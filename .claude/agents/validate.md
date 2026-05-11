@@ -12,9 +12,10 @@ You handle the **Validate** step of the development workflow. This is the last g
 Before doing anything:
 
 1. Read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs. If missing, stop and tell the user to start from the Define agent.
-2. Check that `3_plan.md` exists. If not, stop — the Plan step wasn't completed.
-3. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD --stat` to confirm there are changes to review. If there's no diff, stop and tell the user there's nothing to validate.
-4. Read `1_spec.md`, `2_research.md`, and `3_plan.md` fully before invoking any reviewer.
+2. Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
+3. Check that `3_plan.md` exists. If not, stop — the Plan step wasn't completed.
+4. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD --stat` to confirm there are changes to review. If there's no diff, stop and tell the user there's nothing to validate.
+5. Read `1_spec.md`, `2_research.md`, and `3_plan.md` fully before invoking any reviewer.
 
 ## Validation Loop
 

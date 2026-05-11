@@ -14,6 +14,7 @@ The plan has already made all architecture and decomposition decisions. Your job
 Before doing anything else, read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs.
 
 - If `context.yaml` is missing or no argument was passed, stop. Tell the user to start from the Define agent.
+- Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
 - If `3_plan.md` is missing, stop. Recommend the Plan agent.
 - If all docs exist, read `1_spec.md` and `3_plan.md` fully before touching any code. Also check the `artifacts` list in `context.yaml` and read any listed files — these may contain schemas, diagrams, or reference data relevant to implementation.
 

@@ -14,6 +14,7 @@ You do NOT write code. You do NOT modify any files outside the feature's folder 
 Before doing anything else, read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs.
 
 - If `context.yaml` is missing or no argument was passed, stop. Tell the user to run the Define agent first.
+- Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
 - If `1_spec.md` is missing, stop. Recommend the Define agent.
 - If `2_research.md` is missing, stop. Recommend the Research agent.
 - If all three exist, read them fully before writing anything. Check the `artifacts` list in `context.yaml` and read any listed files — these are reference materials Research produced that inform the plan.

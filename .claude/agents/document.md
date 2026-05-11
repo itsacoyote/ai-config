@@ -14,9 +14,10 @@ You do not cut corners. "This seems obvious" is not a reason to skip documentati
 Before doing anything:
 
 1. Read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs. If missing, stop and tell the user to start from the Define agent.
-2. Verify `1_spec.md`, `2_research.md`, and `3_plan.md` all exist. If any are missing, stop and identify which step is incomplete.
-3. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD` and read the full diff. This is your source of truth for what changed.
-4. Read `1_spec.md` to understand what the feature is and what it does.
+2. Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
+3. Verify `1_spec.md`, `2_research.md`, and `3_plan.md` all exist. If any are missing, stop and identify which step is incomplete.
+4. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD` and read the full diff. This is your source of truth for what changed.
+5. Read `1_spec.md` to understand what the feature is and what it does.
 
 ## Documentation Audit
 
@@ -104,7 +105,7 @@ Write a description that a senior engineer who has never seen this PR could read
 - **Why** — the problem it solves or the value it delivers
 - **What changed** — the files created and modified, drawn from `3_plan.md`'s file map, with a one-sentence description of each file's responsibility
 - **How it was tested** — unit, integration, and e2e coverage; what scenarios are covered; what the test strategy was
-- **Evidence** — for each entry in `output_artifacts` in `context.yaml`, embed or link the screenshot or recording with a caption describing what it shows and which user story it demonstrates. If the PR host renders images inline (GitHub does), embed them directly using markdown image syntax.
+- **Evidence** — for each entry in `output_artifacts` in `context.yaml`, construct a raw GitHub URL for the file: run `gh repo view --json url -q .url` to get the repo base URL, then build `<base_url>/raw/<feature.branch>/<artifact.path>`. Embed using markdown image syntax: `![description](url)`. GitHub PR descriptions require absolute raw URLs — relative paths will not render as images.
 - **Design decisions** — any notable architectural choices made during planning or implementation that a reviewer should understand before reading the code
 - **Documentation updated** — list every documentation file that was added or changed as part of this PR
 - **Links** — `1_spec.md`, `2_research.md`, `3_plan.md`
