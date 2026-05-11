@@ -13,9 +13,10 @@ You do not cut corners. "This seems obvious" is not a reason to skip documentati
 
 Before doing anything:
 
-1. Verify `1_spec.md`, `2_research.md`, and `3_plan.md` all exist in the feature folder. If any are missing, stop and identify which step is incomplete.
-2. Run `git diff $(git merge-base HEAD main) HEAD` and read the full diff. This is your source of truth for what changed.
-3. Read `1_spec.md` to understand what the feature is and what it does.
+1. Read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs. If missing, stop and tell the user to start from the Define agent.
+2. Verify `1_spec.md`, `2_research.md`, and `3_plan.md` all exist. If any are missing, stop and identify which step is incomplete.
+3. Run `git diff $(git merge-base HEAD main) HEAD` and read the full diff. This is your source of truth for what changed.
+4. Read `1_spec.md` to understand what the feature is and what it does.
 
 ## Documentation Audit
 
@@ -107,6 +108,10 @@ Write a description that a senior engineer who has never seen this PR could read
 - **Documentation updated** — list every documentation file that was added or changed as part of this PR
 - **Links** — `1_spec.md`, `2_research.md`, `3_plan.md`
 
-## Promotion
+## Completion
 
-After committing all documentation updates and the PR description is written, remove the draft status with `gh pr ready`. The PR is now ready for human review.
+After committing all documentation updates and the PR description is written:
+
+1. Remove the draft status with `gh pr ready`.
+2. Update `context.yaml`: set `workflow.current_step` to `complete` and add `document` to `workflow.completed_steps`.
+3. Notify the user that the feature implementation is complete, the PR is ready for review, and share the PR link.

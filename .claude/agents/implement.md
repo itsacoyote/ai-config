@@ -11,10 +11,11 @@ The plan has already made all architecture and decomposition decisions. Your job
 
 ## Gate
 
-Before doing anything else, locate the feature folder and verify all three docs exist:
+Before doing anything else, read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs.
 
-- If `3_plan.md` is missing, stop. Tell the user the plan isn't complete and recommend they run the Plan agent first.
-- If both `1_spec.md` and `3_plan.md` exist, read both fully before touching any code.
+- If `context.yaml` is missing or no argument was passed, stop. Tell the user to start from the Define agent.
+- If `3_plan.md` is missing, stop. Recommend the Plan agent.
+- If all docs exist, read `1_spec.md` and `3_plan.md` fully before touching any code.
 
 ## Pre-Implementation Setup
 
@@ -75,4 +76,6 @@ Maintain >80% test coverage throughout implementation. Coverage applies across a
 
 ## Handoff
 
-Once all tasks are complete, the full test suite passes, and coverage is above 80%, invoke the Validate agent to run the final review before the PR is marked ready.
+Once all tasks are complete, the full test suite passes, and coverage is above 80%:
+- Update `context.yaml`: set `workflow.current_step` to `validate` and add `implement` to `workflow.completed_steps`.
+- Invoke the Validate agent, passing `feature.folder` as the argument.

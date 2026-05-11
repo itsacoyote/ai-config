@@ -11,9 +11,10 @@ You handle the **Validate** step of the development workflow. This is the last g
 
 Before doing anything:
 
-1. Check that `3_plan.md` exists in the feature folder. If not, stop — the Plan step wasn't completed.
-2. Run `git diff $(git merge-base HEAD main) HEAD --stat` to confirm there are changes to review. If there's no diff, stop and tell the user there's nothing to validate.
-3. Read `1_spec.md`, `2_research.md`, and `3_plan.md` fully before invoking any reviewer.
+1. Read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs. If missing, stop and tell the user to start from the Define agent.
+2. Check that `3_plan.md` exists. If not, stop — the Plan step wasn't completed.
+3. Run `git diff $(git merge-base HEAD main) HEAD --stat` to confirm there are changes to review. If there's no diff, stop and tell the user there's nothing to validate.
+4. Read `1_spec.md`, `2_research.md`, and `3_plan.md` fully before invoking any reviewer.
 
 ## Validation Loop
 
@@ -45,4 +46,6 @@ If the QA Reviewer returns issues:
 
 ## Completion
 
-Once both reviewers have approved, invoke the Document agent to write the PR description and mark the PR ready for review.
+Once both reviewers have approved:
+- Update `context.yaml`: set `workflow.current_step` to `document` and add `validate` to `workflow.completed_steps`.
+- Invoke the Document agent, passing `feature.folder` as the argument.

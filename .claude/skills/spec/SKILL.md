@@ -40,6 +40,7 @@ Once you have enough to write a solid draft, tell the user and confirm the short
    └── output-artifacts/
    ```
 2. Write `1_spec.md` using the template in [template.md](template.md).
-3. Tell the user the file path and invite revisions.
+3. Create `context.yaml` in the feature folder using the template in `.claude/skills/agent-context/template.yaml`. Populate `feature.name`, `feature.short_name`, `feature.folder`, and `feature.date`. Leave `workflow.current_step` as `define` and `workflow.completed_steps` as an empty list.
+4. Tell the user the file path and invite revisions.
 
 Stay in the conversation after writing — iterate on the doc until the user is satisfied.

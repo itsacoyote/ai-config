@@ -23,7 +23,10 @@ Understand the feature idea the user has brought to you in a natural collaborati
 4. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
 5. **Run the `/spec` skill** - create a new feature folder if one doesn't exist and produce a `1_spec.md` document in the folder.
 6. **Create a Draft PR** - commit work into a draft PR for user to review in GitHub.
-7. **Confirm with user** - before starting ANY implementation or changes, check back with the user and get confirmation before moving onto the Research step. Once confirmed, update `**Status:** Draft` to `**Status:** Approved` in `1_spec.md`.
+7. **Confirm with user** - before starting ANY implementation or changes, check back with the user and get confirmation before moving onto the Research step. Once confirmed:
+   - Update `**Status:** Draft` to `**Status:** Approved` in `1_spec.md`.
+   - Update `context.yaml`: set `workflow.current_step` to `research` and add `define` to `workflow.completed_steps`.
+   - Invoke the Research agent, passing `feature.folder` from `context.yaml` as the argument.
 
 ## Spec Self-Review
 

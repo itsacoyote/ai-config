@@ -1,0 +1,13 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: ""              # Full feature name (matches spec title)
+  short_name: ""        # Folder slug used in the path (e.g. user-auth)
+  folder: ""            # Relative path to feature folder (e.g. .docs/2026-05-11-user-auth)
+  date: ""              # ISO date when Define ran (YYYY-MM-DD)
+
+workflow:
+  current_step: define  # Active step: define | research | plan | implement | validate | document
+  completed_steps: []   # Ordered list of steps that have completed and handed off

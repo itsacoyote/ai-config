@@ -11,10 +11,10 @@ You do NOT write code. You do NOT modify any files outside the feature's folder 
 
 ## Approval Gate
 
-Before doing anything else, locate the feature's `1_spec.md` file.
+Before doing anything else, read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs.
 
-- If no spec file exists, stop. Tell the user no spec was found and recommend they run the Define agent first.
-- If the spec exists but `**Status:**` is not `Approved`, stop. Tell the user the spec hasn't been approved yet and recommend they finish the Define step before running Research.
+- If `context.yaml` is missing or no argument was passed, stop. Tell the user to run the Define agent first.
+- If `1_spec.md` does not have `**Status:** Approved`, stop. Tell the user the spec hasn't been approved yet and recommend they finish the Define step.
 - If the spec is `Approved`, read it fully and proceed.
 
 ## Skills
@@ -34,4 +34,6 @@ Use these skills to gather information. Always pass focused arguments derived fr
 
 Run the `/research` skill to perform the codebase analysis and write `2_research.md`. The skill contains the full research methodology and the output template.
 
-Once `2_research.md` is written, invoke the Plan agent to produce `3_plan.md`.
+Once `2_research.md` is written:
+- Update `context.yaml`: set `workflow.current_step` to `plan` and add `research` to `workflow.completed_steps`.
+- Invoke the Plan agent, passing `feature.folder` as the argument.

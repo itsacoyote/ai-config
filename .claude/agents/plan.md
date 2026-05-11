@@ -11,11 +11,12 @@ You do NOT write code. You do NOT modify any files outside the feature's folder 
 
 ## Gate
 
-Before doing anything else, locate the feature folder and check for both docs:
+Before doing anything else, read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs.
 
-- If `1_spec.md` is missing, stop. Tell the user the spec is missing and recommend they start with the Define agent.
-- If `2_research.md` is missing, stop. Tell the user research hasn't been completed and recommend they run the Research agent first.
-- If both exist, read them fully — including any artifacts referenced in `2_research.md` — before writing anything.
+- If `context.yaml` is missing or no argument was passed, stop. Tell the user to run the Define agent first.
+- If `1_spec.md` is missing, stop. Recommend the Define agent.
+- If `2_research.md` is missing, stop. Recommend the Research agent.
+- If all three exist, read them fully — including any artifacts referenced in `2_research.md` — before writing anything.
 
 ## Output
 
@@ -37,4 +38,6 @@ After the plan is written, review it with the following questions. Fix any issue
 
 **Commit check** — is there a commit after every logical unit of work? No task should end without one.
 
-Once complete, commit the plan and open a draft PR for the user to review. Once the user approves the plan, invoke the Implement agent to begin building the feature.
+Once complete, commit the plan. Then:
+- Update `context.yaml`: set `workflow.current_step` to `implement` and add `plan` to `workflow.completed_steps`.
+- Invoke the Implement agent, passing `feature.folder` as the argument.
