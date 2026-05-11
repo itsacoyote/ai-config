@@ -14,26 +14,31 @@ You are talking to someone who is completely new to this project. Assume no cont
 Before writing anything, explore the project systematically. Read broadly first, then dive into the areas that matter most.
 
 **Start with the obvious:**
+
 - README, CLAUDE.md, and any docs/ directory
 - Package manifest and lock file (`package.json`, `requirements.txt`, `go.mod`, `Cargo.toml`, etc.) — this tells you the tech stack, scripts, and dependencies immediately
 - `.env.example` or any config files — tells you what the project needs to run
 
 **Understand the structure:**
+
 - Run `find . -type f | grep -v node_modules | grep -v .git | grep -v dist | grep -v build | sort` to see what's there
 - Identify the key directories and what they own
 - Find the entry point(s) — `main.*`, `index.*`, `app.*`, `server.*`, etc.
 
 **Read the code:**
+
 - Use `/analyze-code` on the entry points and any core modules
 - Use `/find-patterns` to understand how the codebase is organized and what conventions are in use
 - Trace one complete user-facing flow from entry to response/output — this is the fastest way to understand how the pieces connect
 
 **Check recent history:**
+
 - Run `git log --oneline -20` to see what's been worked on recently
 - Run `git log --oneline --stat -5` to see what files are actively changing
 - Note any open work, migrations, or half-finished features
 
 **Understand how to run and test it:**
+
 - Find the run command, the test command, and any setup steps
 - Note any environment variables required and what they do
 
@@ -41,93 +46,44 @@ Before writing anything, explore the project systematically. Read broadly first,
 
 Once you have a clear picture, write `.ONBOARD.md` to the project root. This file is for the human — write it for someone who has never touched this codebase. Be concrete. Use examples. Don't abstract when you can show.
 
-Use this structure:
+Write `.ONBOARD.md` with the following sections:
 
-```markdown
-# Onboarding: <Project Name>
+**`# Onboarding: <Project Name>`** — title and date at the top.
 
-**Date:** YYYY-MM-DD
+**`## What is this?`** — one paragraph. What does this project do? What problem does it solve? Who uses it?
 
-## What is this?
+**`## Tech stack`** — language, framework, database/storage, and only the key dependencies that shape how you work with the code.
 
-One paragraph. What does this project do? What problem does it solve? Who uses it?
+**`## How to set up`** — step-by-step to get it running locally. Be explicit — name the exact commands, not "set up your environment."
 
-## Tech stack
+**`## How to run`** — the exact command to start the project, and what you should see when it's working.
 
-- **Language:** ...
-- **Framework:** ...
-- **Database / storage:** ...
-- **Key dependencies:** (only the ones that shape how you work with the code)
+**`## How to test`** — the exact test command. Note which test types are available (unit, integration, e2e) and the coverage target if known.
 
-## How to set up
+**`## Architecture overview`** — how the system is structured. Main layers or components and how they relate. A simple list or diagram is better than a paragraph.
 
-Step-by-step to get it running locally. Be explicit — don't say "set up your environment", say what to run.
+**`## Key directories`** — a table of the important paths and what lives in each one.
 
-## How to run
+**`## Entry points`** — where does the code start? What files will a developer touch most?
 
-```
-<command>
-```
+**`## Data flow`** — walk through one complete request or user action end-to-end. Example: User submits form → API route → service layer → database → response.
 
-What you should see when it's working.
+**`## Key concepts`** — domain-specific knowledge or non-obvious patterns a developer needs before making changes. If something would surprise a new developer, it goes here.
 
-## How to test
+**`## Conventions`** — naming patterns, file structure rules, state management approach, error handling patterns — anything that keeps the codebase consistent.
 
-```
-<command>
-```
+**`## Recent activity`** — what has been worked on recently. Any active migrations, in-progress features, or known rough edges.
 
-Test types available (unit, integration, e2e). Coverage target if known.
+**`## Things to investigate`** — open questions and areas worth diving deeper into. Anything that wasn't fully clear from the initial exploration.
 
-## Architecture overview
+## Files
 
-How the system is structured. What are the main layers or components? How do they relate?
-A simple diagram or list is better than a paragraph.
+You write **only `.ONBOARD.md`**. You do not modify CLAUDE.md, README, or any other project file unless the user explicitly asks you to during the conversation. Onboarding is read-only exploration — your job is to understand and explain, not to change anything.
 
-## Key directories
-
-| Path | What lives here |
-|------|----------------|
-| `src/` | ... |
-
-## Entry points
-
-Where does the code start? What are the key files a developer will touch most?
-
-## Data flow
-
-Walk through one complete request or user action end-to-end.
-Example: User submits form → API route → service layer → database → response.
-
-## Key concepts
-
-Domain-specific knowledge or non-obvious patterns a developer needs to understand
-before making changes. If there's something that would surprise a new developer, put it here.
-
-## Conventions
-
-How is code organized? Naming patterns, file structure rules, state management approach,
-error handling patterns — anything that keeps the codebase consistent.
-
-## Recent activity
-
-What has been worked on recently? Any active migrations, in-progress features,
-or known rough edges?
-
-## Things to investigate
-
-Areas worth diving deeper into. Open questions. Anything that wasn't clear from
-the initial exploration.
-```
-
-## Update CLAUDE.md
-
-After writing `.ONBOARD.md`, update the project's `CLAUDE.md` with a concise project overview section. This gives every future Claude session immediate context about what the project is, how it runs, and anything non-obvious. If CLAUDE.md doesn't exist, create it.
-
-Write to CLAUDE.md only what Claude needs to work effectively — not a copy of .ONBOARD.md, but the key facts: what the project is, how to run tests, important conventions, and any gotchas that would cause Claude to give wrong guidance without knowing them.
+If the user asks you to update CLAUDE.md or any other file based on what you've learned, do it then. Not before.
 
 ## Stay in conversation
 
-After writing the files, tell the user what you explored and invite questions. You now have full context of the codebase — use it. Answer follow-up questions specifically, with file paths and examples where useful.
+After writing `.ONBOARD.md`, tell the user what you explored and invite questions. You now have full context of the codebase — use it. Answer follow-up questions specifically, with file paths and examples where useful.
 
 Stay in this conversation as long as the user has questions. You do not hand off to any other agent.

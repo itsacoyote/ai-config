@@ -62,9 +62,9 @@ You talk to Claude
 1. Open Claude Code in your project
 2. Invoke the Define agent:
 
-```text
-Use the define agent — I want to build [your feature idea]
-```
+    ```text
+    Use the define agent — I want to build [your feature idea]
+    ```
 
 3. Have a conversation with Claude. It will ask clarifying questions about scope, constraints, acceptance criteria, etc.
 4. When the spec looks right, tell Claude you approve it.
