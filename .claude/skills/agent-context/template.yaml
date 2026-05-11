@@ -9,5 +9,6 @@ feature:
   date: ""              # ISO date when Define ran (YYYY-MM-DD)
 
 workflow:
-  current_step: define  # Active step: define | research | plan | implement | validate | document
+  current_step: define  # Active step: define | research | plan | implement | validate | document | complete
   completed_steps: []   # Ordered list of steps that have completed and handed off
+  checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.

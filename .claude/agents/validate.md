@@ -34,7 +34,7 @@ If the Senior Reviewer returns issues:
 
 ### Round 2 — QA Review
 
-Once the Senior Reviewer has approved, invoke the QA Reviewer agent.
+Once the Senior Reviewer has approved, update `workflow.checkpoint` in `context.yaml` to `"Senior review passed. Starting QA review."` then invoke the QA Reviewer agent.
 
 If the QA Reviewer returns issues:
 

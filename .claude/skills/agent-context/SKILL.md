@@ -22,8 +22,26 @@ Every feature workflow has a `context.yaml` file that lives in the feature folde
 
 1. Update `workflow.current_step` to the next step name.
 2. Append the completed step to `workflow.completed_steps`.
-3. Write the updated `context.yaml` back to the feature folder.
-4. Pass `feature.folder` as the argument to the next agent.
+3. Clear `workflow.checkpoint` (set to `""`).
+4. Write the updated `context.yaml` back to the feature folder.
+5. Pass `feature.folder` as the argument to the next agent.
+
+**During long steps:** For steps with multiple sub-tasks (Implement in particular), write a brief `workflow.checkpoint` after each committed sub-task so a disruption mid-step leaves a clear resume point. Example: `"Completed tasks 1-3 of 7. Next: Task 4 - Add useAuthToken hook."` For Implement specifically, `git log` is also a reliable record of completed tasks since each task ends with a commit.
+
+## Resuming a disrupted workflow
+
+If a workflow was interrupted, read `context.yaml` to orient:
+
+1. **`workflow.current_step`** — the step that was active when disruption occurred. Resume here.
+2. **`workflow.completed_steps`** — all prior steps finished cleanly. No need to re-run them.
+3. **`workflow.checkpoint`** — if set, this is where the disrupted step left off. Start from here rather than the beginning of the step.
+
+To resume, invoke the agent that owns `current_step` with `feature.folder` as the argument. The agent's gate will validate prerequisite docs are present and the agent will pick up from `checkpoint` if set.
+
+**Step-specific resume notes:**
+- **Implement** — if `checkpoint` is empty, check `git log` to see which plan tasks have committed. Start from the first uncommitted task.
+- **Validate** — if `checkpoint` indicates senior review already passed, skip directly to the QA Reviewer.
+- **All other steps** — restart the step from the beginning. Research, Plan, and Document are idempotent — re-running overwrites with a fresh result.
 
 ## Template
 

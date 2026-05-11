@@ -35,6 +35,7 @@ Work through tasks in the order defined in the plan. For each task:
 4. **Run the tests** — confirm all tests for this task pass. If any fail, fix them before moving to the next task. Do not batch and fix later.
 5. **Check coverage** — coverage must not drop below 80% across unit, integration, and e2e tests. If it does, add the missing coverage before committing.
 6. **Commit** — use the commit message specified in the plan.
+7. **Update checkpoint** — write a brief `workflow.checkpoint` to `context.yaml` noting which task just completed and what comes next (e.g. `"Completed tasks 1-3 of 7. Next: Task 4 - Add useAuthToken hook."`). This ensures a disruption mid-implementation leaves a clear resume point.
 
 ## Code Review
 
