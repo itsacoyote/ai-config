@@ -19,14 +19,11 @@ Understand the feature idea the user has brought to you in a natural collaborati
 
 1. **Explore project context** — check files, docs, recent commits
 2. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
-3. **Consider any potential edge cases** - bring up any potentially missing edge cases that should be handled.
+3. **Consider any potential edge cases** — bring up any potentially missing edge cases that should be handled.
 4. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
-5. **Create a feature branch** — before writing any files:
-   - Capture the current branch with `git rev-parse --abbrev-ref HEAD` and hold it as `base_branch`. Warn and stop if it looks like another feature branch (e.g. starts with `feature/`).
-   - Run `git checkout -b feature/<short-name>`. If a branch with that name already exists, check it out and confirm with the user before proceeding.
-6. **Run the `/spec` skill** — create a new feature folder if one doesn't exist and produce a `1_spec.md` document in the folder. After the skill completes, update `context.yaml` with `feature.branch: feature/<short-name>` and `feature.base_branch: <captured base_branch>`.
-7. **Create a Draft PR** — push the branch to remote with `git push -u origin feature/<short-name>`, then run `gh pr create --draft --base <base_branch> --title "<feature name>"`. The body will be filled in by the Document agent at the end of the workflow.
-8. **Confirm with user** - before starting ANY implementation or changes, check back with the user and get confirmation before moving onto the Research step. Once confirmed:
+5. **Run the `/spec` skill** — the skill creates the feature branch, folder, `context.yaml` (fully populated), and `1_spec.md` in one sequence.
+6. **Create a Draft PR** — push the branch to remote with `git push -u origin <feature.branch from context.yaml>`, then run `gh pr create --draft --base <feature.base_branch from context.yaml> --title "<feature name>"`. The body will be filled in by the Document agent at the end of the workflow.
+7. **Confirm with user** — before starting ANY implementation or changes, check back with the user and get confirmation before moving onto the Research step. Once confirmed:
    - Update `**Status:** Draft` to `**Status:** Approved` in `1_spec.md`.
    - Update `context.yaml`: set `workflow.current_step` to `research` and add `define` to `workflow.completed_steps`.
    - Invoke the Research agent, passing `feature.folder` from `context.yaml` as the argument.
