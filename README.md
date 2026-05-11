@@ -12,7 +12,7 @@ You have a conversation with Claude to define and approve a feature spec. Once y
 
 ## The pipeline
 
-```
+```text
 You talk to Claude
         |
         v
@@ -62,13 +62,13 @@ You talk to Claude
 1. Open Claude Code in your project
 2. Invoke the Define agent:
 
-```
+```text
 Use the define agent — I want to build [your feature idea]
 ```
 
 3. Have a conversation with Claude. It will ask clarifying questions about scope, constraints, acceptance criteria, etc.
 4. When the spec looks right, tell Claude you approve it.
-5. That's it. Claude runs the rest of the pipeline and notifies you when the PR is ready.
+5. Claude runs the rest of the pipeline automatically and notifies you when the PR is ready.
 
 > **You only need to be present for the Define step.** Everything after your approval is autonomous.
 
@@ -77,26 +77,31 @@ Use the define agent — I want to build [your feature idea]
 ## What each step does
 
 ### Define
+
 **Who drives it:** You and Claude together.
 
 Claude helps you think through a feature before anything gets built. It asks about the problem, goals, non-goals, user stories, constraints, and acceptance criteria. Once you're happy with the spec, you approve it. Claude then creates the feature branch, writes `1_spec.md`, and hands off to Research automatically.
 
 ### Research
+
 **Who drives it:** Claude, autonomously.
 
 Claude reads the approved spec and studies the codebase — looking for existing code to reuse, patterns to follow, and gaps to fill. It uses sub-skills to analyze specific files, find conventions, and look up third-party docs if needed. Results go into `2_research.md`. Hands off to Plan automatically.
 
 ### Plan
+
 **Who drives it:** Claude, autonomously.
 
 Claude reads the spec and research, then writes a detailed implementation plan. It maps out every file that will be created, modified, or deleted — with responsibilities and interfaces — before writing a task list. Every task has explicit test cases (written before implementation), specific implementation steps, and a commit message. No vague instructions. Results go into `3_plan.md`. Hands off to Implement automatically.
 
 ### Implement
+
 **Who drives it:** Claude, autonomously.
 
 Claude follows the plan task by task. For each task: write tests → confirm they fail → implement → confirm tests pass → run linter → check coverage → commit → update progress in `context.yaml`. A code reviewer agent checks the work every 300–500 lines and is always invoked for security-critical or complex code. Hands off to Validate automatically.
 
 ### Validate
+
 **Who drives it:** Claude, autonomously.
 
 Two reviewers run in sequence:
@@ -107,6 +112,7 @@ Two reviewers run in sequence:
 Results go into `4_validate.md`. Hands off to Document automatically.
 
 ### Document
+
 **Who drives it:** Claude, autonomously.
 
 Claude reads the full diff and updates everything that changed: README, CLAUDE.md, feature docs, API docs, inline comments, changelog. It writes the PR description with visual evidence (screenshots embedded as images), marks the PR ready, and notifies you it's done.
@@ -124,11 +130,12 @@ Every agent reads `context.yaml` at the start of its gate. This file tracks wher
 3. Check `workflow.checkpoint` — this tells you where within that step things left off
 4. Invoke that agent directly, passing the feature folder path:
 
-```
+```text
 Use the [step name] agent — feature folder is .docs/2026-05-11-my-feature
 ```
 
 **Notes:**
+
 - Research, Plan, and Document are safe to re-run from scratch — they overwrite their output cleanly
 - Implement uses `workflow.checkpoint` to know which tasks are done; if checkpoint is empty, `git log` shows which task commits already landed
 - Validate uses the checkpoint to know if the senior review already passed
@@ -188,7 +195,7 @@ documentation_created: [] # New docs created by the Document agent
 
 Each feature gets its own folder inside `.docs/`:
 
-```
+```text
 .docs/
 └── YYYY-MM-DD-short-name/
     ├── context.yaml          # Workflow state — read by every agent
@@ -218,7 +225,7 @@ This repo is a template. To use this workflow in a new project:
 
 ## File reference
 
-```
+```text
 .claude/
 ├── agents/
 │   ├── define.md          # Step 1: interactive spec and branch setup
