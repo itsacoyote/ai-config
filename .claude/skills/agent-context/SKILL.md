@@ -67,6 +67,16 @@ The `output_artifacts` list is the registry of screenshots and recordings captur
   created_by: qa-review
 ```
 
+## Documentation created registry
+
+The `documentation_created` list is the registry of **new** documentation files created by the Document agent. Updates to existing files (README, CLAUDE.md, API docs) are not listed here — only newly created files whose paths wouldn't be predictable to a future agent or engineer.
+
+```yaml
+- path: docs/features/feature-name.md
+  description: what the documentation covers
+  created_by: document
+```
+
 ## Template
 
 See [template.yaml](template.yaml) for the full structure.

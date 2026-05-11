@@ -61,7 +61,7 @@ Every user-facing feature deserves human-readable documentation. If this feature
 - Edge cases or limitations the user should know about
 - How it interacts with other features if relevant
 
-Place feature documentation where the project's existing docs live. If there's no docs directory, create one and note it in the README.
+Place feature documentation where the project's existing docs live. If there's no docs directory, create one and note it in the README. For every **new** documentation file created (not updated), append an entry to `documentation_created` in `context.yaml` with its path and a description of what it covers.
 
 ### API documentation
 
@@ -92,7 +92,7 @@ If the project maintains a changelog, add an entry for this feature. Include:
 - Any breaking changes
 - Migration steps required, if any
 
-If no changelog exists but the project is public-facing or has external consumers, create one.
+If no changelog exists but the project is public-facing or has external consumers, create one. Register any newly created API documentation or changelog files in `documentation_created` in `context.yaml`.
 
 ## PR Description
 

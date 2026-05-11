@@ -30,3 +30,12 @@ output_artifacts: []
 #   description: Screenshot of successful login flow completing and redirecting to dashboard
 #   user_story: As a user, I want to log in so that I can access my account
 #   created_by: qa-review
+
+documentation_created: []
+# Each entry describes a new documentation file created by the Document agent.
+# Only NEW files are listed here — updates to existing files (README, CLAUDE.md) are not.
+# Useful for discovering what feature documentation was produced and where it lives.
+# Example entry:
+# - path: docs/features/user-auth.md
+#   description: Feature documentation for the user authentication flow
+#   created_by: document
