@@ -1,6 +1,7 @@
 ---
 name: qa-reviewer
 description: Critical QA review agent. Verifies test coverage, test quality, and e2e coverage against the spec's user stories. No tolerance for fake tests or coverage theater. Used by the Validate agent after the senior code review passes.
+model: sonnet
 ---
 
 # QA Reviewer Agent

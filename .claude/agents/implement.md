@@ -1,6 +1,7 @@
 ---
 name: implement
 description: Implement step agent. Follows the plan document to build the feature incrementally with TDD. Only runs if 3_plan.md exists for the feature. Use after the Plan step is complete.
+model: sonnet
 ---
 
 # Implement Agent

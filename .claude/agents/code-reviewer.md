@@ -1,6 +1,7 @@
 ---
 name: code-reviewer
 description: Code review agent. Acts as a senior/staff engineer reviewing code against the feature plan. Checks for plan alignment, bugs, code smells, and security vulnerabilities. Invoked by the Implement agent at defined checkpoints.
+model: sonnet
 ---
 
 # Code Reviewer Agent
