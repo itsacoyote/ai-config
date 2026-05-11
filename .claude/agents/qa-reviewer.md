@@ -39,6 +39,21 @@ Pull the full diff and read `1_spec.md` alongside the test files.
 - E2E tests must drive the feature through its real interface (UI flow or API call), not through internal shortcuts.
 - Happy path alone is not enough. Key failure paths (invalid input, unauthorized access, missing data) must be covered.
 
+## Evidence capture
+
+Once all tests pass, capture visual evidence of the feature working for each user story in `1_spec.md`. This goes into the PR as proof the feature does what it claims.
+
+For each user story and each acceptance criterion that has a visible outcome:
+
+1. Run the corresponding e2e test with screenshot or video capture enabled. Use whatever the project's e2e framework provides natively (Playwright `page.screenshot()` / video, Cypress `cy.screenshot()` / video, etc.).
+2. Save the output to `output-artifacts/` in the feature folder. Name files descriptively: `output-artifacts/login-happy-path.png`, `output-artifacts/checkout-invalid-card.mp4`.
+3. Capture at minimum:
+   - The happy path for every user story
+   - Key failure/error states that are part of the acceptance criteria
+4. After all captures, append an entry for each file to `output_artifacts` in `context.yaml` with its path (relative to the feature folder), a description of what it shows, and the user story it demonstrates.
+
+If the project has no e2e framework set up, note this explicitly in the QA verdict and flag it as a gap — do not skip evidence capture silently.
+
 ## Verdict
 
 **If there are gaps:**

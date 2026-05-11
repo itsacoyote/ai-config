@@ -20,3 +20,13 @@ artifacts: []
 # - path: artifacts/schema.png
 #   description: ER diagram of the new tables added for this feature
 #   created_by: research
+
+output_artifacts: []
+# Each entry describes a screenshot or recording captured during QA as evidence
+# that the feature works as specified. Saved to output-artifacts/.
+# Populated by the QA Reviewer during the Validate step.
+# Example entry:
+# - path: output-artifacts/login-happy-path.png
+#   description: Screenshot of successful login flow completing and redirecting to dashboard
+#   user_story: As a user, I want to log in so that I can access my account
+#   created_by: qa-review

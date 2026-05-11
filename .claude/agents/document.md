@@ -104,6 +104,7 @@ Write a description that a senior engineer who has never seen this PR could read
 - **Why** — the problem it solves or the value it delivers
 - **What changed** — the files created and modified, drawn from `3_plan.md`'s file map, with a one-sentence description of each file's responsibility
 - **How it was tested** — unit, integration, and e2e coverage; what scenarios are covered; what the test strategy was
+- **Evidence** — for each entry in `output_artifacts` in `context.yaml`, embed or link the screenshot or recording with a caption describing what it shows and which user story it demonstrates. If the PR host renders images inline (GitHub does), embed them directly using markdown image syntax.
 - **Design decisions** — any notable architectural choices made during planning or implementation that a reviewer should understand before reading the code
 - **Documentation updated** — list every documentation file that was added or changed as part of this PR
 - **Links** — `1_spec.md`, `2_research.md`, `3_plan.md`

@@ -46,7 +46,7 @@ To resume, invoke the agent that owns `current_step` with `feature.folder` as th
 
 ## Artifacts registry
 
-The `artifacts` list in `context.yaml` is the shared registry of files created in the feature's `artifacts/` folder. Any agent or skill that creates an artifact must append an entry before its handoff:
+The `artifacts` list in `context.yaml` is the shared registry of reference files created in the feature's `artifacts/` folder (primarily by Research). Any step that creates an artifact must append an entry before its handoff:
 
 ```yaml
 - path: artifacts/filename.ext   # relative to feature.folder
@@ -54,7 +54,18 @@ The `artifacts` list in `context.yaml` is the shared registry of files created i
   created_by: research           # which step produced it
 ```
 
-Downstream agents (Plan, Implement, Validate) should check this list at the start of their step so they know what reference material is available without having to scan the artifacts directory manually.
+Downstream agents (Plan, Implement, Validate) should check this list at the start of their step so they know what reference material is available without having to scan the directory manually.
+
+## Output artifacts registry
+
+The `output_artifacts` list is the registry of screenshots and recordings captured during QA as evidence that the feature works. These are saved to `output-artifacts/` and populated by the QA Reviewer during Validate. The Document agent reads this list to embed visual evidence in the PR description.
+
+```yaml
+- path: output-artifacts/filename.ext
+  description: what the screenshot or recording shows
+  user_story: the spec user story it demonstrates
+  created_by: qa-review
+```
 
 ## Template
 
