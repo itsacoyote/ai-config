@@ -39,9 +39,22 @@ If a workflow was interrupted, read `context.yaml` to orient:
 To resume, invoke the agent that owns `current_step` with `feature.folder` as the argument. The agent's gate will validate prerequisite docs are present and the agent will pick up from `checkpoint` if set.
 
 **Step-specific resume notes:**
+
 - **Implement** — if `checkpoint` is empty, check `git log` to see which plan tasks have committed. Start from the first uncommitted task.
 - **Validate** — if `checkpoint` indicates senior review already passed, skip directly to the QA Reviewer.
 - **All other steps** — restart the step from the beginning. Research, Plan, and Document are idempotent — re-running overwrites with a fresh result.
+
+## Artifacts registry
+
+The `artifacts` list in `context.yaml` is the shared registry of files created in the feature's `artifacts/` folder. Any agent or skill that creates an artifact must append an entry before its handoff:
+
+```yaml
+- path: artifacts/filename.ext   # relative to feature.folder
+  description: what it is and why it was created
+  created_by: research           # which step produced it
+```
+
+Downstream agents (Plan, Implement, Validate) should check this list at the start of their step so they know what reference material is available without having to scan the artifacts directory manually.
 
 ## Template
 

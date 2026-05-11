@@ -15,7 +15,7 @@ Before doing anything else, read `context.yaml` from the feature folder passed a
 
 - If `context.yaml` is missing or no argument was passed, stop. Tell the user to start from the Define agent.
 - If `3_plan.md` is missing, stop. Recommend the Plan agent.
-- If all docs exist, read `1_spec.md` and `3_plan.md` fully before touching any code.
+- If all docs exist, read `1_spec.md` and `3_plan.md` fully before touching any code. Also check the `artifacts` list in `context.yaml` and read any listed files — these may contain schemas, diagrams, or reference data relevant to implementation.
 
 ## Pre-Implementation Setup
 

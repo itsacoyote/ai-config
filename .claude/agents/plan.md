@@ -16,7 +16,7 @@ Before doing anything else, read `context.yaml` from the feature folder passed a
 - If `context.yaml` is missing or no argument was passed, stop. Tell the user to run the Define agent first.
 - If `1_spec.md` is missing, stop. Recommend the Define agent.
 - If `2_research.md` is missing, stop. Recommend the Research agent.
-- If all three exist, read them fully — including any artifacts referenced in `2_research.md` — before writing anything.
+- If all three exist, read them fully before writing anything. Check the `artifacts` list in `context.yaml` and read any listed files — these are reference materials Research produced that inform the plan.
 
 ## Output
 

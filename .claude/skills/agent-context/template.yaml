@@ -12,3 +12,11 @@ workflow:
   current_step: define  # Active step: define | research | plan | implement | validate | document | complete
   completed_steps: []   # Ordered list of steps that have completed and handed off
   checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
+
+artifacts: []
+# Each entry describes a file created in the feature's artifacts/ folder.
+# Populated by Research (and any later step that creates an artifact).
+# Example entry:
+# - path: artifacts/schema.png
+#   description: ER diagram of the new tables added for this feature
+#   created_by: research

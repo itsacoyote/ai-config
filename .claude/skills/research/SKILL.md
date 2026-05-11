@@ -49,7 +49,11 @@ Work systematically. Read the spec carefully to understand what the feature does
 
 ## Artifacts
 
-If you produce any artifacts during research (diagrams, data samples, reference files, exported schemas, etc.), place them in the feature's `artifacts/` folder and reference each one in the research doc.
+If you produce any artifacts during research (diagrams, data samples, reference files, exported schemas, etc.):
+
+1. Place them in the feature's `artifacts/` folder.
+2. Reference each one in `2_research.md`.
+3. Append an entry for each to the `artifacts` list in `context.yaml` with its path relative to the feature folder, a description, and `created_by: research`. This makes them discoverable by all downstream agents without scanning the directory.
 
 ## Supporting skills
 

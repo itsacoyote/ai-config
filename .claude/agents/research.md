@@ -35,5 +35,6 @@ Use these skills to gather information. Always pass focused arguments derived fr
 Run the `/research` skill to perform the codebase analysis and write `2_research.md`. The skill contains the full research methodology and the output template.
 
 Once `2_research.md` is written:
+- For every file created in `artifacts/`, append an entry to the `artifacts` list in `context.yaml` with its path (relative to `feature.folder`), a description of what it is, and `created_by: research`.
 - Update `context.yaml`: set `workflow.current_step` to `plan` and add `research` to `workflow.completed_steps`.
 - Invoke the Plan agent, passing `feature.folder` as the argument.
