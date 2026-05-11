@@ -45,8 +45,9 @@ For every task:
 
 - **Name it** precisely (e.g. "Add `useAuthToken` hook" not "Add auth logic")
 - **List the files** it touches, from the file map
-- **Write the tests first** — name each test case explicitly as it would appear in the test file. No vague cases like "it handles errors" — write `it('should throw AuthError when token is expired')`.
-- **List implementation steps** as discrete, ordered actions. Each step names the specific function, component, prop, route, or schema being added or changed. No step should say "implement" or "handle" without saying exactly what.
+- **Write the tests first** — name each test case explicitly as it would appear in the test file. No vague cases like "it handles errors" — write `it('throws AuthError when token is expired')`. No "should" — test names are assertive statements, not intentions.
+- **List implementation steps** as discrete, ordered actions. Each step names the specific function, component, prop, route, or schema being added or changed. No step may say "implement" or "handle" without naming exactly what.
+- **For deletion tasks** — explicitly name the file to delete, list every import and reference to remove or update, and include a step to verify nothing references the deleted file after removal.
 - **End with a commit** using a conventional commit message
 
 ## Output

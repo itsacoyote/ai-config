@@ -21,7 +21,7 @@ Before doing anything else, read `context.yaml` from the feature folder passed a
 
 Before writing any code:
 
-1. **Pull the latest** — run `git pull` to ensure the branch is up to date. If there are merge conflicts, stop and resolve them with the user before proceeding. Do not start implementation on a stale branch.
+1. **Pull the latest** — check whether the feature branch has a remote tracking branch with `git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null`. If it does, run `git pull`. If it does not (branch is local only), skip the pull — the branch was just created and there is nothing to pull. If there are merge conflicts, stop and resolve them with the user before proceeding.
 2. **Read every file in the plan's file map** — read the current state of each file listed under New Files and Modified Files. Do not work from memory or assumptions about what's there.
 3. **Run the existing test suite** — establish a baseline. Record which tests pass, which fail, and the current coverage percentage. If tests are already failing, stop and tell the user before proceeding.
 
@@ -40,7 +40,7 @@ Work through tasks in the order defined in the plan. For each task:
 
 ## Code Review
 
-Track the total lines of code generated since the last code review. After every 300–500 lines, invoke the Code Reviewer agent before continuing to the next task.
+Track the total lines of code generated since the last code review. After every 300–500 lines, invoke the Code Reviewer agent before continuing to the next task. Pass `feature.folder` from `context.yaml` so the Code Reviewer can locate `3_plan.md` for plan alignment checks.
 
 **Always invoke the Code Reviewer for:**
 

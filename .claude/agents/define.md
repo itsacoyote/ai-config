@@ -21,7 +21,10 @@ Understand the feature idea the user has brought to you in a natural collaborati
 2. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
 3. **Consider any potential edge cases** - bring up any potentially missing edge cases that should be handled.
 4. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
-5. **Create a feature branch** — before writing any files, run `git checkout -b feature/<short-name>` using the confirmed short name. If a branch with that name already exists, check it out and confirm with the user before proceeding.
+5. **Create a feature branch** — before writing any files:
+   - Capture the current branch with `git rev-parse --abbrev-ref HEAD` — this is the `base_branch`.
+   - Run `git checkout -b feature/<short-name>`. If a branch with that name already exists, check it out and confirm with the user before proceeding.
+   - Store `feature.branch` (`feature/<short-name>`) and `feature.base_branch` (the captured branch) in `context.yaml`.
 6. **Run the `/spec` skill** - create a new feature folder if one doesn't exist and produce a `1_spec.md` document in the folder.
 7. **Create a Draft PR** - commit work into a draft PR for user to review in GitHub.
 8. **Confirm with user** - before starting ANY implementation or changes, check back with the user and get confirmation before moving onto the Research step. Once confirmed:

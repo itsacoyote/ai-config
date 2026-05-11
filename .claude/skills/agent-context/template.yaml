@@ -7,6 +7,8 @@ feature:
   short_name: ""        # Folder slug used in the path (e.g. user-auth)
   folder: ""            # Relative path to feature folder (e.g. .docs/2026-05-11-user-auth)
   date: ""              # ISO date when Define ran (YYYY-MM-DD)
+  branch: ""            # Feature branch name (e.g. feature/user-auth)
+  base_branch: ""       # Branch this feature was cut from (e.g. main, master, develop)
 
 workflow:
   current_step: define  # Active step: define | research | plan | implement | validate | document | complete

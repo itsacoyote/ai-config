@@ -12,7 +12,7 @@ Check that the implementation built everything the spec required and the plan sp
 ## Current diff
 
 ```!
-git diff $(git merge-base HEAD main) HEAD
+BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD
 ```
 
 ## What to check

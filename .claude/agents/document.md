@@ -15,7 +15,7 @@ Before doing anything:
 
 1. Read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs. If missing, stop and tell the user to start from the Define agent.
 2. Verify `1_spec.md`, `2_research.md`, and `3_plan.md` all exist. If any are missing, stop and identify which step is incomplete.
-3. Run `git diff $(git merge-base HEAD main) HEAD` and read the full diff. This is your source of truth for what changed.
+3. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD` and read the full diff. This is your source of truth for what changed.
 4. Read `1_spec.md` to understand what the feature is and what it does.
 
 ## Documentation Audit

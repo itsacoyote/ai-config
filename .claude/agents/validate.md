@@ -13,7 +13,7 @@ Before doing anything:
 
 1. Read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs. If missing, stop and tell the user to start from the Define agent.
 2. Check that `3_plan.md` exists. If not, stop — the Plan step wasn't completed.
-3. Run `git diff $(git merge-base HEAD main) HEAD --stat` to confirm there are changes to review. If there's no diff, stop and tell the user there's nothing to validate.
+3. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD --stat` to confirm there are changes to review. If there's no diff, stop and tell the user there's nothing to validate.
 4. Read `1_spec.md`, `2_research.md`, and `3_plan.md` fully before invoking any reviewer.
 
 ## Validation Loop
