@@ -20,6 +20,12 @@ All decomposition decisions are made here. Every file below appears in the tasks
 |------|-------------|-----|
 | `path/to/file` | Specifically what is added, changed, or removed | Which requirement drives this |
 
+### Deleted Files
+
+| File | Why Deleted |
+|------|------------|
+| `path/to/file` | What it was replaced by or why it no longer belongs |
+
 ---
 
 ## Implementation Tasks
@@ -36,8 +42,8 @@ Tasks are ordered by dependency. Tests are written before implementation in ever
 
 ```
 describe('<unit>', () => {
-  it('should <specific behavior> when <specific condition>')
-  it('should <specific behavior> when <specific condition>')
+  it('<specific behavior> when <specific condition>')
+  it('<specific behavior> when <specific condition>')
 })
 ```
 
@@ -58,7 +64,7 @@ describe('<unit>', () => {
 
 ```
 describe('<unit>', () => {
-  it('should <specific behavior> when <specific condition>')
+  it('<specific behavior> when <specific condition>')
 })
 ```
 

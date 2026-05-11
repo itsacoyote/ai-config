@@ -30,7 +30,7 @@ If the Senior Reviewer returns issues:
 2. Run the test suite after fixes to confirm nothing broke.
 3. Commit the fixes.
 4. Re-invoke the Senior Reviewer.
-5. Repeat until the Senior Reviewer approves.
+5. Repeat until the Senior Reviewer approves, up to a maximum of 3 fix iterations. If the same issues persist after 3 attempts, escalate — see **Escalation** below.
 
 ### Round 2 — QA Review
 
@@ -42,10 +42,50 @@ If the QA Reviewer returns issues:
 2. Run the full test suite and verify coverage stays above 80%.
 3. Commit the fixes.
 4. Re-invoke the QA Reviewer.
-5. Repeat until the QA Reviewer approves.
+5. Repeat until the QA Reviewer approves, up to a maximum of 3 fix iterations. If the same issues persist after 3 attempts, escalate — see **Escalation** below.
+
+## Escalation
+
+If either reviewer's issues remain unresolved after 3 fix attempts, stop the pipeline. Do not attempt further fixes. Document clearly:
+
+- Which reviewer is blocked and the specific unresolved findings
+- What was attempted in each of the 3 iterations and why it didn't resolve the issue
+- Your assessment of the root cause (design problem, spec ambiguity, missing capability)
+
+Notify the user with this summary and halt. Do not proceed to Document.
 
 ## Completion
 
-Once both reviewers have approved:
+Once both reviewers have approved, write `4_validate.md` to the feature folder using this structure:
+
+```markdown
+# Validation: <Feature Name>
+
+**Date:** YYYY-MM-DD
+**Spec:** [1_spec.md](1_spec.md)
+
+## Senior Code Review
+
+**Verdict:** Approved
+**Iterations:** N
+
+### Findings and fixes
+- [Finding] → [What was changed to resolve it]
+
+## QA Review
+
+**Verdict:** Approved
+**Coverage achieved:** N%
+**Iterations:** N
+
+### Findings and fixes
+- [Finding] → [What was changed to resolve it]
+
+## Evidence
+
+List each entry from `output_artifacts` in `context.yaml` with its description and the user story it demonstrates.
+```
+
+Then:
 - Update `context.yaml`: set `workflow.current_step` to `document` and add `validate` to `workflow.completed_steps`.
 - Invoke the Document agent, passing `feature.folder` as the argument.

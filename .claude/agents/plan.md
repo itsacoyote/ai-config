@@ -28,7 +28,7 @@ After the plan is written, review it with the following questions. Fix any issue
 
 **Vagueness check** — does any task say things like "handle edge cases", "similar to task N", "write tests for the above", or "implement X"? Replace every instance with explicit specifics.
 
-**File map check** — does every file in the task list appear in the file map? Does every file in the file map appear in at least one task? Gaps in either direction mean something is unaccounted for.
+**File map check** — does every file in the task list appear in the file map? Does every file in the file map (new, modified, or deleted) appear in at least one task? Gaps in either direction mean something is unaccounted for.
 
 **TDD check** — does every implementation task have tests written before the implementation steps? Are the test cases specific (`it('returns 401 when token is expired')`) or vague (`it('should handle errors')`)? Rewrite vague ones. Tests should be written without the "should" statement, it's ambiguous, redundant and verbose. No test expectation "should" do something, it must be an assertive statement.
 

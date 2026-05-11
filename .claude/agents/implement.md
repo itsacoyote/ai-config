@@ -33,9 +33,10 @@ Work through tasks in the order defined in the plan. For each task:
 2. **Write the tests** — write exactly the test cases named in the plan. Do not add tests not in the plan; do not skip tests that are. Run them and confirm they fail for the right reason.
 3. **Implement** — follow the plan's implementation steps in order. Each step names a specific function, component, route, or schema — build exactly that.
 4. **Run the tests** — confirm all tests for this task pass. If any fail, fix them before moving to the next task. Do not batch and fix later.
-5. **Check coverage** — coverage must not drop below 80% across unit, integration, and e2e tests. If it does, add the missing coverage before committing.
-6. **Commit** — use the commit message specified in the plan.
-7. **Update checkpoint** — write a brief `workflow.checkpoint` to `context.yaml` noting which task just completed and what comes next (e.g. `"Completed tasks 1-3 of 7. Next: Task 4 - Add useAuthToken hook."`). This ensures a disruption mid-implementation leaves a clear resume point.
+5. **Run the linter** — run the project's linter and formatter. Fix any violations before committing. Tests passing and linter failing will still break CI.
+6. **Check coverage** — coverage must not drop below 80% across unit, integration, and e2e tests. If it does, add the missing coverage before committing.
+7. **Commit** — use the commit message specified in the plan.
+8. **Update checkpoint** — write a brief `workflow.checkpoint` to `context.yaml` noting which task just completed and what comes next (e.g. `"Completed tasks 1-3 of 7. Next: Task 4 - Add useAuthToken hook."`). This ensures a disruption mid-implementation leaves a clear resume point.
 
 ## Code Review
 
@@ -59,7 +60,7 @@ Track the total lines of code generated since the last code review. After every 
 - Trivial bug fixes under 10 lines
 - Configuration changes
 
-When the Code Reviewer returns issues, fix all of them before continuing. When it returns approval, reset the line count and proceed.
+When the Code Reviewer returns issues, fix all of them before continuing. When it returns approval, reset the line count and proceed. If the Code Reviewer returns the same issues after 3 fix attempts with no meaningful progress, stop — do not attempt a 4th fix. See **Escalation** below.
 
 ## Coverage Requirements
 
@@ -68,6 +69,16 @@ Maintain >80% test coverage throughout implementation. Coverage applies across a
 - **Unit tests** — individual functions, components, and modules in isolation
 - **Integration tests** — interactions between modules, API endpoints, and database operations
 - **E2E tests** — full user flows through the feature as described in the spec's user stories
+
+## Escalation
+
+If you have made 3 full attempts to resolve the same issue — whether a failing test, a linter error, or a code review finding — without meaningful progress, stop the pipeline. Do not attempt a 4th fix. Document clearly:
+
+- What is failing and the exact error or finding
+- What was attempted in each of the 3 attempts and why it didn't work
+- Your assessment of why this is stuck (architectural mismatch, missing information, ambiguity in the plan)
+
+Notify the user with this summary and halt. Do not proceed to Validate.
 
 ## Constraints
 

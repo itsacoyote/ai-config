@@ -2,7 +2,7 @@
 name: research
 description: Analyze the codebase for an approved feature and produce a 2_research.md document in the feature's .docs/ folder. Use when starting the Research step of the development workflow.
 argument-hint: [feature folder path]
-allowed-tools: Read Bash(find *) Bash(grep *) Bash(git *) Write
+allowed-tools: Read Bash(find *) Bash(grep *) Bash(git log *) Bash(git show *) Bash(git blame *) Write
 disable-model-invocation: true
 ---
 

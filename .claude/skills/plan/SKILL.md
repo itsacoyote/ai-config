@@ -33,6 +33,8 @@ For each file:
 - Define its public interface: what it exports or exposes to other files
 - Note which research finding or spec requirement it addresses
 
+The file map has three tables: New Files, Modified Files, and Deleted Files. If the feature removes or replaces any existing files, list them in Deleted Files with the reason. Deletion decisions belong in the map, not discovered mid-implementation.
+
 Do not write tasks until the file map is complete and internally consistent. Every file in the map must earn its place — if its responsibility could belong to another file without violating the single-responsibility rule, merge them.
 
 ## Step 2: Write tasks
