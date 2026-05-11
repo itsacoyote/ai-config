@@ -223,6 +223,20 @@ This repo is a template. To use this workflow in a new project:
 
 ---
 
+## Other agents
+
+### Onboard
+
+Not part of the pipeline. Use this when you're new to a project or returning after a long absence.
+
+```text
+Use the onboard agent
+```
+
+It explores the codebase from scratch, writes a `.ONBOARD.md` to the project root with a plain-language explanation of what the project is and how it works, and updates `CLAUDE.md` so future Claude sessions have immediate context. After writing the files, stay in conversation — ask it anything about the codebase.
+
+---
+
 ## File reference
 
 ```text
@@ -234,6 +248,7 @@ This repo is a template. To use this workflow in a new project:
 │   ├── implement.md       # Step 4: code the feature
 │   ├── validate.md        # Step 5: code and QA review
 │   ├── document.md        # Step 6: docs, PR description, notify
+│   ├── onboard.md         # Standalone: codebase exploration for new developers
 │   ├── code-reviewer.md   # Mid-implementation code review checkpoints
 │   ├── senior-reviewer.md # Brutal final code review (used by Validate)
 │   └── qa-reviewer.md     # Final QA and evidence capture (used by Validate)
