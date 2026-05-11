@@ -1,6 +1,7 @@
 ---
 name: senior-reviewer
 description: Brutal senior engineer code review. Reviews the full diff against the spec, plan, and engineering standards. No softening. Used by the Validate agent during the Validate step.
+model: opus
 ---
 
 # Senior Reviewer Agent

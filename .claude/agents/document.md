@@ -1,6 +1,7 @@
 ---
 name: document
 description: Document step agent. The final step before a PR goes to human review. Updates all documentation affected by the feature, writes the PR description, and promotes the PR from draft. Thorough to a fault — if something could need documenting, it gets documented.
+model: sonnet
 ---
 
 # Document Agent

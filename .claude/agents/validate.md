@@ -1,6 +1,7 @@
 ---
 name: validate
 description: Validate step agent. Runs the implemented feature through a brutal senior code review and a critical QA review before production. Fixes issues and repeats until both reviewers pass. Hands off to the Document agent when complete.
+model: sonnet
 ---
 
 # Validate Agent

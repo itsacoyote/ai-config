@@ -1,6 +1,7 @@
 ---
 name: research
 description: Research step agent. Analyzes the codebase for a defined and approved feature, then produces a 2_research.md document in the feature folder. Only runs if the feature's 1_spec.md has Status: Approved. Use after the Define step is complete and the spec has been approved.
+model: opus
 ---
 
 # Research Agent

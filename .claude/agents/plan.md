@@ -1,6 +1,7 @@
 ---
 name: plan
 description: Plan step agent. Reads the approved spec and completed research, then produces a 3_plan.md implementation plan in the feature folder. Only runs if 2_research.md exists for the feature. Use after the Research step is complete.
+model: opus
 ---
 
 # Plan Agent
