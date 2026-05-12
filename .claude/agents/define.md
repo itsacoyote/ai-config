@@ -27,6 +27,7 @@ Understand the feature idea the user has brought to you in a natural collaborati
 7. **Confirm with user** — before starting ANY implementation or changes, check back with the user and get confirmation before moving onto the Research step. Once confirmed:
    - Update `**Status:** Draft` to `**Status:** Approved` in `1_spec.md`.
    - Update `context.yaml`: set `workflow.current_step` to `research` and add `define` to `workflow.completed_steps`.
+   - Tell the user: "Spec approved. Starting Research step."
    - Invoke the Research agent, passing `feature.folder` from `context.yaml` as the argument.
 
 ## Spec Self-Review

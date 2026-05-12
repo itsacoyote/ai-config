@@ -92,4 +92,5 @@ Notify the user with this summary and halt. Do not proceed to Validate.
 
 Once all tasks are complete, the full test suite passes, and coverage is above 80%:
 - Update `context.yaml`: set `workflow.current_step` to `validate` and add `implement` to `workflow.completed_steps`.
+- Tell the user: "Implementation complete. Starting Validate step."
 - Invoke the Validate agent, passing `feature.folder` as the argument.

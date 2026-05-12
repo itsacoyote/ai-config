@@ -42,4 +42,5 @@ After the plan is written, review it with the following questions. Fix any issue
 
 Once complete, commit the plan. Then:
 - Update `context.yaml`: set `workflow.current_step` to `implement` and add `plan` to `workflow.completed_steps`.
+- Tell the user: "Plan complete. Starting Implementation step."
 - Invoke the Implement agent, passing `feature.folder` as the argument.

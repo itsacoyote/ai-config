@@ -90,4 +90,5 @@ List each entry from `output_artifacts` in `context.yaml` with its description a
 
 Then:
 - Update `context.yaml`: set `workflow.current_step` to `document` and add `validate` to `workflow.completed_steps`.
+- Tell the user: "Validation complete. Starting Document step."
 - Invoke the Document agent, passing `feature.folder` as the argument.
