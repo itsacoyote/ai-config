@@ -5,6 +5,7 @@ model: opus
 skills:
   - agent-context
   - plan
+  - ui-design-brain
 ---
 
 # Plan Agent
