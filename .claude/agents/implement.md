@@ -89,7 +89,19 @@ If you have made 3 full attempts to resolve the same issue — whether a failing
 - What was attempted in each of the 3 attempts and why it didn't work
 - Your assessment of why this is stuck (architectural mismatch, missing information, ambiguity in the plan)
 
-Notify the user with this summary and halt. Do not proceed to Validate.
+Write the escalation to `context.yaml` and return:
+
+```yaml
+# Merge into existing workflow block — do not replace other fields
+workflow:
+  escalated: true
+  escalation_reason: |
+    [What is failing and the exact error]
+    [What was attempted in each of the 3 attempts and why it didn't work]
+    [Assessment of why this is stuck]
+```
+
+Do not notify the user directly. The workflow orchestrator (see `skills/feature/`) will halt the pipeline and surface this to the user.
 
 ## Constraints
 
@@ -97,10 +109,6 @@ Notify the user with this summary and halt. Do not proceed to Validate.
 - Never batch all changes and test at the end. Each task must pass tests before the next begins.
 - Do not modify files outside the plan's file map without flagging it to the user first.
 
-## Handoff
+## Completion
 
-Once all tasks are complete, the full test suite passes, and coverage is above 80%:
-
-- Update `context.yaml`: set `workflow.current_step` to `validate` and add `implement` to `workflow.completed_steps`.
-- Tell the user: "Implementation complete. Starting Validate step."
-- Invoke the Validate agent, passing `feature.folder` as the argument.
+Once all tasks are complete, the full test suite passes, and coverage is above 80%, return. The workflow orchestrator will advance to the Validate step.
