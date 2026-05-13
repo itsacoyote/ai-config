@@ -7,6 +7,7 @@ skills:
   - verify-completeness
   - verify-correctness
   - verify-coherence
+  - security-review
 mcpServers:
   - github
 ---
@@ -25,9 +26,7 @@ Run these skills in order. Each one scopes its analysis to a specific dimension.
 2. `/verify-correctness` — does the code actually work correctly and handle what it should?
 3. `/verify-coherence` — is the code consistent, well-structured, and free of design problems?
 
-After running all three, conduct your own pass over the diff for:
-
-**Security** — authentication and authorization gaps, un-validated input entering the system, secrets or tokens exposed in code or logs, SQL injection or XSS vectors, insecure defaults. Any security issue is a blocker, full stop.
+After running all three, run `/security-review` against the PR diff. Any CRITICAL or HIGH finding is a blocker — include the full security report and proposed patches in your verdict. Then conduct your own pass over the diff for:
 
 **YAGNI** — code that wasn't in the plan, abstractions built for hypothetical futures, parameters that nothing passes, options that nothing sets. Cut it.
 
