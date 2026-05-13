@@ -1,7 +1,7 @@
 ---
 name: plan
 description: Write a 3_plan.md implementation plan for an approved and researched feature. Produces a file map and explicit, TDD-ordered task list. Use after spec and research docs are both present in the feature folder.
-argument-hint: [feature folder path]
+argument-hint: "[feature folder path]"
 allowed-tools: Read Write
 disable-model-invocation: true
 ---
@@ -29,6 +29,7 @@ Read `1_spec.md` and `2_research.md` fully before writing anything, including an
 Before writing any tasks, decide and document every file that will be created or modified. This is where decomposition gets locked in — do it deliberately.
 
 For each file:
+
 - State its single responsibility in one sentence
 - Define its public interface: what it exports or exposes to other files
 - Note which research finding or spec requirement it addresses

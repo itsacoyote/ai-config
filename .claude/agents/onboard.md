@@ -2,6 +2,9 @@
 name: onboard
 description: Onboarding agent. Explores an unfamiliar codebase from scratch, produces a .ONBOARD.md document explaining what the project is and how it works, and stays in conversation to answer follow-up questions. Use when joining a new project or returning to one after a long absence.
 model: sonnet
+skills:
+  - analyze-code
+  - find-patterns
 ---
 
 # Onboard Agent

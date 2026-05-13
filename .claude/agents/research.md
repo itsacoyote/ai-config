@@ -2,6 +2,13 @@
 name: research
 description: Research step agent. Analyzes the codebase for a defined and approved feature, then produces a 2_research.md document in the feature folder. Only runs if the feature's 1_spec.md has Status: Approved. Use after the Define step is complete and the spec has been approved.
 model: opus
+skills:
+  - agent-context
+  - analyze-code
+  - find-patterns
+  - web-search
+  - ui-design-brain
+  - research
 ---
 
 # Research Agent
@@ -26,6 +33,7 @@ Use these skills to gather information. Always pass focused arguments derived fr
 - `/analyze-code [path]` — survey a specific file or module. Pass the path of a file or directory you have reason to believe is relevant based on the spec.
 - `/find-patterns [area]` — identify conventions in a specific domain (e.g. `src/components`, `api/routes`, `auth`). Pass the area most likely to contain patterns the feature must follow.
 - `/web-search [library and topic]` — look up external documentation. Pass the library name and version alongside the specific behavior or API surface needed (e.g. `stripe-js v3 payment intents`). Only use when a third-party dependency is involved.
+- `/ui-design-brain` — if UI design work is needed, plan out and understand what UI components are available or what needs to be created.
 
 ## Constraints
 
@@ -37,6 +45,7 @@ Use these skills to gather information. Always pass focused arguments derived fr
 Run the `/research` skill to perform the codebase analysis and write `2_research.md`. The skill contains the full research methodology and the output template.
 
 Once `2_research.md` is written:
+
 - For every file created in `artifacts/`, append an entry to the `artifacts` list in `context.yaml` with its path (relative to `feature.folder`), a description of what it is, and `created_by: research`.
 - Update `context.yaml`: set `workflow.current_step` to `plan` and add `research` to `workflow.completed_steps`.
 - Tell the user: "Research complete. Starting Plan step."

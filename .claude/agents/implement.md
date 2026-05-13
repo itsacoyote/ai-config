@@ -2,6 +2,12 @@
 name: implement
 description: Implement step agent. Follows the plan document to build the feature incrementally with TDD. Only runs if 3_plan.md exists for the feature. Use after the Plan step is complete.
 model: sonnet
+skills:
+  - agent-context
+  - ui-design-brain
+  - shadcn
+  - find-patterns
+  - git-commit
 ---
 
 # Implement Agent
@@ -91,6 +97,7 @@ Notify the user with this summary and halt. Do not proceed to Validate.
 ## Handoff
 
 Once all tasks are complete, the full test suite passes, and coverage is above 80%:
+
 - Update `context.yaml`: set `workflow.current_step` to `validate` and add `implement` to `workflow.completed_steps`.
 - Tell the user: "Implementation complete. Starting Validate step."
 - Invoke the Validate agent, passing `feature.folder` as the argument.
