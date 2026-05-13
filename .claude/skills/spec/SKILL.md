@@ -34,15 +34,16 @@ Work through these over the conversation. Follow what makes sense given what the
 Once you have enough to write a solid draft, tell the user and confirm the short name for the folder (e.g. `user-auth`, `csv-export`). Then:
 
 1. **Capture the base branch** — run `git rev-parse --abbrev-ref HEAD` and save it as `base_branch`. Warn and stop if it looks like another feature branch (starts with `feature/`) — the user should be on a stable base branch.
-2. **Create the feature branch** — run `git checkout -b feature/<short-name>`. If a branch with that name already exists, check it out and confirm with the user before proceeding.
-3. **Create the folder structure:**
+2. **Pull latest** — run `git pull origin <base_branch>` to ensure the branch is up to date before branching. If there are local uncommitted changes that would block the pull, warn the user and stop.
+3. **Create the feature branch** — run `git checkout -b feature/<short-name>`. If a branch with that name already exists, check it out and confirm with the user before proceeding.
+4. **Create the folder structure:**
    ```
    .docs/YYYY-MM-DD-<short-name>/
    ├── artifacts/
    └── output-artifacts/
    ```
-4. **Create `context.yaml` immediately** — this is the first file written in the folder. Use the template in `.claude/skills/agent-context/template.yaml` and populate every known field right now: `feature.name`, `feature.short_name`, `feature.folder`, `feature.date`, `feature.branch` (`feature/<short-name>`), `feature.base_branch` (the captured base branch). Leave `workflow.current_step` as `define` and `workflow.completed_steps` as an empty list.
-5. **Write `1_spec.md`** using the template in [template.md](template.md).
-6. Tell the user the file path and invite revisions.
+5. **Create `context.yaml` immediately** — this is the first file written in the folder. Use the template in `.claude/skills/agent-context/template.yaml` and populate every known field right now: `feature.name`, `feature.short_name`, `feature.folder`, `feature.date`, `feature.branch` (`feature/<short-name>`), `feature.base_branch` (the captured base branch). Leave `workflow.current_step` as `define` and `workflow.completed_steps` as an empty list.
+6. **Write `1_spec.md`** using the template in [template.md](template.md).
+7. Tell the user the file path and invite revisions.
 
 Stay in the conversation after writing — iterate on the doc until the user is satisfied.
