@@ -44,7 +44,7 @@ After generating the spec document, look at it with fresh eyes.
 
 Fix issues in-line. No need to re-review, make changes and move on.
 
-Once complete, have the changes available to review in a Draft PR in GitHub for the user to approve.
+Once complete, have the changes available to review in a Draft PR in GitHub for review.
 
 ## Output
 
