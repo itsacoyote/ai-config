@@ -1,7 +1,7 @@
 ---
 name: spec
 description: Interactively define a new feature and write its spec document to .docs/. Use when the user wants to spec a feature, define requirements, brainstorm an idea, or start the Define step of the development workflow.
-argument-hint: [feature idea]
+argument-hint: "[feature idea]"
 allowed-tools: Bash(mkdir *) Bash(git rev-parse *) Bash(git checkout *) Write Read
 disable-model-invocation: true
 ---

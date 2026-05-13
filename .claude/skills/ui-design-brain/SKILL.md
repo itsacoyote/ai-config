@@ -1,14 +1,14 @@
 ---
 name: ui-design-brain
-description: Generate production-grade UI using real component patterns and best practices from 60+ documented interface components. Use when the user asks to build web interfaces, pages, dashboards, forms, navigation, or any UI — ensures modern, minimal, SaaS-quality output grounded in design system conventions rather than generic AI patterns.
+description: Design and build production-grade UI with the right component patterns for any stack. When shadcn/ui is present (components.json detected), coordinates with the shadcn skill to use existing components and follow its rules. For all other projects, applies 60+ interface patterns from component.gallery. Use when building web interfaces, pages, dashboards, forms, navigation, modals, or any UI component.
 license: Complete terms in LICENSE.txt
 ---
 
 # UI Design Brain
 
-This skill provides a curated knowledge base of 60+ UI component patterns sourced from [component.gallery](https://component.gallery) and enriched with best practices, layout guidance, and usage rules. It replaces generic guessing with real design-system knowledge when generating interfaces.
+This skill provides a curated knowledge base of 60+ UI component patterns sourced from [component.gallery](https://component.gallery) and enriched with best practices, layout guidance, and usage rules. It adapts to the project's stack — deferring to the shadcn skill when shadcn/ui is in use, and applying standard design-system conventions otherwise.
 
-**Before writing any UI code**, consult this skill to select the right components and follow their best practices. Read [components.md](components.md) for the full reference.
+**Before writing any UI code**, follow the workflow below to select the right components and approach for this project.
 
 ## When to Use This Skill
 
@@ -44,7 +44,41 @@ The output should match what you'd expect from a senior product designer at a to
 
 ## Workflow
 
+### Step 0 — Detect Stack
+
+Check whether `components.json` exists in the project root.
+
+**If `components.json` is present (shadcn/ui project):**
+
+Invoke the shadcn skill before doing anything else. It will inject current project context including installed components, aliases, Tailwind version, icon library, base primitive, and framework. Use this context to guide all component decisions in the steps below. The shadcn skill's rules (styling, forms, composition, icons) take precedence over the generic best practices in Step 2 of this skill.
+
+**If `components.json` is absent:**
+
+Proceed with the standard workflow below. No shadcn-specific considerations apply.
+
+---
+
 ### Step 1 — Identify Components
+
+**For shadcn/ui projects:**
+
+Use shadcn's Component Selection table as the primary reference. Check which components are already installed (from the injected project context) before adding new ones. Map the UI need to the best-fit shadcn component:
+
+- Button/action → `Button` with appropriate variant
+- Form inputs → `Input`, `Select`, `Combobox`, `Switch`, `Checkbox`, `RadioGroup`, `Textarea`
+- Toggle options (2–5 choices) → `ToggleGroup`
+- Data display → `Table`, `Card`, `Badge`, `Avatar`
+- Navigation → `Sidebar`, `NavigationMenu`, `Breadcrumb`, `Tabs`, `Pagination`
+- Overlays → `Dialog` (modal), `Sheet` (side panel), `Drawer` (bottom sheet), `AlertDialog` (confirmation)
+- Feedback → `sonner` (toast), `Alert`, `Progress`, `Skeleton`, `Spinner`
+- Layout → `Card`, `Separator`, `Resizable`, `ScrollArea`, `Accordion`, `Collapsible`
+- Empty states → `Empty`
+- Menus → `DropdownMenu`, `ContextMenu`, `Menubar`
+- Tooltips/info → `Tooltip`, `HoverCard`, `Popover`
+
+For anything not covered by shadcn, fall back to [components.md](components.md) for pattern guidance.
+
+**For non-shadcn projects:**
 
 Read the user's request and determine which UI components are needed. Reference [components.md](components.md) to find each component by name or alias.
 
@@ -57,9 +91,13 @@ Common mappings:
 - "input" → Text input, Textarea, Select, Combobox, Datepicker, File upload, Slider
 - "overlay" → Modal, Drawer, Popover, Tooltip, Dropdown menu
 
+---
+
 ### Step 2 — Apply Best Practices
 
-For each component in the interface, follow its best practices from the reference. Key rules that apply broadly:
+**For shadcn/ui projects**, the shadcn skill's rules take precedence. Follow its rule files for styling, forms, composition, and icons. The guidelines below still apply where the shadcn skill doesn't address them.
+
+**For all projects**, apply these patterns:
 
 **Layout**
 
@@ -125,7 +163,16 @@ Select the style preset that best matches the user's intent, or ask if unclear:
 
 ### Step 4 — Generate Code
 
-Write production-ready code following these rules:
+**For shadcn/ui projects**, the shadcn skill governs code generation. Follow its rules for component composition, semantic color tokens, icon usage, form layout, and Tailwind conventions. Key reminders:
+
+- Use semantic tokens (`bg-primary`, `text-muted-foreground`) — never raw color utilities
+- Use `gap-*` for spacing, never `space-x-*` or `space-y-*`
+- Use `size-*` when width and height are equal
+- Use `cn()` for conditional class merging
+- Add `"use client"` when `isRSC` is true and the component uses state, effects, or browser APIs
+- Use the project's `iconLibrary` for all icon imports — never assume `lucide-react`
+
+**For non-shadcn projects**, write production-ready code following these rules:
 
 ```
 Stack:       React + Tailwind CSS (unless user specifies otherwise)

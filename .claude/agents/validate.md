@@ -2,6 +2,8 @@
 name: validate
 description: Validate step agent. Runs the implemented feature through a brutal senior code review and a critical QA review before production. Fixes issues and repeats until both reviewers pass. Hands off to the Document agent when complete.
 model: sonnet
+skills:
+  - agent-context
 ---
 
 # Validate Agent
@@ -24,7 +26,7 @@ Run both reviewers in order. If either returns issues, coordinate fixes and re-r
 
 ### Round 1 — Senior Code Review
 
-Invoke the Senior Reviewer agent. It will use the `/verify-completeness`, `/verify-correctness`, and `/verify-coherence` skills to structure its review, then issue a verdict.
+Invoke the Senior Reviewer agent. It will use skills to structure its review, then issue a verdict.
 
 If the Senior Reviewer returns issues:
 
@@ -72,6 +74,7 @@ Once both reviewers have approved, write `4_validate.md` to the feature folder u
 **Iterations:** N
 
 ### Findings and fixes
+
 - [Finding] → [What was changed to resolve it]
 
 ## QA Review
@@ -81,6 +84,7 @@ Once both reviewers have approved, write `4_validate.md` to the feature folder u
 **Iterations:** N
 
 ### Findings and fixes
+
 - [Finding] → [What was changed to resolve it]
 
 ## Evidence
@@ -89,6 +93,7 @@ List each entry from `output_artifacts` in `context.yaml` with its description a
 ```
 
 Then:
+
 - Update `context.yaml`: set `workflow.current_step` to `document` and add `validate` to `workflow.completed_steps`.
 - Tell the user: "Validation complete. Starting Document step."
 - Invoke the Document agent, passing `feature.folder` as the argument.

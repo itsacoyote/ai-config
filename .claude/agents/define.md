@@ -2,6 +2,11 @@
 name: define
 description: Define step agent. Use when a user wants to spec out a new feature, clarify requirements, or create a spec document. Handles the full Define phase of the development workflow.
 model: opus
+skills:
+  - agent-context
+  - create-pr
+  - git-commit
+  - spec
 ---
 
 # Define Agent
