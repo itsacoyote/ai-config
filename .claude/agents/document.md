@@ -117,5 +117,3 @@ Follow the `create-pr` skill for PR body guidelines (no AI attribution, what/why
 After committing all documentation updates and the PR description is written:
 
 1. Remove the draft status with `gh pr ready`.
-2. Update `context.yaml`: set `workflow.current_step` to `complete` and add `document` to `workflow.completed_steps`.
-3. Notify the user that the feature implementation is complete, the PR is ready for review, and share the PR link.
