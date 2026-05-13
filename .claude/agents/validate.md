@@ -58,7 +58,19 @@ If either reviewer's issues remain unresolved after 3 fix attempts, stop the pip
 - What was attempted in each of the 3 iterations and why it didn't resolve the issue
 - Your assessment of the root cause (design problem, spec ambiguity, missing capability)
 
-Notify the user with this summary and halt. Do not proceed to Document.
+Write the escalation to `context.yaml` and return:
+
+```yaml
+# Merge into existing workflow block — do not replace other fields
+workflow:
+  escalated: true
+  escalation_reason: |
+    [Which reviewer is blocked and the specific unresolved findings]
+    [What was attempted in each of the 3 iterations and why it didn't resolve]
+    [Assessment of root cause]
+```
+
+Do not notify the user directly. The workflow orchestrator (see `skills/feature/`) will halt the pipeline and surface this to the user.
 
 ## Completion
 
@@ -94,8 +106,4 @@ Once both reviewers have approved, write `4_validate.md` to the feature folder u
 List each entry from `output_artifacts` in `context.yaml` with its description and the user story it demonstrates.
 ```
 
-Then:
-
-- Update `context.yaml`: set `workflow.current_step` to `document` and add `validate` to `workflow.completed_steps`.
-- Tell the user: "Validation complete. Starting Document step."
-- Invoke the Document agent, passing `feature.folder` as the argument.
+Then return. The workflow orchestrator will advance to the Document step.
