@@ -28,7 +28,7 @@ List each one for the user with:
 
 Ask: "Do you want to resume one of these, or start a new feature?"
 
-**To resume:** Read the `context.yaml`, set `feature_folder` to its `feature.folder` value, then jump to the step named in `workflow.current_step` in the **Pipeline** section below.
+**To resume:** Read the `context.yaml`, set `feature_folder` to its `feature.folder` value. Check `workflow.escalated` — if `true`, tell the user the previous run escalated and show `workflow.escalation_reason`. Reset `workflow.escalated` to `false` and `workflow.escalation_reason` to `""` in `context.yaml` before re-invoking the step. Then look up the agent for `workflow.current_step` in the **Step sequence** agent invocation table in the Pipeline section and invoke it (with `feature_folder` as argument), then continue the pipeline from there. If `workflow.current_step` is `define`, jump to the **Approval Gate** instead. If `workflow.current_step` is `complete`, announce the workflow is already complete and stop.
 
 **To start new:** Continue to Step 3.
 
@@ -50,7 +50,7 @@ Run this after every agent returns:
 
 1. Read `context.yaml` from `feature_folder`.
 2. If `workflow.escalated` is `true`: halt immediately. Tell the user: `"Pipeline halted — " + workflow.escalation_reason`. Do not update `context.yaml`. Do not invoke the next agent. Stop.
-3. Append the completed step name to `workflow.completed_steps`.
+3. Append the completed step name to `workflow.completed_steps` (initialize to `[]` if the key is absent).
 4. Set `workflow.current_step` to the next step name (see sequence table below).
 5. Write the updated `context.yaml`.
 
