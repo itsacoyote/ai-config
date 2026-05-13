@@ -131,7 +131,8 @@ Only include for CRITICAL and HIGH findings:
 ````
 🛠️  PATCH PROPOSALS
 ══════════════════
-⚠️  REVIEW EACH PATCH BEFORE APPLYING — Nothing has been changed yet.
+These patches are included in the senior reviewer's verdict.
+CRITICAL and HIGH findings are blockers — the Implement agent applies accepted fixes on the next pass.
 
 ─────────────────────────────────────────────
 Patch 1/3: SQL Injection in src/routes/users.js
@@ -146,12 +147,10 @@ db.execute(query);
 
 AFTER (fixed):
 ```js
-// Line 47 — Fixed: Use parameterized query to prevent SQL injection
+// Line 47
 const query = 'SELECT * FROM users WHERE id = ?';
 db.execute(query, [req.params.id]);
 ```
-
-Apply this patch? (Review first — AI-generated patches may need adjustment)
 ─────────────────────────────────────────────
 ````
 

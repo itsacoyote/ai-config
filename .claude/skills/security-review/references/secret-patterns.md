@@ -181,7 +181,6 @@ These are intentional placeholders — recognize and skip:
 "<YOUR_API_KEY>"
 "${API_KEY}"
 "${process.env.API_KEY}"
-"os.environ.get('API_KEY')"
 "REPLACE_WITH_YOUR_KEY"
 "xxx...xxx"
 "sk-..." (in documentation/comments)

@@ -22,9 +22,6 @@ Load this during Step 4 of the scan workflow.
 ```
 "SELECT ... " + variable
 `SELECT ... ${variable}`
-f"SELECT ... {variable}"
-"SELECT ... %s" % variable   # Only safe with proper driver parameterization
-cursor.execute("... " + input)
 db.raw(`... ${req.params.id}`)
 ```
 
@@ -65,7 +62,7 @@ User.findOne({ where: { id: userId } }); // ORM safe
 
 ### Command Injection
 
-**What to look for (Node.js):**
+**What to look for:**
 
 ```js
 exec(userInput);
@@ -74,24 +71,7 @@ spawn("sh", ["-c", userInput]);
 child_process.exec("ls " + dir);
 ```
 
-**What to look for (Python):**
-
-```python
-os.system(user_input)
-subprocess.call(user_input, shell=True)
-eval(user_input)
-```
-
-**What to look for (PHP):**
-
-```php
-exec($input)
-system($_GET['cmd'])
-passthru($input)
-`$input`  # backtick operator
-```
-
-**Safe alternatives:** Use array form of spawn/subprocess without shell=True; use allowlists for commands.
+**Safe alternative:** Use the array form of `spawn` and never pass `shell: true` with user input; use allowlists for commands.
 
 ---
 
@@ -246,19 +226,18 @@ Math.random().toString(36); // weak token generation
 
 // SAFE
 crypto.randomBytes(32); // Node.js
-secrets.token_urlsafe(32); // Python
 ```
 
 ### Password Hashing
 
-```python
-# VULNERABLE
-hashlib.md5(password.encode()).hexdigest()
-hashlib.sha256(password.encode()).hexdigest()
+```js
+// VULNERABLE
+crypto.createHash("md5").update(password).digest("hex");
+crypto.createHash("sha256").update(password).digest("hex");
 
-# SAFE
-bcrypt.hashpw(password, bcrypt.gensalt(rounds=12))
-argon2.hash(password)
+// SAFE
+bcrypt.hash(password, 12);
+argon2.hash(password);
 ```
 
 ---
@@ -309,14 +288,16 @@ Flag endpoints that:
 
 ## 7. Path Traversal
 
-```python
-# VULNERABLE
-filename = request.args.get('file')
-with open(f'/var/uploads/{filename}') as f:  # ../../../../etc/passwd
+```js
+// VULNERABLE
+const file = req.params.filename;
+fs.readFile(`/var/uploads/${file}`); // ../../../../etc/passwd
 
-# SAFE
-filename = os.path.basename(request.args.get('file'))
-safe_path = os.path.join('/var/uploads', filename)
-if not safe_path.startswith('/var/uploads/'):
-    abort(400)
+// SAFE
+const file = path.basename(req.params.filename);
+const safePath = path.join("/var/uploads", file);
+if (!safePath.startsWith("/var/uploads/")) {
+  return res.status(400).end();
+}
+fs.readFile(safePath);
 ```

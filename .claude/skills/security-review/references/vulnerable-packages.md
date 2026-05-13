@@ -35,40 +35,6 @@ Load this during Step 2 (Dependency Audit). Check versions in the project's lock
 
 ---
 
-## Python / pip
-
-| Package      | Vulnerable Versions | Issue                          | Safe Version |
-| ------------ | ------------------- | ------------------------------ | ------------ |
-| Pillow       | < 10.0.1            | Multiple CVEs, buffer overflow | >= 10.0.1    |
-| cryptography | < 41.0.0            | OpenSSL vulnerabilities        | >= 41.0.0    |
-| PyYAML       | < 6.0               | Arbitrary code via yaml.load() | >= 6.0       |
-| paramiko     | < 3.4.0             | Authentication bypass          | >= 3.4.0     |
-| requests     | < 2.31.0            | Proxy auth info leak           | >= 2.31.0    |
-| urllib3      | < 2.0.7             | Header injection               | >= 2.0.7     |
-| Django       | < 4.2.16            | Various                        | >= 4.2.16    |
-| Flask        | < 3.0.3             | Various                        | >= 3.0.3     |
-| Jinja2       | < 3.1.4             | HTML attribute injection       | >= 3.1.4     |
-| sqlalchemy   | < 2.0.28            | Various                        | >= 2.0.28    |
-| aiohttp      | < 3.9.4             | SSRF, path traversal           | >= 3.9.4     |
-| werkzeug     | < 3.0.3             | Various                        | >= 3.0.3     |
-
----
-
-## Java / Maven
-
-| Package             | Vulnerable Versions | Issue                                     |
-| ------------------- | ------------------- | ----------------------------------------- |
-| log4j-core          | 2.0-2.14.1          | Log4Shell RCE (CVE-2021-44228) — CRITICAL |
-| log4j-core          | 2.15.0              | Incomplete fix — still vulnerable         |
-| Spring Framework    | < 5.3.28, < 6.0.13  | Various CVEs                              |
-| Spring Boot         | < 3.1.4             | Various                                   |
-| Jackson-databind    | < 2.14.0            | Deserialization                           |
-| Apache Commons Text | < 1.10.0            | Text4Shell RCE (CVE-2022-42889)           |
-| Apache Struts       | < 6.3.0             | Various RCE                               |
-| Netty               | < 4.1.94            | HTTP request smuggling                    |
-
----
-
 ## Ruby / Gems
 
 | Gem      | Vulnerable Versions | Issue        |
@@ -78,28 +44,6 @@ Load this during Step 2 (Dependency Audit). Check versions in the project's lock
 | rexml    | < 3.2.7             | ReDoS        |
 | rack     | < 3.0.9             | Various      |
 | devise   | < 4.9.3             | Various      |
-
----
-
-## Rust / Cargo
-
-| Crate   | Issue                                 |
-| ------- | ------------------------------------- |
-| openssl | Check advisory db for current version |
-| hyper   | Check advisory db for current version |
-
-Reference: https://rustsec.org/advisories/
-
----
-
-## Go
-
-Reference: https://pkg.go.dev/vuln/ and https://vuln.go.dev
-
-Common risky patterns:
-
-- `golang.org/x/crypto` — check if version is within 6 months of current
-- Any dependency using `syscall` package directly — review carefully
 
 ---
 
