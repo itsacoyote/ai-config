@@ -34,6 +34,11 @@ Ask: "Do you want to resume one of these, or start a new feature?"
 
 ## Step 3: Start a new feature
 
+Before invoking Define:
+
+1. Run `git rev-parse --abbrev-ref HEAD`. If the current branch is not `main` or `master`, warn the user and stop — they should check out main before starting a new feature.
+2. Run `git pull origin main` (or `master` if that's the base). If there are local uncommitted changes that block the pull, warn the user and stop.
+
 If a feature idea was passed as `$ARGUMENTS`, use it as the starting context for the Define agent. Otherwise ask the user what they want to build first.
 
 Announce: `"Starting Define..."`
