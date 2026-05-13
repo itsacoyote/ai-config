@@ -43,8 +43,4 @@ After the plan is written, review it with the following questions. Fix any issue
 
 **Commit check** — is there a commit after every logical unit of work? No task should end without one.
 
-Once complete, commit the plan. Then:
-
-- Update `context.yaml`: set `workflow.current_step` to `implement` and add `plan` to `workflow.completed_steps`.
-- Tell the user: "Plan complete. Starting Implementation step."
-- Invoke the Implement agent, passing `feature.folder` as the argument.
+Once complete, commit the plan.
