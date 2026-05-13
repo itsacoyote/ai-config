@@ -11,8 +11,8 @@ feature:
   base_branch: "main"
 
 workflow:
-  current_step: document
-  completed_steps: [define, research, plan, implement, validate]
+  current_step: complete
+  completed_steps: [define, research, plan, implement, validate, document]
   checkpoint: ""
   escalated: false
   escalation_reason: ""
