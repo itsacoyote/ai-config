@@ -34,18 +34,21 @@ Ask: "Do you want to resume one of these, or start a new feature?"
 
 ## Step 3: Start a new feature
 
-Before invoking Define:
-
-1. Run `git rev-parse --abbrev-ref HEAD`. If the current branch is not `main` or `master`, warn the user and stop — they should check out main before starting a new feature.
-2. Run `git pull origin main` (or `master` if that's the base). If there are local uncommitted changes that block the pull, warn the user and stop.
-
-If a feature idea was passed as `$ARGUMENTS`, use it as the starting context for the Define agent. Otherwise ask the user what they want to build first.
+1. **Get the feature idea** — use `$ARGUMENTS` if provided, otherwise ask: "What do you want to build?"
+2. **Derive a short name** — slug the idea: lowercase, spaces/punctuation → hyphens, max 30 chars (e.g. "user auth flow" → `user-auth-flow`).
+3. **Set up git and workspace:**
+   ```bash
+   git checkout main
+   git pull origin main
+   git checkout -b feature/<short-name>
+   mkdir -p .docs/YYYY-MM-DD-<short-name>/artifacts .docs/YYYY-MM-DD-<short-name>/output-artifacts
+   ```
+4. **Create `context.yaml`** — read the template at `.claude/skills/agent-context/template.yaml`. Write it to `.docs/YYYY-MM-DD-<short-name>/context.yaml`, populating: `feature.name` (from the idea), `feature.short_name`, `feature.folder`, `feature.date` (today), `feature.branch` (`feature/<short-name>`), `feature.base_branch` (`main`). Set `workflow.current_step: define`, `workflow.completed_steps: []`.
+5. Set `feature_folder` to `.docs/YYYY-MM-DD-<short-name>`.
 
 Announce: `"Starting Define..."`
 
-Invoke the Define agent with the feature idea. After it returns, scan for context.yaml files again with the same `find` command. Read the one where `workflow.current_step` is `define` and `workflow.completed_steps` is empty — this is the one Define just created. Set `feature_folder` to its `feature.folder` value.
-
-Then proceed to the **Approval Gate** below.
+Invoke the Define agent with `feature_folder` as the argument. After it returns, proceed to the **Approval Gate** below.
 
 ## Pipeline
 

@@ -29,7 +29,7 @@ Understand the feature idea the user has brought to you in a natural collaborati
 2. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
 3. **Consider any potential edge cases** — bring up any potentially missing edge cases that should be handled.
 4. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
-5. **Run the `/spec` skill** — the skill creates the feature branch, folder, `context.yaml` (fully populated), and `1_spec.md` in one sequence.
+5. **Run the `/spec` skill** — pass the `feature_folder` argument you received. The skill writes `1_spec.md` into that folder.
 6. **Create a Draft PR** — push the branch to remote with `git push -u origin <feature.branch from context.yaml>`, then run `gh pr create --draft --base <feature.base_branch from context.yaml> --title "<feature name>"`. Use the `create-pr` skill for title format. Leave the body minimal — it will be fully written by the Document agent at the end of the workflow.
 7. **Return** — your work is complete. The workflow orchestrator will present the spec for user approval and advance to Research.
 
