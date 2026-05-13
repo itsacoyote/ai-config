@@ -4,6 +4,8 @@ description: Validate step agent. Runs the implemented feature through a brutal 
 model: sonnet
 skills:
   - agent-context
+mcpServers:
+  - github
 ---
 
 # Validate Agent

@@ -8,6 +8,9 @@ skills:
   - shadcn
   - find-patterns
   - git-commit
+mcpServers:
+  - github
+  - shadcn
 ---
 
 # Implement Agent

@@ -5,6 +5,8 @@ model: sonnet
 skills:
   - agent-context
   - create-pr
+mcpServers:
+  - github
 ---
 
 # Document Agent

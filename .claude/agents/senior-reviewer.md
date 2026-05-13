@@ -7,6 +7,8 @@ skills:
   - verify-completeness
   - verify-correctness
   - verify-coherence
+mcpServers:
+  - github
 ---
 
 # Senior Reviewer Agent
