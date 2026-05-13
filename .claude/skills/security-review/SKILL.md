@@ -33,6 +33,8 @@ Unlike traditional static analysis tools that match patterns, this skill:
 
 ## Execution Workflow
 
+All `references/` paths below are relative to this skill's base directory (provided in the skill header). Use the Read tool with the full absolute path when loading them.
+
 Follow these steps **in order** every time:
 
 ### Step 1 — Scope Resolution
