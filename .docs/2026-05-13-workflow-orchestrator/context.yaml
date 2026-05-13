@@ -1,0 +1,24 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Workflow Orchestrator"
+  short_name: "workflow-orchestrator"
+  folder: ".docs/2026-05-13-workflow-orchestrator"
+  date: "2026-05-13"
+  branch: "feat/workflow-orchestrator"
+  base_branch: "main"
+
+workflow:
+  current_step: define
+  completed_steps: []
+  checkpoint: ""
+  escalated: false
+  escalation_reason: ""
+
+artifacts: []
+
+output_artifacts: []
+
+documentation_created: []
