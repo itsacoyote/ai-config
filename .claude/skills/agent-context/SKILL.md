@@ -82,6 +82,7 @@ The `documentation_created` list is the registry of **new** documentation files 
 When an agent cannot resolve an issue after 3 attempts (failed tests, linter errors, code review findings that won't clear), it signals the orchestrator by writing to `context.yaml` before returning:
 
 ```yaml
+# Merge into existing workflow block — do not replace other fields
 workflow:
   escalated: true
   escalation_reason: |
@@ -90,7 +91,9 @@ workflow:
     [Assessment of root cause]
 ```
 
-The agent then returns immediately — it does not notify the user directly. The workflow orchestrator reads `workflow.escalated` after each agent returns and halts the pipeline if it is `true`, surfacing `workflow.escalation_reason` to the user.
+The agent then returns immediately — it does not notify the user directly. The workflow orchestrator (see `skills/feature/`) reads `workflow.escalated` after each agent returns and halts the pipeline if it is `true`, surfacing `workflow.escalation_reason` to the user.
+
+**On resume:** If a workflow is resumed and `context.yaml` already has `workflow.escalated: true`, reset both `escalated` and `escalation_reason` to their defaults before re-invoking the step — treat it as a fresh attempt.
 
 ## Template
 
