@@ -2,6 +2,9 @@
 name: plan
 description: Plan step agent. Reads the approved spec and completed research, then produces a 3_plan.md implementation plan in the feature folder. Only runs if 2_research.md exists for the feature. Use after the Research step is complete.
 model: opus
+skills:
+  - agent-context
+  - plan
 ---
 
 # Plan Agent
@@ -41,6 +44,7 @@ After the plan is written, review it with the following questions. Fix any issue
 **Commit check** — is there a commit after every logical unit of work? No task should end without one.
 
 Once complete, commit the plan. Then:
+
 - Update `context.yaml`: set `workflow.current_step` to `implement` and add `plan` to `workflow.completed_steps`.
 - Tell the user: "Plan complete. Starting Implementation step."
 - Invoke the Implement agent, passing `feature.folder` as the argument.
