@@ -7,6 +7,8 @@ skills:
   - create-pr
   - git-commit
   - spec
+mcpServers:
+  - github
 ---
 
 # Define Agent
@@ -29,11 +31,7 @@ Understand the feature idea the user has brought to you in a natural collaborati
 4. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope
 5. **Run the `/spec` skill** — the skill creates the feature branch, folder, `context.yaml` (fully populated), and `1_spec.md` in one sequence.
 6. **Create a Draft PR** — push the branch to remote with `git push -u origin <feature.branch from context.yaml>`, then run `gh pr create --draft --base <feature.base_branch from context.yaml> --title "<feature name>"`. Use the `create-pr` skill for title format. Leave the body minimal — it will be fully written by the Document agent at the end of the workflow.
-7. **Confirm with user** — before starting ANY implementation or changes, check back with the user and get confirmation before moving onto the Research step. Once confirmed:
-   - Update `**Status:** Draft` to `**Status:** Approved` in `1_spec.md`.
-   - Update `context.yaml`: set `workflow.current_step` to `research` and add `define` to `workflow.completed_steps`.
-   - Tell the user: "Spec approved. Starting Research step."
-   - Invoke the Research agent, passing `feature.folder` from `context.yaml` as the argument.
+7. **Return** — your work is complete. The workflow orchestrator will present the spec for user approval and advance to Research.
 
 ## Spec Self-Review
 
@@ -46,12 +44,13 @@ After generating the spec document, look at it with fresh eyes.
 
 Fix issues in-line. No need to re-review, make changes and move on.
 
-Once complete, have the changes available to review in a Draft PR in GitHub for the user to approve.
+Once complete, have the changes available to review in a Draft PR in GitHub for review.
 
 ## Output
 
 The Define step is complete when:
 
 - A `.docs/YYYY-MM-DD-<short-name>/` folder exists with `artifacts/` and `output-artifacts/` subdirectories.
-- `1_spec.md` is written, reviewed, and approved by the user.
+- `1_spec.md` is written and self-reviewed (no placeholders, no open ambiguities).
+- The draft PR is created and pushed to remote.
 - There are no major open questions that would block the Research step.

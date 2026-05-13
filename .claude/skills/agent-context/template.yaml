@@ -14,6 +14,8 @@ workflow:
   current_step: define  # Active step: define | research | plan | implement | validate | document | complete
   completed_steps: []   # Ordered list of steps that have completed and handed off
   checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
+  escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
+  escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
 
 artifacts: []
 # Each entry describes a file created in the feature's artifacts/ folder.

@@ -47,6 +47,3 @@ Run the `/research` skill to perform the codebase analysis and write `2_research
 Once `2_research.md` is written:
 
 - For every file created in `artifacts/`, append an entry to the `artifacts` list in `context.yaml` with its path (relative to `feature.folder`), a description of what it is, and `created_by: research`.
-- Update `context.yaml`: set `workflow.current_step` to `plan` and add `research` to `workflow.completed_steps`.
-- Tell the user: "Research complete. Starting Plan step."
-- Invoke the Plan agent, passing `feature.folder` as the argument.

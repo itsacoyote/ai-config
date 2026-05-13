@@ -5,6 +5,9 @@ model: sonnet
 skills:
   - agent-context
   - verify-completeness
+mcpServers:
+  - github
+  - playwright
 ---
 
 # QA Reviewer Agent

@@ -60,10 +60,10 @@ You talk to Claude
 ## How to start a feature
 
 1. Open Claude Code in your project
-2. Invoke the Define agent:
+2. Run the `/feature` skill with your idea:
 
     ```text
-    Use the define agent — I want to build [your feature idea]
+    /feature I want to build [your feature idea]
     ```
 
 3. Have a conversation with Claude. It will ask clarifying questions about scope, constraints, acceptance criteria, etc.
@@ -71,6 +71,8 @@ You talk to Claude
 5. Claude runs the rest of the pipeline automatically and notifies you when the PR is ready.
 
 > **You only need to be present for the Define step.** Everything after your approval is autonomous.
+
+To resume an in-progress workflow, just run `/feature` with no arguments — it will scan for in-progress `context.yaml` files and ask whether to resume or start fresh.
 
 ---
 
@@ -125,6 +127,10 @@ Every agent reads `context.yaml` at the start of its gate. This file tracks wher
 
 **To resume after a disruption:**
 
+Run `/feature` with no arguments. It will scan for in-progress `context.yaml` files, list them with their current step and checkpoint, and ask whether to resume one or start a new feature. Resuming jumps directly to the correct step without re-running completed steps.
+
+If you need to resume manually without the orchestrator:
+
 1. Open `context.yaml` in the feature's `.docs/` folder
 2. Check `workflow.current_step` — this is the step to resume at
 3. Check `workflow.checkpoint` — this tells you where within that step things left off
@@ -144,7 +150,9 @@ Use the [step name] agent — feature folder is .docs/2026-05-11-my-feature
 
 ## Escalation
 
-If Claude gets stuck — same test failing after 3 attempts, same review issue after 3 fix cycles — it stops the pipeline and sends you a message explaining what's blocked and what was tried. It will not loop forever. You'll need to intervene and then re-invoke the relevant agent to continue.
+If Claude gets stuck — same test failing after 3 attempts, same review issue after 3 fix cycles — it writes `workflow.escalated: true` and a `workflow.escalation_reason` to `context.yaml`, then returns. The orchestrator reads this after the agent returns and halts the pipeline, displaying the reason to you. It will not loop forever.
+
+To resume after an escalation, run `/feature` — it will detect the escalation, show you the reason, clear the flag, and re-invoke the step for another attempt.
 
 ---
 
@@ -167,6 +175,8 @@ workflow:
   current_step: implement
   completed_steps: [define, research, plan]
   checkpoint: "Completed tasks 1-4 of 9. Next: Task 5 - Add usePayment hook."
+  escalated: false      # Set to true by an agent that cannot continue after 3 attempts
+  escalation_reason: "" # Human-readable description shown to you when the pipeline halts
 
 artifacts: []        # Research reference files (schemas, diagrams, etc.)
 output_artifacts: [] # QA screenshots and recordings
@@ -181,6 +191,7 @@ documentation_created: [] # New docs created by the Document agent
 
 | Skill | What it does |
 |-------|-------------|
+| `/feature` | **Entry point.** Orchestrates the full pipeline — starts new features, resumes in-progress ones, handles escalations |
 | `/spec` | Interactive spec writing — used by the Define agent |
 | `/research` | Codebase analysis — used by the Research agent |
 | `/plan` | Implementation plan writing — used by the Plan agent |
@@ -190,6 +201,7 @@ documentation_created: [] # New docs created by the Document agent
 | `/verify-completeness` | Checks spec requirements are implemented |
 | `/verify-correctness` | Checks logic, error handling, and test quality |
 | `/verify-coherence` | Checks design consistency and pattern conformance |
+| `/shadcn` | shadcn/ui component management — adding, updating, and composing UI components |
 
 ### The .docs/ folder
 
@@ -253,6 +265,7 @@ It explores the codebase from scratch, writes a `.ONBOARD.md` to the project roo
 │   ├── senior-reviewer.md # Brutal final code review (used by Validate)
 │   └── qa-reviewer.md     # Final QA and evidence capture (used by Validate)
 └── skills/
+    ├── feature/           # /feature — pipeline orchestrator entry point
     ├── spec/              # /spec — interactive spec writing
     ├── research/          # /research — codebase analysis and 2_research.md
     ├── plan/              # /plan — implementation plan and 3_plan.md
@@ -262,5 +275,20 @@ It explores the codebase from scratch, writes a `.ONBOARD.md` to the project roo
     ├── verify-completeness/ # checks spec requirements are present
     ├── verify-correctness/  # checks logic and test quality
     ├── verify-coherence/    # checks design and pattern consistency
+    ├── shadcn/            # /shadcn — shadcn/ui component management
     └── agent-context/     # documents context.yaml protocol and template
 ```
+
+---
+
+## MCP server configuration
+
+This template ships with a `.mcp.json` that configures three MCP servers used by the agents:
+
+| Server | Purpose |
+|--------|---------|
+| `shadcn` | shadcn/ui component registry — search, view, and install components |
+| `playwright` | Browser automation for the QA Reviewer (screenshots, e2e tests) |
+| `github` | GitHub API access for PR operations and code review |
+
+The `github` server requires a `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable. Set it in your shell environment or a `.env` file before running Claude Code. The token needs `repo` scope.
