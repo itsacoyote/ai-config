@@ -33,7 +33,7 @@ Work through these over the conversation. Follow what makes sense given what the
 
 Once you have enough to write a solid draft, tell the user and confirm the short name for the folder (e.g. `user-auth`, `csv-export`). Then:
 
-1. **Capture the base branch** — run `git rev-parse --abbrev-ref HEAD` and save it as `base_branch`. Warn and stop if it looks like another feature branch (starts with `feature/`) — the user should be on a stable base branch.
+1. **Verify on main** — run `git rev-parse --abbrev-ref HEAD` and save it as `base_branch`. If it is not `main` (or `master`), warn the user that they are not on the main branch and stop — do not proceed until they confirm they want to branch from here or check out main first.
 2. **Pull latest** — run `git pull origin <base_branch>` to ensure the branch is up to date before branching. If there are local uncommitted changes that would block the pull, warn the user and stop.
 3. **Create the feature branch** — run `git checkout -b feature/<short-name>`. If a branch with that name already exists, check it out and confirm with the user before proceeding.
 4. **Create the folder structure:**
