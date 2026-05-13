@@ -202,6 +202,7 @@ documentation_created: [] # New docs created by the Document agent
 | `/verify-correctness` | Checks logic, error handling, and test quality |
 | `/verify-coherence` | Checks design consistency and pattern conformance |
 | `/shadcn` | shadcn/ui component management — adding, updating, and composing UI components |
+| `/ui-design-brain` | Designs and builds production-grade UI using 60+ component patterns — used by the Research, Plan, and Implement agents when UI work is involved |
 
 ### The .docs/ folder
 
