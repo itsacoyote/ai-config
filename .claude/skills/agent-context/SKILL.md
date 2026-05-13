@@ -77,6 +77,21 @@ The `documentation_created` list is the registry of **new** documentation files 
   created_by: document
 ```
 
+## Escalation signaling
+
+When an agent cannot resolve an issue after 3 attempts (failed tests, linter errors, code review findings that won't clear), it signals the orchestrator by writing to `context.yaml` before returning:
+
+```yaml
+workflow:
+  escalated: true
+  escalation_reason: |
+    [Which reviewer or check is blocked]
+    [What was attempted in each of the 3 iterations]
+    [Assessment of root cause]
+```
+
+The agent then returns immediately — it does not notify the user directly. The workflow orchestrator reads `workflow.escalated` after each agent returns and halts the pipeline if it is `true`, surfacing `workflow.escalation_reason` to the user.
+
 ## Template
 
 See [template.yaml](template.yaml) for the full structure.
