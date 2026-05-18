@@ -41,7 +41,7 @@ Before writing any code:
 
 Work through tasks in the order defined in the plan. For each task:
 
-1. **Check recommended skills** — for each entry in `recommended_skills`, evaluate the `invoke_when` condition against the current task name and description. If it matches, invoke that skill now before writing any tests or code. A skill may match multiple tasks — invoke it each time the condition is met.
+1. **Check recommended skills** — for each entry in `recommended_skills`, use semantic judgment to evaluate the `invoke_when` condition against the current task: if the task's purpose or the code it touches reasonably fits the description, treat it as a match. When in doubt, invoke. A skill may match multiple tasks — invoke it each time the condition is met. If the skill returns findings that must be addressed before code is safe to write, resolve them first. If it returns a checklist or reference material, use it to inform the implementation but do not block on it.
 2. **Re-read the relevant files** — always read the current file state before editing, even if you read it during setup.
 3. **Write the tests** — write exactly the test cases named in the plan. Do not add tests not in the plan; do not skip tests that are. Run them and confirm they fail for the right reason.
 4. **Implement** — follow the plan's implementation steps in order. Each step names a specific function, component, route, or schema — build exactly that.
