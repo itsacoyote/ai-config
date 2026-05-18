@@ -5,7 +5,6 @@ model: opus
 skills:
   - agent-context
   - plan
-  - frontend-ui-engineering
   - ui-design-brain
 ---
 
