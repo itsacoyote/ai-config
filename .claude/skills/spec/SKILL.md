@@ -1,39 +1,29 @@
 ---
 name: spec
-description: Interactively define a new feature and write its spec document to .docs/. Use when the user wants to spec a feature, define requirements, brainstorm an idea, or start the Define step of the development workflow.
-argument-hint: "[feature idea]"
+description: Template and quality criteria for writing a 1_spec.md file. Use when ready to write the spec document after the discovery conversation is complete.
 allowed-tools: Write Read
-disable-model-invocation: true
 ---
 
 # Spec
 
-Help the user define a new feature through conversation, then write a spec document to `.docs/`.
+Write `1_spec.md` using the template in [template.md](template.md) into the feature folder.
 
-If a feature idea was passed as an argument, use `$ARGUMENTS` as the starting point. Otherwise, ask the user what they want to build.
+## Quality criteria
 
-## Your role
+Each section should meet this bar before the file is written:
 
-You are a product collaborator. Your job is to ask the right questions, surface assumptions, and help the user arrive at a well-defined spec before any implementation starts. Work conversationally — ask one or two things at a time, listen, and follow up naturally. Probe for things the user hasn't considered. Push back gently on vague scope or weak acceptance criteria.
+- **Summary** — One paragraph. A new reader with no context should understand what the feature is and why it exists.
+- **Problem Statement** — Concrete. Names who is affected and how. Not "users want X" — describe the actual pain.
+- **Goals** — Specific outcomes, not activities. "Users can do X" not "we will build Y".
+- **Non-Goals** — Explicit. If it's not listed here, it's assumed in scope.
+- **User Stories** — Cover the primary path and at least one edge case. Format: "As a [role], I want [action] so that [outcome]."
+- **Requirements** — Functional facts already decided. No vague language ("should", "maybe"). Each requirement is either true or false after implementation.
+- **Constraints** — Real blockers: technical limits, time, third-party dependencies. Not preferences.
+- **Acceptance Criteria** — Testable. Each criterion can be marked done by a reviewer without asking the author what they meant.
+- **Open Questions** — Only unresolved blockers. If the answer is known, fold it into the relevant section instead.
 
-## Areas to cover
+## What to avoid
 
-Work through these over the conversation. Follow what makes sense given what the user shares — don't march through them as a rigid checklist:
-
-- **Problem** — What is broken or missing today? Who experiences it?
-- **Goals** — What does success look like? What are the 1–3 things this must do well?
-- **Non-Goals** — What is explicitly out of scope for this version?
-- **User Stories** — Who uses this and how? Walk through the key scenarios.
-- **Requirements** — What must the feature do? Any functional details already decided?
-- **Constraints** — Technical, time, resource, or design constraints.
-- **Acceptance Criteria** — How will we know this is done and correct?
-- **Open Questions** — What still needs a decision before implementation?
-
-## Writing the doc
-
-Once you have enough to write a solid draft:
-
-1. **Write `1_spec.md`** using the template in [template.md](template.md). Write it into the feature folder passed as your argument — the branch, folder, and `context.yaml` were created before you were invoked.
-2. Tell the user the file path and invite revisions.
-
-Stay in the conversation after writing — iterate on the doc until the user is satisfied.
+- No TBDs, TODOs, or placeholders in the final doc.
+- No contradictions between sections.
+- Scope should fit a single implementation cycle — if it spans multiple independent subsystems, it needs decomposition first.
