@@ -79,11 +79,11 @@ The `documentation_created` list is the registry of **new** documentation files 
 
 ## Recommended skills registry
 
-The `recommended_skills` list is written by the Plan agent after `3_plan.md` is complete. It contains the skills the Plan agent determined are relevant for this specific feature's implementation, along with a one-line hint for when each skill should be invoked.
+The `recommended_skills` list is written by the Plan agent after `3_plan.md` is complete. It contains the skills the Plan agent determined are relevant for this specific feature's implementation, along with a brief hint for when each skill should be invoked.
 
 ```yaml
 - skill: security-review
-  invoke_when: "Before implementing the JWT validation logic in Task 3 and the role-check middleware in Task 5"
+  invoke_when: "After any task involving authentication, authorization, or input validation"
 ```
 
 **Lifecycle:** Written by Plan. Read by Implement during pre-implementation setup. Not updated by any later step — it reflects what the Plan agent decided, not runtime events.
