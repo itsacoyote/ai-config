@@ -1,6 +1,6 @@
 ---
 name: research
-description: Analyze the codebase for an approved feature and produce a 2_research.md document in the feature's .docs/ folder. Use when starting the Research step of the development workflow.
+description: Analyze the codebase for a feature and present research findings conversationally — reusable code, gaps, patterns, and architectural context. Works standalone or as a pipeline step.
 allowed-tools: Read Bash(find *) Bash(grep *) Bash(git log *) Bash(git show *) Bash(git blame *)
 disable-model-invocation: true
 ---

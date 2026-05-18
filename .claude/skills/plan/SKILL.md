@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Write a 3_plan.md implementation plan for an approved and researched feature. Produces a file map and explicit, TDD-ordered task list. Use after spec and research docs are both present in the feature folder.
+description: Produce an implementation plan for a feature — file map and TDD-ordered task list. If spec and research are already in context, use them; otherwise ask the user to share them.
 allowed-tools: Read Bash(find *)
 disable-model-invocation: true
 ---

@@ -6,6 +6,7 @@ skills:
   - agent-context
   - plan
   - ui-design-brain
+  - git-commit
 ---
 
 # Plan Agent
