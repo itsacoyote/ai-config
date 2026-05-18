@@ -5,14 +5,11 @@ model: opus
 skills:
   - agent-context
   - plan
+  - frontend-ui-engineering
   - ui-design-brain
 ---
 
 # Plan Agent
-
-You handle the **Plan** step of the development workflow. Your job is to produce an implementation plan precise enough that an engineer with zero codebase context and questionable design instincts can execute it correctly — because the plan makes all architecture and decomposition decisions for them.
-
-You do NOT write code. You do NOT modify any files outside the feature's folder in `.docs/`.
 
 ## Gate
 
@@ -22,26 +19,31 @@ Before doing anything else, read `context.yaml` from the feature folder passed a
 - Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
 - If `1_spec.md` is missing, stop. Recommend the Define agent.
 - If `2_research.md` is missing, stop. Recommend the Research agent.
-- If all three exist, read them fully before writing anything. Check the `artifacts` list in `context.yaml` and read any listed files — these are reference materials Research produced that inform the plan.
+- Read `1_spec.md` and `2_research.md` fully. Check the `artifacts` list in `context.yaml` and read any listed files — these are reference materials from Research.
 
-## Output
+## Workflow
 
-Run the `/plan` skill to write `3_plan.md`. The skill contains the full planning methodology and the output template.
+Read and follow `.claude/skills/plan/SKILL.md`.
 
-## Plan Self-Review
+## After the workflow completes
 
-After the plan is written, review it with the following questions. Fix any issues inline — no need to re-review after.
+1. Write the plan to `<feature.folder>/3_plan.md` using the template at `.claude/skills/plan/template.md` as the structure.
+2. Scan `.claude/skills/*/SKILL.md` for locally available skills. For each, read the `name` and `description` fields from the YAML frontmatter. Exclude always-on skills: `agent-context`, `ui-design-brain`, `find-patterns`, `git-commit`. For each remaining skill, decide whether it is relevant to this feature based on `1_spec.md` and `2_research.md`. Use these heuristics:
 
-**Vagueness check** — does any task say things like "handle edge cases", "similar to task N", "write tests for the above", or "implement X"? Replace every instance with explicit specifics.
+   | Skill | Relevant when |
+   |-------|---------------|
+   | `security-review` | Feature involves authentication, authorization, session handling, payments, file uploads, input validation, cryptography, or SQL queries |
+   | `web-search` | Feature integrates with an external API, third-party service, or library not already used in the codebase |
+   | `verify-correctness` | Feature contains non-trivial algorithms, data transformations, or business logic with many edge cases |
+   | `verify-coherence` | Feature spans multiple files or modules and consistency across interfaces is a risk |
 
-**File map check** — does every file in the task list appear in the file map? Does every file in the file map (new, modified, or deleted) appear in at least one task? Gaps in either direction mean something is unaccounted for.
+   For each selected skill, write a one-line `invoke_when` hint specific to this feature. Update `recommended_skills` in `context.yaml` (preserve all other fields):
 
-**TDD check** — does every implementation task have tests written before the implementation steps? Are the test cases specific (`it('returns 401 when token is expired')`) or vague (`it('should handle errors')`)? Rewrite vague ones. Tests should be written without the "should" statement, it's ambiguous, redundant and verbose. No test expectation "should" do something, it must be an assertive statement.
+   ```yaml
+   recommended_skills:
+     - skill: security-review
+       invoke_when: "Before implementing the JWT validation logic in Task 3"
+   ```
 
-**YAGNI check** — does anything in the plan go beyond the spec's acceptance criteria? Flag and cut it.
-
-**Boundary check** — does any file do more than one thing? Does any interface leak internal concerns? Tighten it.
-
-**Commit check** — is there a commit after every logical unit of work? No task should end without one.
-
-Once complete, commit the plan.
+   If no skills are relevant, write `recommended_skills: []`.
+3. Commit the plan with a conventional commit message.
