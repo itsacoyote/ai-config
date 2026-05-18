@@ -2,7 +2,7 @@
 name: plan
 description: Write a 3_plan.md implementation plan for an approved and researched feature. Produces a file map and explicit, TDD-ordered task list. Use after spec and research docs are both present in the feature folder.
 argument-hint: "[feature folder path]"
-allowed-tools: Read Write
+allowed-tools: Read Write Bash(find *)
 disable-model-invocation: true
 ---
 
@@ -68,7 +68,6 @@ For each remaining skill, decide whether it is relevant to this feature by compa
 |-------|---------------|
 | `security-review` | Feature involves authentication, authorization, session handling, payments, file uploads, input validation, cryptography, or SQL queries |
 | `web-search` | Feature integrates with an external API, third-party service, or library not already used in the codebase |
-| `analyze-code` | Feature touches a large or unfamiliar area of the codebase not covered in research |
 | `verify-correctness` | Feature contains non-trivial algorithms, data transformations, or business logic with many edge cases |
 | `verify-coherence` | Feature spans multiple files or modules and consistency across interfaces is a risk |
 
