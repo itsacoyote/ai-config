@@ -183,26 +183,42 @@ output_artifacts: [] # QA screenshots and recordings
 documentation_created: [] # New docs created by the Document agent
 ```
 
-### Agents vs skills
+### Pipeline skills
 
-**Agents** handle a full workflow step. They have a gate (checks prerequisites), do their work, and hand off to the next agent. You invoke an agent when you want a step to run.
+Skills for the `Define → Research → Plan → Implement → Validate` sequence. Run automatically via `/feature`, or invoke any step directly in a conversation.
 
-**Skills** are focused tools agents use to do specific work. You can also invoke skills directly with `/skill-name`. Skills used in this workflow:
+| Step | Skill | What it does |
+|------|-------|--------------|
+| Define | `/define` | Collaborative spec conversation — scope, goals, constraints, acceptance criteria |
+| Research | `/research` | Codebase analysis for a feature — reuse, gaps, patterns, constraints |
+| Plan | `/plan` | File map and TDD task list for a feature |
+| Implement | `/implement` | TDD implementation guidance — task loop, code review, coverage |
+| Validate | `/validate` | Senior code review then QA review coordination |
+
+### Reviewer agents
+
+Expert personas invoked during the pipeline. Can also be invoked directly for a focused review session.
+
+| Agent | What it does |
+|-------|--------------|
+| `code-reviewer` | Mid-implementation plan alignment and quality checks (invoked by Implement) |
+| `senior-reviewer` | Brutal final code review against spec, plan, and engineering standards |
+| `qa-reviewer` | Coverage audit, test quality, e2e gaps, and evidence capture |
+
+### Utility skills
+
+Used by the pipeline internally. Also available for direct invocation outside a full pipeline run.
 
 | Skill | What it does |
-|-------|-------------|
-| `/feature` | **Entry point.** Orchestrates the full pipeline — starts new features, resumes in-progress ones, handles escalations |
-| `/spec` | Interactive spec writing — used by the Define agent |
-| `/research` | Codebase analysis — used by the Research agent |
-| `/plan` | Implementation plan writing — used by the Plan agent |
-| `/analyze-code` | Surveys a specific file or module |
-| `/find-patterns` | Identifies codebase conventions |
-| `/web-search` | Looks up third-party docs with version verification |
-| `/verify-completeness` | Checks spec requirements are implemented |
-| `/verify-correctness` | Checks logic, error handling, and test quality |
-| `/verify-coherence` | Checks design consistency and pattern conformance |
-| `/shadcn` | shadcn/ui component management — adding, updating, and composing UI components |
-| `/ui-design-brain` | Designs and builds production-grade UI using 60+ component patterns — used by the Research, Plan, and Implement agents when UI work is involved |
+|-------|--------------|
+| `/analyze-code` | Survey a file or module — structure, dependencies, behavior |
+| `/find-patterns` | Identify conventions, naming patterns, and architectural decisions |
+| `/web-search` | Look up versioned third-party docs and external APIs |
+| `/verify-completeness` | Check spec requirements are present in the implementation |
+| `/verify-correctness` | Check logic, error handling, edge cases, and test quality |
+| `/verify-coherence` | Check design consistency and pattern conformance across files |
+| `/security-review` | Security audit — auth, input validation, injection vectors, secrets |
+| `/ui-design-brain` | UI design planning and component patterns |
 
 ### The .docs/ folder
 
@@ -255,28 +271,32 @@ It explores the codebase from scratch, writes a `.ONBOARD.md` to the project roo
 ```text
 .claude/
 ├── agents/
-│   ├── define.md          # Step 1: interactive spec and branch setup
-│   ├── research.md        # Step 2: codebase analysis
-│   ├── plan.md            # Step 3: implementation plan
-│   ├── implement.md       # Step 4: code the feature
-│   ├── validate.md        # Step 5: code and QA review
+│   ├── define.md          # Step 1: gate check, invokes define skill, writes 1_spec.md
+│   ├── research.md        # Step 2: gate check, invokes research skill, writes 2_research.md
+│   ├── plan.md            # Step 3: gate check, invokes plan skill, writes 3_plan.md
+│   ├── implement.md       # Step 4: gate check, invokes implement skill, manages checkpoint
+│   ├── validate.md        # Step 5: gate check, invokes validate skill, writes 4_validate.md
 │   ├── document.md        # Step 6: docs, PR description, notify
 │   ├── onboard.md         # Standalone: codebase exploration for new developers
 │   ├── code-reviewer.md   # Mid-implementation code review checkpoints
-│   ├── senior-reviewer.md # Brutal final code review (used by Validate)
-│   └── qa-reviewer.md     # Final QA and evidence capture (used by Validate)
+│   ├── senior-reviewer.md # Brutal final code review (used by validate skill)
+│   └── qa-reviewer.md     # Final QA and evidence capture (used by validate skill)
 └── skills/
     ├── feature/           # /feature — pipeline orchestrator entry point
-    ├── spec/              # /spec — interactive spec writing
-    ├── research/          # /research — codebase analysis and 2_research.md
-    ├── plan/              # /plan — implementation plan and 3_plan.md
+    ├── define/            # /define — collaborative spec conversation
+    ├── research/          # /research — codebase analysis methodology
+    ├── plan/              # /plan — implementation planning methodology
+    ├── implement/         # /implement — TDD implementation methodology
+    ├── validate/          # /validate — review coordination methodology
+    ├── spec/              # /spec — spec document formatting (used by define agent)
     ├── analyze-code/      # /analyze-code — file/module survey
     ├── find-patterns/     # /find-patterns — convention detection
     ├── web-search/        # /web-search — versioned third-party docs lookup
     ├── verify-completeness/ # checks spec requirements are present
     ├── verify-correctness/  # checks logic and test quality
     ├── verify-coherence/    # checks design and pattern consistency
-    ├── shadcn/            # /shadcn — shadcn/ui component management
+    ├── security-review/   # security audit
+    ├── ui-design-brain/   # UI design planning
     └── agent-context/     # documents context.yaml protocol and template
 ```
 
