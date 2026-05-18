@@ -77,6 +77,19 @@ The `documentation_created` list is the registry of **new** documentation files 
   created_by: document
 ```
 
+## Recommended skills registry
+
+The `recommended_skills` list is written by the Plan agent after `3_plan.md` is complete. It contains the skills the Plan agent determined are relevant for this specific feature's implementation, along with a brief hint for when each skill should be invoked.
+
+```yaml
+- skill: security-review
+  invoke_when: "Before any task involving authentication, authorization, or input validation"
+```
+
+**Lifecycle:** Written by Plan. Read by Implement during pre-implementation setup. Not updated by any later step — it reflects what the Plan agent decided, not runtime events.
+
+**Excluded:** Skills already always-on in the Implement agent's frontmatter (`agent-context`, `ui-design-brain`, `shadcn`, `find-patterns`, `git-commit`) are never added to this list — they are unconditionally available and do not need conditional recommendations.
+
 ## Escalation signaling
 
 When an agent cannot resolve an issue after 3 attempts (failed tests, linter errors, code review findings that won't clear), it signals the orchestrator by writing to `context.yaml` before returning:

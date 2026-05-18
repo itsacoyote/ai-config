@@ -25,6 +25,13 @@ artifacts: []
 #   description: ER diagram of the new tables added for this feature
 #   created_by: research
 
+recommended_skills: []
+# Skills the Plan agent determined are relevant for this feature's implementation.
+# Populated during the Plan step. Read by the Implement agent before the implementation loop. Not modified by later steps.
+# Example entry:
+# - skill: security-review
+#   invoke_when: "Before any task involving authentication, authorization, or input validation"
+
 output_artifacts: []
 # Each entry describes a screenshot or recording captured during QA as evidence
 # that the feature works as specified. Saved to output-artifacts/.
