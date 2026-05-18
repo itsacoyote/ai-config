@@ -49,9 +49,9 @@ To resume, invoke the agent that owns `current_step` with `feature.folder` as th
 The `artifacts` list in `context.yaml` is the shared registry of reference files created in the feature's `artifacts/` folder (primarily by Research). Any step that creates an artifact must append an entry before its handoff:
 
 ```yaml
-- path: artifacts/filename.ext   # relative to feature.folder
+- path: artifacts/filename.ext # relative to feature.folder
   description: what it is and why it was created
-  created_by: research           # which step produced it
+  created_by: research # which step produced it
 ```
 
 Downstream agents (Plan, Implement, Validate) should check this list at the start of their step so they know what reference material is available without having to scan the directory manually.
@@ -88,7 +88,7 @@ The `recommended_skills` list is written by the Plan agent after `3_plan.md` is 
 
 **Lifecycle:** Written by Plan. Read by Implement during pre-implementation setup. Not updated by any later step — it reflects what the Plan agent decided, not runtime events.
 
-**Excluded:** Skills already always-on in the Implement agent's frontmatter (`agent-context`, `ui-design-brain`, `shadcn`, `find-patterns`, `git-commit`) are never added to this list — they are unconditionally available and do not need conditional recommendations.
+**Excluded:** Skills already always-on in the Implement agent's frontmatter (`agent-context`, `ui-design-brain`, `find-patterns`, `git-commit`) are never added to this list — they are unconditionally available and do not need conditional recommendations.
 
 ## Escalation signaling
 
