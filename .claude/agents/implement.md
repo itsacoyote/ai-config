@@ -35,19 +35,21 @@ Before writing any code:
 1. **Pull the latest** — check whether the feature branch has a remote tracking branch with `git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null`. If it does, run `git pull`. If it does not (branch is local only), skip the pull — the branch was just created and there is nothing to pull. If there are merge conflicts, stop and resolve them with the user before proceeding.
 2. **Read every file in the plan's file map** — read the current state of each file listed under New Files and Modified Files. Do not work from memory or assumptions about what's there.
 3. **Run the existing test suite** — establish a baseline. Record which tests pass, which fail, and the current coverage percentage. If tests are already failing, stop and tell the user before proceeding.
+4. **Load recommended skills** — read `recommended_skills` from `context.yaml`. If the list is non-empty, internalize each entry's `skill` name and `invoke_when` condition. You will check these at the start of each task in the implementation loop.
 
 ## Implementation Loop
 
 Work through tasks in the order defined in the plan. For each task:
 
-1. **Re-read the relevant files** — always read the current file state before editing, even if you read it during setup.
-2. **Write the tests** — write exactly the test cases named in the plan. Do not add tests not in the plan; do not skip tests that are. Run them and confirm they fail for the right reason.
-3. **Implement** — follow the plan's implementation steps in order. Each step names a specific function, component, route, or schema — build exactly that.
-4. **Run the tests** — confirm all tests for this task pass. If any fail, fix them before moving to the next task. Do not batch and fix later.
-5. **Run the linter** — run the project's linter and formatter. Fix any violations before committing. Tests passing and linter failing will still break CI.
-6. **Check coverage** — coverage must not drop below 80% across unit, integration, and e2e tests. If it does, add the missing coverage before committing.
-7. **Commit** — use the commit message specified in the plan.
-8. **Update checkpoint** — write a brief `workflow.checkpoint` to `context.yaml` noting which task just completed and what comes next (e.g. `"Completed tasks 1-3 of 7. Next: Task 4 - Add useAuthToken hook."`). This ensures a disruption mid-implementation leaves a clear resume point.
+1. **Check recommended skills** — for each entry in `recommended_skills`, evaluate the `invoke_when` condition against the current task name and description. If it matches, invoke that skill now before writing any tests or code. A skill may match multiple tasks — invoke it each time the condition is met.
+2. **Re-read the relevant files** — always read the current file state before editing, even if you read it during setup.
+3. **Write the tests** — write exactly the test cases named in the plan. Do not add tests not in the plan; do not skip tests that are. Run them and confirm they fail for the right reason.
+4. **Implement** — follow the plan's implementation steps in order. Each step names a specific function, component, route, or schema — build exactly that.
+5. **Run the tests** — confirm all tests for this task pass. If any fail, fix them before moving to the next task. Do not batch and fix later.
+6. **Run the linter** — run the project's linter and formatter. Fix any violations before committing. Tests passing and linter failing will still break CI.
+7. **Check coverage** — coverage must not drop below 80% across unit, integration, and e2e tests. If it does, add the missing coverage before committing.
+8. **Commit** — use the commit message specified in the plan.
+9. **Update checkpoint** — write a brief `workflow.checkpoint` to `context.yaml` noting which task just completed and what comes next (e.g. `"Completed tasks 1-3 of 7. Next: Task 4 - Add useAuthToken hook."`). This ensures a disruption mid-implementation leaves a clear resume point.
 
 ## Code Review
 
