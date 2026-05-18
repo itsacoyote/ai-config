@@ -73,7 +73,7 @@ For each remaining skill, decide whether it is relevant to this feature by compa
 
 For each selected skill, write a one-line `invoke_when` hint that is specific to this feature (not generic — reference the actual tasks or code areas from the plan).
 
-Write the result to `context.yaml` in the feature folder:
+Update `recommended_skills` in the existing `context.yaml` in the feature folder (preserve all other fields):
 
 ```yaml
 recommended_skills:

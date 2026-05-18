@@ -83,7 +83,7 @@ The `recommended_skills` list is written by the Plan agent after `3_plan.md` is 
 
 ```yaml
 - skill: security-review
-  invoke_when: "After any task involving authentication, authorization, or input validation"
+  invoke_when: "Before any task involving authentication, authorization, or input validation"
 ```
 
 **Lifecycle:** Written by Plan. Read by Implement during pre-implementation setup. Not updated by any later step — it reflects what the Plan agent decided, not runtime events.

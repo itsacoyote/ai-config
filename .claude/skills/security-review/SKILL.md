@@ -13,6 +13,8 @@ vulnerabilities that pattern-matching tools miss.
 
 This skill is invoked by the `senior-reviewer` agent during the Validate step. It runs against the PR diff — all files changed in the current branch — and outputs a structured findings report that the senior reviewer includes in its verdict.
 
+It may also be recommended to the Implement agent by the Plan skill when a feature involves authentication, authorization, payments, file uploads, or other security-sensitive code. In that context it runs pre-task — before any implementation code is written — to surface security constraints and patterns the implementer should follow. With no diff yet, the output is advisory: a checklist of security concerns to keep in mind, not a verdict on code that doesn't exist.
+
 It can also be invoked directly when asked to:
 
 - Scan a specific file or directory for security vulnerabilities
