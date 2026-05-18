@@ -1,16 +1,15 @@
 ---
 name: research
 description: Analyze the codebase for an approved feature and produce a 2_research.md document in the feature's .docs/ folder. Use when starting the Research step of the development workflow.
-argument-hint: [feature folder path]
-allowed-tools: Read Bash(find *) Bash(grep *) Bash(git log *) Bash(git show *) Bash(git blame *) Write
+allowed-tools: Read Bash(find *) Bash(grep *) Bash(git log *) Bash(git show *) Bash(git blame *)
 disable-model-invocation: true
 ---
 
 # Research
 
-Analyze the codebase for the approved feature and write `2_research.md` to the feature's folder.
+Analyze the codebase for a feature and present research findings.
 
-If a feature folder path was passed as an argument, use `$ARGUMENTS`. Otherwise, ask the user which feature folder to work in.
+If a spec is already in context, use it. Otherwise, ask the user to share their feature spec or describe what they want to research.
 
 ## Research Methodology
 
@@ -49,11 +48,7 @@ Work systematically. Read the spec carefully to understand what the feature does
 
 ## Artifacts
 
-If you produce any artifacts during research (diagrams, data samples, reference files, exported schemas, etc.):
-
-1. Place them in the feature's `artifacts/` folder.
-2. Reference each one in `2_research.md`.
-3. Append an entry for each to the `artifacts` list in `context.yaml` with its path relative to the feature folder, a description, and `created_by: research`. This makes them discoverable by all downstream agents without scanning the directory.
+If you produce any reference files (diagrams, data samples, exported schemas, etc.) during research, note them clearly in your findings so the user or a downstream agent can save them if needed.
 
 ## Supporting skills
 
@@ -65,4 +60,4 @@ Use these skills as needed during research:
 
 ## Output
 
-Write `2_research.md` in the feature's folder using the template in [template.md](template.md).
+Present research findings in the conversation using the structure in [template.md](template.md) as a guide. Do not write files unless the user asks.
