@@ -27,7 +27,7 @@ artifacts: []
 
 recommended_skills: []
 # Skills the Plan agent determined are relevant for this feature's implementation.
-# Populated during the Plan step. Read by the Implement agent before the implementation loop.
+# Populated during the Plan step. Read by the Implement agent before the implementation loop. Not modified by later steps.
 # Example entry:
 # - skill: security-review
 #   invoke_when: "After any task involving authentication, authorization, or input validation"
