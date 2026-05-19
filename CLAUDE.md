@@ -52,7 +52,6 @@ Only the `/feature` orchestrator writes `current_step` and `completed_steps`. Ag
 
 This project ships `.mcp.json` with three servers:
 
-- `shadcn` — shadcn/ui component registry access
 - `playwright` — browser automation (used by the QA Reviewer)
 - `github` — GitHub API (requires `GITHUB_PERSONAL_ACCESS_TOKEN` in the environment)
 

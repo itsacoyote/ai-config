@@ -1,7 +1,7 @@
 ---
 name: analyze-code
 description: Survey a file, module, or area of the codebase to understand what it does and whether it's relevant to a feature under research. Use to quickly assess reusability and surface what the Planner needs to know.
-argument-hint: [file or directory path]
+argument-hint: "[file or directory path]"
 allowed-tools: Read Bash(find *) Bash(grep *)
 ---
 
