@@ -62,9 +62,9 @@ You talk to Claude
 1. Open Claude Code in your project
 2. Run the `/feature` skill with your idea:
 
-    ```text
-    /feature I want to build [your feature idea]
-    ```
+   ```text
+   /feature I want to build [your feature idea]
+   ```
 
 3. Have a conversation with Claude. It will ask clarifying questions about scope, constraints, acceptance criteria, etc.
 4. When the spec looks right, tell Claude you approve it.
@@ -175,10 +175,10 @@ workflow:
   current_step: implement
   completed_steps: [define, research, plan]
   checkpoint: "Completed tasks 1-4 of 9. Next: Task 5 - Add usePayment hook."
-  escalated: false      # Set to true by an agent that cannot continue after 3 attempts
+  escalated: false # Set to true by an agent that cannot continue after 3 attempts
   escalation_reason: "" # Human-readable description shown to you when the pipeline halts
 
-artifacts: []        # Research reference files (schemas, diagrams, etc.)
+artifacts: [] # Research reference files (schemas, diagrams, etc.)
 output_artifacts: [] # QA screenshots and recordings
 documentation_created: [] # New docs created by the Document agent
 ```
@@ -187,38 +187,38 @@ documentation_created: [] # New docs created by the Document agent
 
 Skills for the `Define → Research → Plan → Implement → Validate` sequence. Run automatically via `/feature`, or invoke any step directly in a conversation.
 
-| Step | Skill | What it does |
-|------|-------|--------------|
-| Define | `/define` | Collaborative spec conversation — scope, goals, constraints, acceptance criteria |
-| Research | `/research` | Codebase analysis for a feature — reuse, gaps, patterns, constraints |
-| Plan | `/plan` | File map and TDD task list for a feature |
-| Implement | `/implement` | TDD implementation guidance — task loop, code review, coverage |
-| Validate | `/validate` | Senior code review then QA review coordination |
+| Step      | Skill        | What it does                                                                     |
+| --------- | ------------ | -------------------------------------------------------------------------------- |
+| Define    | `/define`    | Collaborative spec conversation — scope, goals, constraints, acceptance criteria |
+| Research  | `/research`  | Codebase analysis for a feature — reuse, gaps, patterns, constraints             |
+| Plan      | `/plan`      | File map and TDD task list for a feature                                         |
+| Implement | `/implement` | TDD implementation guidance — task loop, code review, coverage                   |
+| Validate  | `/validate`  | Senior code review then QA review coordination                                   |
 
 ### Reviewer agents
 
 Expert personas invoked during the pipeline. Can also be invoked directly for a focused review session.
 
-| Agent | What it does |
-|-------|--------------|
-| `code-reviewer` | Mid-implementation plan alignment and quality checks (invoked by Implement) |
-| `senior-reviewer` | Brutal final code review against spec, plan, and engineering standards |
-| `qa-reviewer` | Coverage audit, test quality, e2e gaps, and evidence capture |
+| Agent             | What it does                                                                |
+| ----------------- | --------------------------------------------------------------------------- |
+| `code-reviewer`   | Mid-implementation plan alignment and quality checks (invoked by Implement) |
+| `senior-reviewer` | Brutal final code review against spec, plan, and engineering standards      |
+| `qa-reviewer`     | Coverage audit, test quality, e2e gaps, and evidence capture                |
 
 ### Utility skills
 
 Used by the pipeline internally. Also available for direct invocation outside a full pipeline run.
 
-| Skill | What it does |
-|-------|--------------|
-| `/analyze-code` | Survey a file or module — structure, dependencies, behavior |
-| `/find-patterns` | Identify conventions, naming patterns, and architectural decisions |
-| `/web-search` | Look up versioned third-party docs and external APIs |
-| `/verify-completeness` | Check spec requirements are present in the implementation |
-| `/verify-correctness` | Check logic, error handling, edge cases, and test quality |
-| `/verify-coherence` | Check design consistency and pattern conformance across files |
-| `/security-review` | Security audit — auth, input validation, injection vectors, secrets |
-| `/ui-design-brain` | UI design planning and component patterns |
+| Skill                  | What it does                                                        |
+| ---------------------- | ------------------------------------------------------------------- |
+| `/analyze-code`        | Survey a file or module — structure, dependencies, behavior         |
+| `/find-patterns`       | Identify conventions, naming patterns, and architectural decisions  |
+| `/web-search`          | Look up versioned third-party docs and external APIs                |
+| `/verify-completeness` | Check spec requirements are present in the implementation           |
+| `/verify-correctness`  | Check logic, error handling, edge cases, and test quality           |
+| `/verify-coherence`    | Check design consistency and pattern conformance across files       |
+| `/security-review`     | Security audit — auth, input validation, injection vectors, secrets |
+| `/ui-design-brain`     | UI design planning and component patterns                           |
 
 ### The .docs/ folder
 
@@ -306,10 +306,9 @@ It explores the codebase from scratch, writes a `.ONBOARD.md` to the project roo
 
 This template ships with a `.mcp.json` that configures three MCP servers used by the agents:
 
-| Server | Purpose |
-|--------|---------|
-| `shadcn` | shadcn/ui component registry — search, view, and install components |
+| Server       | Purpose                                                         |
+| ------------ | --------------------------------------------------------------- |
 | `playwright` | Browser automation for the QA Reviewer (screenshots, e2e tests) |
-| `github` | GitHub API access for PR operations and code review |
+| `github`     | GitHub API access for PR operations and code review             |
 
 The `github` server requires a `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable. Set it in your shell environment or a `.env` file before running Claude Code. The token needs `repo` scope.
