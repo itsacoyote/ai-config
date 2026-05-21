@@ -11,15 +11,17 @@ feature:
   base_branch: "main"
 
 workflow:
-  current_step: define
-  completed_steps: []
+  current_step: plan
+  completed_steps: [define, research]
   checkpoint: ""
   escalated: false
   escalation_reason: ""
 
 artifacts: []
 
-recommended_skills: []
+recommended_skills:
+  - skill: verify-coherence
+    invoke_when: "After Task 7, before Task 8, to confirm the seven modified files share identical commit-message strings, push-failure escalation YAML shape, and `git add` discipline."
 
 output_artifacts: []
 
