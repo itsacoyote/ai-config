@@ -82,25 +82,25 @@ To resume an in-progress workflow, just run `/feature` with no arguments — it 
 
 **Who drives it:** You and Claude together.
 
-Claude helps you think through a feature before anything gets built. It asks about the problem, goals, non-goals, user stories, constraints, and acceptance criteria. Once you're happy with the spec, you approve it. Claude then creates the feature branch, writes `1_spec.md`, and hands off to Research automatically.
+Claude helps you think through a feature before anything gets built. It asks about the problem, goals, non-goals, user stories, constraints, and acceptance criteria. Once you're happy with the spec, you approve it. Claude then creates the feature branch, writes `1_spec.md`, commits it with `context.yaml`, pushes, and opens a draft PR before handing off to Research automatically.
 
 ### Research
 
 **Who drives it:** Claude, autonomously.
 
-Claude reads the approved spec and studies the codebase — looking for existing code to reuse, patterns to follow, and gaps to fill. It uses sub-skills to analyze specific files, find conventions, and look up third-party docs if needed. Results go into `2_research.md`. Hands off to Plan automatically.
+Claude reads the approved spec and studies the codebase — looking for existing code to reuse, patterns to follow, and gaps to fill. It uses sub-skills to analyze specific files, find conventions, and look up third-party docs if needed. Results go into `2_research.md`. After writing the research, Claude commits and pushes before handing off to Plan automatically.
 
 ### Plan
 
 **Who drives it:** Claude, autonomously.
 
-Claude reads the spec and research, then writes a detailed implementation plan. It maps out every file that will be created, modified, or deleted — with responsibilities and interfaces — before writing a task list. Every task has explicit test cases (written before implementation), specific implementation steps, and a commit message. No vague instructions. Results go into `3_plan.md`. Hands off to Implement automatically.
+Claude reads the spec and research, then writes a detailed implementation plan. It maps out every file that will be created, modified, or deleted — with responsibilities and interfaces — before writing a task list. Every task has explicit test cases (written before implementation), specific implementation steps, and a commit message. No vague instructions. Results go into `3_plan.md`. After writing the plan, Claude commits and pushes before handing off to Implement automatically.
 
 ### Implement
 
 **Who drives it:** Claude, autonomously.
 
-Claude follows the plan task by task. For each task: write tests → confirm they fail → implement → confirm tests pass → run linter → check coverage → commit → update progress in `context.yaml`. A code reviewer agent checks the work every 300–500 lines and is always invoked for security-critical or complex code. Hands off to Validate automatically.
+Claude follows the plan task by task. For each task: write tests → confirm they fail → implement → confirm tests pass → run linter → check coverage → commit → update progress in `context.yaml`. A code reviewer agent checks the work every 300–500 lines and is always invoked for security-critical or complex code. After completing all tasks, Claude commits any remaining `context.yaml` changes and pushes before handing off to Validate automatically.
 
 ### Validate
 
@@ -111,19 +111,21 @@ Two reviewers run in sequence:
 - **Senior Reviewer** — a brutal, no-softening review against the spec, plan, and engineering standards. Checks completeness, correctness, coherence, security, YAGNI, and code smells. Runs up to 3 fix iterations before escalating.
 - **QA Reviewer** — checks real test coverage (no mock theater), maps e2e tests to every user story, and captures screenshots/recordings of the feature working. Runs up to 3 fix iterations before escalating.
 
-Results go into `4_validate.md`. Hands off to Document automatically.
+Results go into `4_validate.md`. After writing the report, Claude commits and pushes before handing off to Document automatically.
 
 ### Document
 
 **Who drives it:** Claude, autonomously.
 
-Claude reads the full diff and updates everything that changed: README, CLAUDE.md, feature docs, API docs, inline comments, changelog. It writes the PR description with visual evidence (screenshots embedded as images), marks the PR ready, and notifies you it's done.
+Claude reads the full diff and updates everything that changed: README, CLAUDE.md, feature docs, API docs, inline comments, changelog. It commits the documentation changes and pushes, then writes the PR description with visual evidence (screenshots embedded as images), marks the PR ready, and notifies you it's done.
 
 ---
 
 ## If the pipeline gets disrupted
 
 Every agent reads `context.yaml` at the start of its gate. This file tracks where the workflow is, what's been completed, and where within the current step things left off.
+
+Every agent commits and pushes its output before returning. This means completed steps are always on the remote — if your session ends between steps, no work is lost. When you resume, Claude can pull the branch and continue from exactly where it left off.
 
 **To resume after a disruption:**
 
@@ -150,9 +152,14 @@ Use the [step name] agent — feature folder is .docs/2026-05-11-my-feature
 
 ## Escalation
 
-If Claude gets stuck — same test failing after 3 attempts, same review issue after 3 fix cycles — it writes `workflow.escalated: true` and a `workflow.escalation_reason` to `context.yaml`, then returns. The orchestrator reads this after the agent returns and halts the pipeline, displaying the reason to you. It will not loop forever.
+Two things will halt the pipeline and escalate to you:
 
-To resume after an escalation, run `/feature` — it will detect the escalation, show you the reason, clear the flag, and re-invoke the step for another attempt.
+- **Stuck on a problem** — same test failing after 3 attempts, same review issue after 3 fix cycles.
+- **Push failure** — `git push` exits non-zero (non-fast-forward, auth failure, network error). The agent stops rather than letting more work pile up locally against a diverged remote.
+
+In both cases, Claude writes `workflow.escalated: true` and a `workflow.escalation_reason` to `context.yaml`, then returns. The orchestrator reads this after the agent returns and halts the pipeline, displaying the reason to you.
+
+To resume after an escalation, run `/feature` — it will detect the escalation, show you the reason, clear the flag, and re-invoke the step for another attempt. For push failures, resolve the remote state first (e.g. `git pull --rebase`) before resuming.
 
 ---
 

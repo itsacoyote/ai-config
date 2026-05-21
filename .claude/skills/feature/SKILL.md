@@ -61,6 +61,15 @@ Run this after every agent returns:
 3. Append the completed step name to `workflow.completed_steps` (initialize to `[]` if the key is absent).
 4. Set `workflow.current_step` to the next step name (see sequence table below).
 5. Write the updated `context.yaml`.
+6. Commit the updated `context.yaml`. Invoke `Skill(git-commit)` first, then:
+
+   ```bash
+   git add <feature_folder>/context.yaml
+   git commit -m "chore(context): advance workflow to <next step>"
+   ```
+
+   Substitute `<next step>` with the value just written to `workflow.current_step` (e.g. `research`, `plan`, `implement`, `validate`, `document`, `complete`). Do not use `git add -A` or `git add .`.
+7. Push the branch with `git push`. If the push fails (non-zero exit), halt the orchestrator: announce `"Pipeline halted — git push failed during post-return protocol: <stderr>"` to the user and stop. Do not invoke the next agent. The orchestrator has no agent above it to surface escalation through, so it halts itself rather than writing to `workflow.escalated`.
 
 ### Approval Gate (after Define)
 

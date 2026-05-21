@@ -46,4 +46,28 @@ Read and follow `.claude/skills/plan/SKILL.md`.
    ```
 
    If no skills are relevant, write `recommended_skills: []`.
-3. Commit the plan with a conventional commit message.
+3. Commit the plan and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage and commit only those two files:
+
+   ```bash
+   git add <feature.folder>/3_plan.md <feature.folder>/context.yaml
+   git commit -m "docs(plan): add implementation plan for <feature.name from context.yaml>"
+   ```
+
+   Do not use `git add -A` or `git add .` — stage explicit paths only.
+4. Push the branch with `git push`. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return.
+
+## Push-failure escalation
+
+If `git push` exits non-zero (non-fast-forward, network error, auth failure), write to `context.yaml` and return:
+
+```yaml
+# Merge into existing workflow block — do not replace other fields
+workflow:
+  escalated: true
+  escalation_reason: |
+    git push failed during the Plan step.
+    [Exit code and the exact stderr from the failed push]
+    [Assessment: e.g. branch out of date with remote, missing credentials, network error]
+```
+
+Do not notify the user directly. The workflow orchestrator will halt the pipeline and surface this.

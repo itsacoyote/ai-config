@@ -43,10 +43,25 @@ Every feature has a `context.yaml`. The `workflow` block tracks pipeline state:
 - `current_step` — the active step name
 - `completed_steps` — ordered list of steps that have finished
 - `checkpoint` — free-text resume point within a step (written by agents, cleared on handoff)
-- `escalated` — set to `true` by an agent that cannot resolve an issue after 3 attempts; the orchestrator halts when it sees this
+- `escalated` — set to `true` by an agent that cannot resolve an issue after 3 attempts, or when `git push` fails; the orchestrator halts when it sees this
 - `escalation_reason` — human-readable description of what caused the escalation
 
 Only the `/feature` orchestrator writes `current_step` and `completed_steps`. Agents write `checkpoint`, `escalated`, and `escalation_reason`. When resuming after an escalation, the orchestrator resets `escalated` to `false` and `escalation_reason` to `""` before re-invoking the step.
+
+## Per-step commit and push
+
+Every pipeline agent (Define, Research, Plan, Implement, Validate, Document) commits its own output files — the step document, any artifacts produced, and the updated `context.yaml` — then pushes the feature branch before returning to the orchestrator. The orchestrator also commits and pushes `context.yaml` after each step transition.
+
+This means:
+
+- The remote feature branch is always in sync with local after each step boundary
+- Every step has its own commit in the git history — you can revert any step independently
+- `context.yaml` and the files it references are always consistent at every commit
+- If a session ends between steps, resuming from another machine loses nothing
+
+All commit messages follow Conventional Commits. Every agent invokes `Skill(git-commit)` before each `git commit`. No agent uses `git add -A` or `git add .` — only explicit file paths.
+
+If `git push` fails (non-fast-forward, auth, network), the agent writes `workflow.escalated: true` and `workflow.escalation_reason` to `context.yaml` and returns. The orchestrator halts the pipeline and surfaces the failure. Resolve the remote state (e.g. `git pull --rebase`) and resume with `/feature`.
 
 ## MCP servers
 

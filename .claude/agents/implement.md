@@ -44,6 +44,43 @@ The `recommended_skills` loaded above are the skill recommendations for this fea
 
 Write a brief `workflow.checkpoint` to `context.yaml` noting which task just completed and what comes next. Example: `"Completed tasks 1-3 of 7. Next: Task 4 - Add useAuthToken hook."` Preserve all other fields.
 
+## After all tasks complete
+
+Once the implement skill signals all tasks are done, perform a final end-of-step sync before returning.
+
+1. Check whether `context.yaml` has uncommitted changes (the last `workflow.checkpoint` update may not yet be in a commit):
+
+   ```bash
+   git status --porcelain <feature.folder>/context.yaml
+   ```
+
+   If the output is non-empty, commit `context.yaml`. Invoke `Skill(git-commit)` first, then stage and commit only that file:
+
+   ```bash
+   git add <feature.folder>/context.yaml
+   git commit -m "chore(context): update workflow checkpoint"
+   ```
+
+   If the output is empty, skip the commit — there is nothing to add. Do not produce an empty commit.
+
+2. Push the branch with `git push`. Run this unconditionally (whether or not step 1 produced a commit) so any per-task commits from the implement skill are flushed to the remote. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return.
+
+## Push-failure escalation
+
+If `git push` exits non-zero (non-fast-forward, network error, auth failure), write to `context.yaml` and return:
+
+```yaml
+# Merge into existing workflow block — do not replace other fields
+workflow:
+  escalated: true
+  escalation_reason: |
+    git push failed during the Implement step.
+    [Exit code and the exact stderr from the failed push]
+    [Assessment: e.g. branch out of date with remote, missing credentials, network error]
+```
+
+Do not notify the user directly. The workflow orchestrator will halt the pipeline and surface this.
+
 ## If the skill cannot complete
 
 If the implement skill signals it cannot resolve an issue after 3 attempts, write the escalation to `context.yaml` and return:

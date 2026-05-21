@@ -27,6 +27,30 @@ Read and follow `.claude/skills/define/SKILL.md`.
 ## After the workflow completes
 
 1. Use the `spec` skill to format the agreed design into a `1_spec.md` document. Write it to `<feature.folder>/1_spec.md`.
-2. Push the branch to remote with `git push -u origin <feature.branch from context.yaml>`.
-3. Run `gh pr create --draft --base <feature.base_branch from context.yaml> --title "<feature name>"`. Use the `create-pr` skill for title format. Leave the PR body minimal — it will be written by the Document agent at the end of the workflow.
-4. Return. The feature orchestrator will present the spec for user approval.
+2. Commit the spec and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage and commit only those two files:
+
+   ```bash
+   git add <feature.folder>/1_spec.md <feature.folder>/context.yaml
+   git commit -m "docs(spec): add spec for <feature.name from context.yaml>"
+   ```
+
+   Do not use `git add -A` or `git add .` — stage explicit paths only.
+3. Push the branch to remote with `git push -u origin <feature.branch from context.yaml>`. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return — do not proceed to the PR step.
+4. Run `gh pr create --draft --base <feature.base_branch from context.yaml> --title "<feature name>"`. Use the `create-pr` skill for title format. Leave the PR body minimal — it will be written by the Document agent at the end of the workflow.
+5. Return. The feature orchestrator will present the spec for user approval.
+
+## Push-failure escalation
+
+If `git push` exits non-zero (non-fast-forward, network error, auth failure), write to `context.yaml` and return:
+
+```yaml
+# Merge into existing workflow block — do not replace other fields
+workflow:
+  escalated: true
+  escalation_reason: |
+    git push failed during the Define step.
+    [Exit code and the exact stderr from the failed push]
+    [Assessment: e.g. branch out of date with remote, missing credentials, network error]
+```
+
+Do not notify the user directly. The workflow orchestrator will halt the pipeline and surface this.

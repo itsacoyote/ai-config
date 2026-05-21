@@ -1,0 +1,28 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Agent Commit on Handoff"
+  short_name: "agent-commit-on-handoff"
+  folder: ".docs/2026-05-21-agent-commit-on-handoff"
+  date: "2026-05-21"
+  branch: "feature/agent-commit-on-handoff"
+  base_branch: "main"
+
+workflow:
+  current_step: complete
+  completed_steps: [define, research, plan, implement, validate, document]
+  checkpoint: ""
+  escalated: false
+  escalation_reason: ""
+
+artifacts: []
+
+recommended_skills:
+  - skill: verify-coherence
+    invoke_when: "After Task 7, before Task 8, to confirm the seven modified files share identical commit-message strings, push-failure escalation YAML shape, and `git add` discipline."
+
+output_artifacts: []
+
+documentation_created: []

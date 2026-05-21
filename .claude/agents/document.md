@@ -5,6 +5,7 @@ model: sonnet
 skills:
   - agent-context
   - create-pr
+  - git-commit
 mcpServers:
   - github
 ---
@@ -100,6 +101,34 @@ If the project maintains a changelog, add an entry for this feature. Include:
 - Migration steps required, if any
 
 If no changelog exists but the project is public-facing or has external consumers, create one. Register any newly created API documentation or changelog files in `documentation_created` in `context.yaml`.
+
+## Commit and push documentation
+
+Once the documentation audit is complete and every affected documentation surface has been updated, commit those changes and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage only the files you actually modified — do **not** use `git add -A` or `git add .`.
+
+```bash
+# Example — replace the paths with the exact files you touched
+git add README.md CLAUDE.md docs/<feature-doc>.md <feature.folder>/context.yaml
+git commit -m "docs: update documentation for <feature.name from context.yaml>"
+```
+
+Push the branch with `git push`. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return — do not proceed to the PR description update or draft removal.
+
+## Push-failure escalation
+
+If `git push` exits non-zero (non-fast-forward, network error, auth failure), write to `context.yaml` and return:
+
+```yaml
+# Merge into existing workflow block — do not replace other fields
+workflow:
+  escalated: true
+  escalation_reason: |
+    git push failed during the Document step.
+    [Exit code and the exact stderr from the failed push]
+    [Assessment: e.g. branch out of date with remote, missing credentials, network error]
+```
+
+Do not notify the user directly. The workflow orchestrator will halt the pipeline and surface this.
 
 ## PR Description
 

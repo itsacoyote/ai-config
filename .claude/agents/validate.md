@@ -4,6 +4,7 @@ description: Validate step agent. Runs the implemented feature through a brutal 
 model: sonnet
 skills:
   - agent-context
+  - git-commit
 mcpServers:
   - github
 ---
@@ -57,6 +58,33 @@ Write `4_validate.md` to `<feature.folder>` with this structure:
 
 List each entry from `output_artifacts` in `context.yaml` with its description and the user story it demonstrates.
 ```
+
+Then commit the validation report and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage and commit only those files:
+
+```bash
+git add <feature.folder>/4_validate.md <feature.folder>/context.yaml
+git commit -m "docs(validate): add validation report for <feature.name from context.yaml>"
+```
+
+Do not use `git add -A` or `git add .` — stage explicit paths only.
+
+Push the branch with `git push`. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return.
+
+## Push-failure escalation
+
+If `git push` exits non-zero (non-fast-forward, network error, auth failure), write to `context.yaml` and return:
+
+```yaml
+# Merge into existing workflow block — do not replace other fields
+workflow:
+  escalated: true
+  escalation_reason: |
+    git push failed during the Validate step.
+    [Exit code and the exact stderr from the failed push]
+    [Assessment: e.g. branch out of date with remote, missing credentials, network error]
+```
+
+Do not notify the user directly. The workflow orchestrator will halt the pipeline and surface this.
 
 ## If the skill cannot complete
 
