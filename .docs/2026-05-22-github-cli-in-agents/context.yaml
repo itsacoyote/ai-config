@@ -1,0 +1,26 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Audit agents and skills for git commands conflicting with github-tool-preference"
+  short_name: "github-cli-in-agents"
+  folder: ".docs/2026-05-22-github-cli-in-agents"
+  date: "2026-05-22"
+  branch: "feature/github-cli-in-agents"
+  base_branch: "main"
+
+workflow:
+  current_step: research
+  completed_steps: [define]
+  checkpoint: ""
+  escalated: false
+  escalation_reason: ""
+
+artifacts: []
+
+recommended_skills: []
+
+output_artifacts: []
+
+documentation_created: []
