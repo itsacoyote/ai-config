@@ -19,7 +19,9 @@ workflow:
 
 artifacts: []
 
-recommended_skills: []
+recommended_skills:
+  - skill: verify-coherence
+    invoke_when: "After Task 8 commits, before handing off to Validate — confirms all seven agent frontmatter blocks share the same shape and that `qa-reviewer.md` is the sole remaining `mcpServers` declarant."
 
 output_artifacts: []
 
