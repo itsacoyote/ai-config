@@ -63,6 +63,10 @@ All commit messages follow Conventional Commits. Every agent invokes `Skill(git-
 
 If `git push` fails (non-fast-forward, auth, network), the agent writes `workflow.escalated: true` and `workflow.escalation_reason` to `context.yaml` and returns. The orchestrator halts the pipeline and surfaces the failure. Resolve the remote state (e.g. `git pull --rebase`) and resume with `/feature`.
 
+## GitHub tool preference
+
+Always use the GitHub CLI (`gh`, `git`) for git and GitHub operations. Fall back to `mcp__github__*` tools only when the CLI is unavailable or cannot perform the required operation. Invoke `Skill(github-tool-preference)` before any `gh` or `mcp__github__*` call to confirm the right tool is chosen.
+
 ## MCP servers
 
 This project ships `.mcp.json` with three servers:
