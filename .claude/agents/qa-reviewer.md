@@ -19,6 +19,39 @@ You review against the spec's user stories and acceptance criteria. If a user-fa
 
 Pull the full diff and read `1_spec.md` alongside the test files.
 
+**E2E Execution (first action):**
+
+Run the project's e2e suite before any other QA work.
+
+Detect the e2e command using the following precedence — first match wins:
+
+1. `test:e2e` script in `package.json`
+2. `e2e` script in `package.json`
+3. `e2e` target in a `Makefile`
+4. The e2e command documented in the project README
+
+If none match, record "no e2e framework configured" as a gap and skip running — never invent a command.
+
+If a command is detected but the required runtime binary is unavailable (e.g. `package.json` has `test:e2e` but `npm`/`pnpm`/`yarn` is not on PATH, or `make` is missing), return the **Escalated** verdict. A missing runtime indicates broken local setup; do not silently approve.
+
+Run the detected command from the repository root as the first action, before any review activity.
+
+**E2E fix loop (when the suite fails):**
+
+When an e2e run fails, execute the following steps in order:
+
+1. **Diagnose:** Read the failure output. Identify the failing test(s) and root cause.
+2. **Decide:** Determine whether the bug is in production code or in the test itself. A test asserting incorrect behavior is also a defect.
+3. **Fix:** Apply the fix. Do not weaken assertions, do not skip tests, do not quarantine tests.
+4. **Commit:** Invoke `Skill(git-commit)` first, then `git add <explicit paths>` (never `-A` or `.`), then commit: use `fix(<scope>): <description>` when production code was wrong, or `test(<scope>): <description>` when the test was wrong.
+5. **Re-run:** Run the full e2e suite from a clean state.
+
+Repeat up to 3 attempts. If still red after attempt 3, return the **Escalated** verdict — do not approve.
+
+For each attempt, record: the failing tests, the diagnosed cause, the fix applied, and the re-run result. This log flows into the verdict, and from there into `4_validate.md`.
+
+In-loop commits accumulate locally. The terminal `git push` is owned by the Validate agent and flushes them all.
+
 **Coverage audit:**
 
 - Run or inspect the coverage report. Overall coverage must be above 80%.
