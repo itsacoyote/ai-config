@@ -52,6 +52,12 @@ Write `4_validate.md` to `<feature.folder>` with this structure:
 
 - [Finding] → [What was changed to resolve it]
 
+## E2E Test Run
+
+**Command:** <the detected e2e command, e.g. `pnpm test:e2e`>
+**Result:** <green / escalated / not configured>
+**Fix iterations:** N
+
 ## Evidence
 
 List each entry from `output_artifacts` in `context.yaml` with its description and the user story it demonstrates.
@@ -96,6 +102,25 @@ workflow:
     [Which reviewer is blocked and the specific unresolved findings]
     [What was attempted in each of the 3 iterations and why it didn't resolve]
     [Assessment of root cause]
+```
+
+Do not notify the user directly. The workflow orchestrator will halt the pipeline and surface this.
+
+## If QA cannot reach a green e2e suite
+
+If the QA Reviewer returns the **Escalated** verdict because its 3-attempt e2e fix loop could not reach a green suite, write the escalation to `context.yaml` and return:
+
+```yaml
+# Merge into existing workflow block — do not replace other fields
+workflow:
+  escalated: true
+  escalation_reason: |
+    QA could not reach a green e2e suite after 3 fix attempts.
+    Failing tests: [list each failing test by name]
+    Attempt 1: [diagnosis] — [fix applied, fix(<scope>) or test(<scope>)]
+    Attempt 2: [diagnosis] — [fix applied]
+    Attempt 3: [diagnosis] — [fix applied]
+    Suspected root cause: [QA's assessment]
 ```
 
 Do not notify the user directly. The workflow orchestrator will halt the pipeline and surface this.
