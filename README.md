@@ -311,11 +311,11 @@ It explores the codebase from scratch, writes a `.ONBOARD.md` to the project roo
 
 ## MCP server configuration
 
-This template ships with a `.mcp.json` that configures three MCP servers used by the agents:
+This template ships with a `.mcp.json` that configures two MCP servers:
 
 | Server       | Purpose                                                         |
 | ------------ | --------------------------------------------------------------- |
 | `playwright` | Browser automation for the QA Reviewer (screenshots, e2e tests) |
-| `github`     | GitHub API access for PR operations and code review             |
+| `github`     | GitHub API access for interactive use outside the pipeline      |
 
-The `github` server requires a `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable. Set it in your shell environment or a `.env` file before running Claude Code. The token needs `repo` scope.
+The `github` server is available for interactive Claude Code sessions. Pipeline agents do not use it — they perform all git and GitHub operations via the `gh` CLI and `git` Bash commands. The server requires a `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable with `repo` scope.

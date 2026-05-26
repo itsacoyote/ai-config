@@ -69,9 +69,9 @@ Always use the GitHub CLI (`gh`, `git`) for git and GitHub operations. Fall back
 
 ## MCP servers
 
-This project ships `.mcp.json` with three servers:
+This project ships `.mcp.json` with two servers:
 
 - `playwright` — browser automation (used by the QA Reviewer)
-- `github` — GitHub API (requires `GITHUB_PERSONAL_ACCESS_TOKEN` in the environment)
+- `github` — GitHub API for interactive use (requires `GITHUB_PERSONAL_ACCESS_TOKEN` in the environment); pipeline agents use `gh` CLI and `git` instead
 
-Agent frontmatter declares which servers each agent needs via `mcpServers:`. Do not add server declarations to agents that do not need them.
+Agent frontmatter declares which servers each agent needs via `mcpServers:`. Do not add server declarations to agents that do not need them. The only agent that currently declares `mcpServers` is `qa-reviewer.md` (playwright).
