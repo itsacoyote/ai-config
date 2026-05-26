@@ -11,9 +11,9 @@ feature:
   base_branch: "main"
 
 workflow:
-  current_step: implement
-  completed_steps: [define, research, plan]
-  checkpoint: "Completed all 5 tasks. All changes committed: qa-reviewer.md (e2e execution, fix loop, three-state verdict, evidence gate, non-negotiables), validate/SKILL.md (Round 2 e2e responsibility, green-suite gate, completion bullet), validate.md (E2E Test Run template section, e2e-failure escalation block), vocabulary consistency pass."
+  current_step: validate
+  completed_steps: [define, research, plan, implement]
+  checkpoint: ""
   escalated: false
   escalation_reason: ""
 
