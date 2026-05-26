@@ -78,6 +78,30 @@ In-loop commits accumulate locally. The terminal `git push` is owned by the Vali
 - E2E tests must drive the feature through its real interface (UI flow or API call), not through internal shortcuts.
 - Happy path alone is not enough. Key failure paths (invalid input, unauthorized access, missing data) must be covered.
 
+**Changed test review:**
+
+Pull the full diff and identify every test file that was modified by the feature branch (not just new tests — any change to an existing test file counts).
+
+For each changed test, evaluate whether the change is spec-justified:
+
+- Read the original assertion and the new assertion side by side.
+- Ask: does this change reflect a real behavioral requirement from `1_spec.md`, or does it exist to make a previously-failing test pass without fixing the underlying problem?
+- A test that was changed to accept a weaker postcondition, a broader input, a skipped assertion, or a different expected value — without a corresponding spec requirement explaining the difference — is a defect, not a fix.
+
+Flag any test change that:
+- Removes or weakens an assertion without a spec requirement justifying the looser contract
+- Changes an expected value to match incorrect behavior rather than correcting the behavior
+- Broadens the set of accepted inputs to hide a validation gap
+- Replaces a real check with a mock or stub to avoid an infrastructure dependency
+
+Each flagged change must be returned as a **Gap** with:
+- **File and test name** — exact location of the changed assertion
+- **What changed** — the before/after delta in plain language
+- **Why it's unacceptable** — which spec requirement the original behavior was serving
+- **Required resolution** — fix the production code to meet the original assertion, not the other way around
+
+This audit is separate from the e2e fix loop. It runs on all test changes visible in the diff, regardless of whether the suite currently passes.
+
 ## Verdict
 
 **Approved** — all three preconditions must hold:
