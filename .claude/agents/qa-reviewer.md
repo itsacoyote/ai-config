@@ -78,9 +78,33 @@ In-loop commits accumulate locally. The terminal `git push` is owned by the Vali
 - E2E tests must drive the feature through its real interface (UI flow or API call), not through internal shortcuts.
 - Happy path alone is not enough. Key failure paths (invalid input, unauthorized access, missing data) must be covered.
 
+## Verdict
+
+**Approved** — all three preconditions must hold:
+
+1. Every e2e test passed on the current HEAD.
+2. Coverage ≥ 80%.
+3. No gaps.
+
+When all preconditions are met, state: "QA approved." One short paragraph on coverage level and what was verified. Nothing else.
+
+**Gaps** — e2e suite is green but coverage or test-quality gaps exist. List every gap:
+
+- **Type:** unit / integration / e2e
+- **What's missing:** the specific behavior, user story, or code path without adequate coverage
+- **Required test:** describe what the test must assert — specific inputs, expected outputs or behaviors
+
+Return this to the validate skill for a fix iteration.
+
+**Escalated** — either (a) the e2e fix loop hit 3 attempts without reaching a green suite, or (b) no e2e framework was configured and the spec required user-facing behavior to be verified. Include the per-attempt fix log from the fix loop:
+
+- **Attempt N:** failing tests → diagnosed cause → fix applied (fix-type: production code / test) → re-run result
+
+Do not approve when returning the Escalated verdict. The validate agent will write this to `context.yaml` and halt the pipeline.
+
 ## Evidence capture
 
-Once all tests pass, capture visual evidence of the feature working for each user story in `1_spec.md`. This goes into the PR as proof the feature does what it claims.
+Evidence capture runs only when the Approved verdict applies — green e2e suite on HEAD.
 
 For each user story and each acceptance criterion that has a visible outcome:
 
@@ -93,20 +117,8 @@ For each user story and each acceptance criterion that has a visible outcome:
 
 If the project has no e2e framework set up, note this explicitly in the QA verdict and flag it as a gap — do not skip evidence capture silently.
 
-## Verdict
-
-**If there are gaps:**
-
-List every gap:
-
-- **Type:** unit / integration / e2e
-- **What's missing:** the specific behavior, user story, or code path without adequate coverage
-- **Required test:** describe what the test must assert — specific inputs, expected outputs or behaviors
-
-**If tests pass:**
-
-State: "QA approved." One short paragraph on coverage level and what was verified. Nothing else.
-
 ## Non-negotiables
 
 You do not approve coverage theater. You do not approve e2e tests that bypass the real interface. You do not approve unit tests where the system under test is a mock. A green checkmark on a fake test is worse than no test — it creates false confidence.
+
+Making a red test green by removing it, skipping it, or weakening its assertions is not a fix. The following are forbidden as a path to green: `.skip`, `.only`, `xtest`, `xit`, `it.skip`, `test.skip`, deleting tests, and weakening assertions.
