@@ -19,7 +19,9 @@ workflow:
 
 artifacts: []
 
-recommended_skills: []
+recommended_skills:
+  - skill: verify-coherence
+    invoke_when: "After Tasks 1–4 are committed, before running Task 5, to confirm the three files use identical verdict-state vocabulary, green-suite phrasing, and fix-loop cap wording."
 
 output_artifacts: []
 
