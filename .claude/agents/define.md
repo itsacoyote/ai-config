@@ -7,8 +7,6 @@ skills:
   - create-pr
   - git-commit
   - spec
-mcpServers:
-  - github
 ---
 
 # Define Agent

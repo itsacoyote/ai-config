@@ -6,8 +6,6 @@ skills:
   - agent-context
   - create-pr
   - git-commit
-mcpServers:
-  - github
 ---
 
 # Document Agent

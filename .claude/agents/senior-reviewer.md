@@ -8,8 +8,6 @@ skills:
   - verify-correctness
   - verify-coherence
   - security-review
-mcpServers:
-  - github
 ---
 
 # Senior Reviewer Agent

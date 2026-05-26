@@ -7,8 +7,6 @@ skills:
   - ui-design-brain
   - find-patterns
   - git-commit
-mcpServers:
-  - github
 ---
 
 # Implement Agent

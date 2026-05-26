@@ -6,8 +6,6 @@ skills:
   - agent-context
   - verify-correctness
   - verify-coherence
-mcpServers:
-  - github
 ---
 
 # Code Reviewer Agent
