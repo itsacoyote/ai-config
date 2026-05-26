@@ -6,7 +6,6 @@ skills:
   - agent-context
   - verify-completeness
 mcpServers:
-  - github
   - playwright
 ---
 

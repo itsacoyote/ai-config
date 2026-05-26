@@ -5,8 +5,6 @@ model: sonnet
 skills:
   - agent-context
   - git-commit
-mcpServers:
-  - github
 ---
 
 # Validate Agent
