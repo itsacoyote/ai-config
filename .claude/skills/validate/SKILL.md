@@ -52,7 +52,7 @@ If the QA Reviewer returns issues:
 
 If the same issues persist after 3 attempts, stop. Return a clear summary as above.
 
-**Green-suite gate:** If QA returns the **Approved** verdict but the final state was not "all e2e tests passed on HEAD," treat the verdict as a defect. Re-invoke QA with the gap called out (e2e not actually run, or not actually green). This re-invocation counts against the same 3-iteration Round 2 cap.
+**Green-suite gate:** If QA returns the **Approved** verdict but the final state was not "all e2e tests passed on HEAD," treat the verdict as a defect. Re-invoke QA with the gap called out (e2e not actually run, or not actually green). This re-invocation counts against the same 3-attempt Round 2 cap.
 
 ## Completion
 

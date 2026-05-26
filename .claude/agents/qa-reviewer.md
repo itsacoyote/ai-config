@@ -104,7 +104,7 @@ Do not approve when returning the Escalated verdict. The validate agent will wri
 
 ## Evidence capture
 
-Evidence capture runs only when the Approved verdict applies — green e2e suite on HEAD.
+Evidence capture runs only when the Approved verdict applies — all e2e tests passed on HEAD.
 
 For each user story and each acceptance criterion that has a visible outcome:
 
