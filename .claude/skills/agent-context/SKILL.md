@@ -44,6 +44,32 @@ To resume, invoke the agent that owns `current_step` with `feature.folder` as th
 - **Validate** — if `checkpoint` indicates senior review already passed, skip directly to the QA Reviewer.
 - **All other steps** — restart the step from the beginning. Research, Plan, and Document are idempotent — re-running overwrites with a fresh result.
 
+## Workflow summary
+
+`workflow.summary` is the outcome-focused prose summary written by each pipeline agent before returning. It is the primary handoff narrative for the next agent — the next agent reads it first and only opens prior step docs on demand when a specific detail is needed beyond what the summary carries. The goal is progressive context loading: avoid re-reading the full spec, research, and plan on every step boundary when the summary can orient the agent in a fraction of the tokens.
+
+The summary is prose (not bullets or YAML), targeting 300–500 tokens. It covers three required content areas in order: (1) what the step accomplished, (2) key findings and decisions made during the step (including why, when non-obvious), (3) relevant context for the next phase. It lives as a YAML block scalar (`|`) under `workflow.summary` for parser-clean multi-line content.
+
+```yaml
+workflow:
+  summary: |
+    Plan produced 3_plan.md — a nine-task linear plan covering every file in
+    scope. No new files, no deletions. Each task ends in a single conventional
+    commit.
+
+    Key findings and decisions: task ordering is template-first, then skill
+    docs, then agents in pipeline order. Shared wording for gate-read and
+    summary-write is codified once to prevent drift across the six agent edits.
+
+    Relevant context for Implement: invoke verify-coherence after completing
+    all six agent edits. Do not paraphrase the shared wording — copy verbatim
+    and substitute only the per-task tokens listed in the substitution tables.
+```
+
+**Lifecycle:** Written by every pipeline agent (Define through Document) immediately before returning. Overwritten per step — only the most recent completed step's summary lives in the field. Read by the next agent on start as its primary context source. Also useful to the orchestrator for orientation and to a developer resuming the workflow.
+
+An agent that escalates may write a partial-progress summary, but the orchestrator does not run `/compact` on an escalation halt, so the escalation conversation remains intact for the user to inspect.
+
 ## Artifacts registry
 
 The `artifacts` list in `context.yaml` is the shared registry of reference files created in the feature's `artifacts/` folder (primarily by Research). Any step that creates an artifact must append an entry before its handoff:
