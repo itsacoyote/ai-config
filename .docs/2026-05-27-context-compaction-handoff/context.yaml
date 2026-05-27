@@ -1,0 +1,98 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Context compaction handoff"
+  short_name: "context-compaction-handoff"
+  folder: ".docs/2026-05-27-context-compaction-handoff"
+  date: "2026-05-27"
+  branch: "feature/context-compaction-handoff"
+  base_branch: "main"
+
+workflow:
+  current_step: define  # Active step: define | research | plan | implement | validate | document | complete
+  completed_steps: []   # Ordered list of steps that have completed and handed off
+  checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
+  escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
+  escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
+  summary: |
+    Define produced 1_spec.md for the "Context compaction handoff" feature.
+
+    What the feature is: add a context-compaction step to the /feature pipeline.
+    Each of the six pipeline agents (Define, Research, Plan, Implement, Validate,
+    Document) overwrites workflow.summary in context.yaml with a fresh ~300-500
+    token outcome-focused prose summary immediately before returning. The
+    /feature orchestrator then invokes /compact in its post-return protocol so
+    its own context window stays slim across a long pipeline run. The summary
+    that the agent leaves behind is also consumed by the next agent at the start
+    of its step, giving it a concise narrative of outcomes, decisions, and
+    gotchas without forcing it to re-read the prior step doc just to extract
+    that signal.
+
+    Key decisions locked in during discovery:
+    - Summary shape is outcome-focused prose (Option A), not bullet lists or
+      structured YAML. It covers what was accomplished, key non-obvious
+      decisions, and gotchas/constraints for the next agent. It does NOT recap
+      the step doc — the next agent reads that fresh.
+    - Token budget is ~300-500 tokens. This is a guideline, not enforced by
+      tooling.
+    - Each agent writes its own summary before returning (no separate
+      summarize step or agent).
+    - Summary is overwritten each step, not appended. Only the most recent
+      step's summary lives in the field at any time.
+    - The summary write is folded into the existing per-step commit alongside
+      the step doc and context.yaml — no separate commit.
+    - /compact runs unconditionally after every step transition EXCEPT when
+      the orchestrator is halting due to an escalation. On escalation, the
+      conversation stays intact for the user to inspect.
+
+    Gotchas for Research:
+    - Six agent files, the /feature orchestrator skill, the agent-context
+      skill doc, and the context.yaml template all need touching. The in-flight
+      context.yaml for this feature already carries the summary field; the
+      template change makes future features inherit it.
+    - No existing fields (checkpoint, escalated, escalation_reason,
+      completed_steps, current_step) change semantics. The new field is purely
+      additive.
+    - Multi-line summary content must use YAML block scalar syntax (| or >)
+      so existing YAML tooling parses cleanly. The current file already
+      demonstrates this pattern.
+    - Acceptance criteria call for a dry-run validation that shows the summary
+      reflects the just-completed step, /compact ran, and the next agent
+      logged reading the summary. Plan should account for how that dry-run
+      gets exercised.
+
+artifacts: []
+# Each entry describes a file created in the feature's artifacts/ folder.
+# Populated by Research (and any later step that creates an artifact).
+# Example entry:
+# - path: artifacts/schema.png
+#   description: ER diagram of the new tables added for this feature
+#   created_by: research
+
+recommended_skills: []
+# Skills the Plan agent determined are relevant for this feature's implementation.
+# Populated during the Plan step. Read by the Implement agent before the implementation loop. Not modified by later steps.
+# Example entry:
+# - skill: security-review
+#   invoke_when: "Before any task involving authentication, authorization, or input validation"
+
+output_artifacts: []
+# Each entry describes a screenshot or recording captured during QA as evidence
+# that the feature works as specified. Saved to output-artifacts/.
+# Populated by the QA Reviewer during the Validate step.
+# Example entry:
+# - path: output-artifacts/login-happy-path.png
+#   description: Screenshot of successful login flow completing and redirecting to dashboard
+#   user_story: As a user, I want to log in so that I can access my account
+#   created_by: qa-review
+
+documentation_created: []
+# Each entry describes a new documentation file created by the Document agent.
+# Only NEW files are listed here — updates to existing files (README, CLAUDE.md) are not.
+# Useful for discovering what feature documentation was produced and where it lives.
+# Example entry:
+# - path: docs/features/user-auth.md
+#   description: Feature documentation for the user authentication flow
+#   created_by: document
