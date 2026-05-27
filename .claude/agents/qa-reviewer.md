@@ -130,16 +130,29 @@ Do not approve when returning the Escalated verdict. The validate agent will wri
 
 Evidence capture runs only when the Approved verdict applies — all e2e tests passed on HEAD.
 
-For each user story and each acceptance criterion that has a visible outcome:
+Evidence capture uses the Playwright MCP browser tools directly. This is a separate session from the automated test run — do not try to extract screenshots from the test framework's output. The purpose is a human-readable visual record of the feature working.
 
-1. Run the corresponding e2e test with screenshot or video capture enabled. Use whatever the project's e2e framework provides natively (Playwright `page.screenshot()` / video, Cypress `cy.screenshot()` / video, etc.).
-2. Save the output to `output-artifacts/` in the feature folder. Name files descriptively: `output-artifacts/login-happy-path.png`, `output-artifacts/checkout-invalid-card.mp4`.
-3. Capture at minimum:
-   - The happy path for every user story
-   - Key failure/error states that are part of the acceptance criteria
-4. After all captures, append an entry for each file to `output_artifacts` in `context.yaml` with its path (relative to the feature folder), a description of what it shows, and the user story it demonstrates.
+**Before you start:**
 
-If the project has no e2e framework set up, note this explicitly in the QA verdict and flag it as a gap — do not skip evidence capture silently.
+1. Determine how to reach the running application. Check `package.json` scripts (`dev`, `start`, `preview`) or the project README. If a dev server must be started, run it as a background process first.
+2. Identify the base URL (commonly `http://localhost:3000` or similar).
+
+**For each user story and each acceptance criterion with a visible outcome:**
+
+1. Use `mcp__playwright__browser_navigate` to open the relevant page or starting point.
+2. Use `mcp__playwright__browser_fill`, `mcp__playwright__browser_click`, and other interaction tools to drive through the flow.
+3. At the key moment that demonstrates the behavior (form submitted, result visible, error shown, etc.), call `mcp__playwright__browser_take_screenshot` and save the file to `<feature.folder>/output-artifacts/` with a descriptive name: e.g. `output-artifacts/login-happy-path.png`, `output-artifacts/checkout-invalid-card.png`.
+
+Capture at minimum:
+- The happy path for every user story — at the point where the outcome is visible
+- Key failure/error states that are part of the acceptance criteria
+
+4. After all captures, append an entry for each saved file to `output_artifacts` in `context.yaml`:
+   - `path`: file path relative to the feature folder (e.g. `output-artifacts/login-happy-path.png`)
+   - `description`: what the screenshot shows
+   - `user_story`: the user story or acceptance criterion it demonstrates
+
+**If the app cannot be started** (missing build, missing env vars, no start script), note this explicitly in the QA verdict, list what was missing, and flag it as a gap. Do not silently skip evidence capture.
 
 ## Non-negotiables
 
