@@ -109,7 +109,7 @@ Claude follows the plan task by task. For each task: write tests → confirm the
 Two reviewers run in sequence:
 
 - **Senior Reviewer** — a brutal, no-softening review against the spec, plan, and engineering standards. Checks completeness, correctness, coherence, security, YAGNI, and code smells. Runs up to 3 fix iterations before escalating.
-- **QA Reviewer** — checks real test coverage (no mock theater), maps e2e tests to every user story, and captures screenshots/recordings of the feature working. Runs up to 3 fix iterations before escalating.
+- **QA Reviewer** — runs the full e2e suite as its first action, fixes any failures in up to 3 attempts (commit-and-rerun loop), checks real test coverage (no mock theater), maps e2e tests to every user story, and captures screenshots/recordings after the suite is green. Escalates rather than approving if the suite cannot be brought to green.
 
 Results go into `4_validate.md`. After writing the report, Claude commits and pushes before handing off to Document automatically.
 
@@ -210,7 +210,7 @@ Expert personas invoked during the pipeline. Can also be invoked directly for a 
 | ----------------- | --------------------------------------------------------------------------- |
 | `code-reviewer`   | Mid-implementation plan alignment and quality checks (invoked by Implement) |
 | `senior-reviewer` | Brutal final code review against spec, plan, and engineering standards      |
-| `qa-reviewer`     | Coverage audit, test quality, e2e gaps, and evidence capture                |
+| `qa-reviewer`     | Runs e2e suite, fixes failures in up to 3 attempts, coverage audit, and evidence capture after green |
 
 ### Utility skills
 
