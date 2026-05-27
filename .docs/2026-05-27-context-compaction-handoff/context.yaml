@@ -17,53 +17,80 @@ workflow:
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
   summary: |
-    Define produced 1_spec.md for the "Context compaction handoff" feature and
-    then revised it in response to user feedback that reframed the purpose of
-    the summary field.
-
-    What was accomplished: a complete spec landed at
-    .docs/2026-05-27-context-compaction-handoff/1_spec.md describing a new
-    workflow.summary field in context.yaml, written by every pipeline agent
-    before returning, plus a /compact invocation in the /feature orchestrator's
-    post-return protocol. After the first draft, the user clarified that the
-    summary is not supplementary — it IS the primary handoff narrative. The
-    spec was rewritten so that progressive context loading is an explicit goal:
-    the next agent reads workflow.summary as its primary context source and
-    only opens prior step docs/artifacts on demand when it needs detail the
-    summary deliberately omits.
+    Research produced 2_research.md at
+    .docs/2026-05-27-context-compaction-handoff/2_research.md, scoping the
+    exact edits required to land the feature across nine files. No artifacts
+    saved — the in-flight context.yaml and 1_spec.md already serve as worked
+    examples for the summary shape and YAML block scalar pattern, so saving
+    duplicates would have added noise.
 
     Key findings and decisions:
-    - Summary shape: outcome-focused prose, ~300-500 tokens, overwritten each
-      step. Three required content areas, in order: (1) what was accomplished,
-      (2) key findings and decisions, (3) relevant context for the next phase
-      (gotchas, constraints, scope boundaries).
-    - Authorship: each agent writes its own summary inline before returning.
-      No separate summarize step or agent.
-    - Purpose: primary handoff narrative for progressive context loading. The
-      summary is self-contained — the next agent should be able to start work
-      from it alone in the common case. Prior step docs remain authoritative
-      but are read on demand only.
-    - Orchestrator change: /compact runs unconditionally after every step
-      transition (including after Define on spec approval) EXCEPT when halting
-      on an escalation. On escalation, the conversation stays intact.
-    - Lifecycle: summary write is folded into the existing per-step commit
-      alongside the step doc and context.yaml. No separate commit. No change
-      to commit/push cadence or escalation semantics.
+    - The change is mechanical and high-coverage: nine files, roughly ten
+      small inserts, no deletions, no renames, no semantics changes to any
+      existing field. Files in scope: six agents (define, research, plan,
+      implement, validate, document), .claude/skills/feature/SKILL.md, and
+      both files in .claude/skills/agent-context/ (SKILL.md and template.yaml).
+    - Two halves of the same goal. /compact reclaims orchestrator-side
+      context (the Approval Gate dialogue, post-return bookkeeping, anything
+      the orchestrator reads itself). workflow.summary reclaims downstream-
+      agent-side context (prior step docs are no longer the default first
+      read). Important nuance confirmed via Claude Code docs: subagents
+      already run in isolated context windows — /compact does not affect
+      agent context loads, only the orchestrator's.
+    - Define is the asymmetric agent. It gets only the "write summary"
+      change, not the gate-read change, because it is the first step and
+      has no prior summary to read. The Plan should call this out explicitly
+      so the Implementer does not accidentally add a gate-read line to it.
+    - /compact placement in the post-return protocol satisfies the "no
+      compact on escalation" requirement structurally — the existing step 2
+      halts on workflow.escalated: true before reaching the new /compact
+      step. An explicit prose note still belongs in the protocol so intent
+      is documented, not just structurally enforced.
+    - Implement and Document have non-standard "after" sections. Implement's
+      summary write belongs in "After all tasks complete" before the
+      git status --porcelain check. Document's belongs in
+      "Commit and push documentation" before the commit. Every other agent's
+      summary write goes immediately before the existing commit step so the
+      summary update folds into the per-step commit without changing
+      commit messages or commit count.
+    - /compact [instructions] is a built-in Claude Code slash command. Bare
+      invocation (no focus instructions) matches the spec.
 
-    Relevant context for Research:
-    - Files to study: six agent files in .claude/agents/ (define, research,
-      plan, implement, validate, document), the orchestrator skill at
-      .claude/skills/feature/SKILL.md, the agent-context skill at
-      .claude/skills/agent-context/ (both SKILL.md and template.yaml), and the
-      in-flight context.yaml for this feature (which already demonstrates the
-      field shape and YAML block scalar pattern).
-    - No existing fields change semantics — checkpoint, escalated,
-      escalation_reason, completed_steps, current_step all retain meaning.
-      The new field is purely additive.
-    - Acceptance criteria include a dry-run validation: summary reflects the
-      just-completed step, covers all three content areas, /compact ran, and
-      the next agent's gate logs reading the summary as its primary handoff.
-      Research should surface how that dry-run can be exercised in this repo.
+    Relevant context for Plan:
+    - Place the new workflow.summary field LAST in the workflow block,
+      after escalation_reason. Matches the in-flight context.yaml ordering,
+      keeps the change additive and low-diff-noise.
+    - Place the new "Workflow summary" section in agent-context/SKILL.md
+      between "Resuming a disrupted workflow" and "Artifacts registry".
+      Mirror the existing registry-section structure: purpose paragraph +
+      YAML example + lifecycle note.
+    - Suggested gate-read wording (one bullet to slot into the existing
+      gate list): "Read workflow.summary from context.yaml first — this is
+      your primary handoff narrative. Read prior step docs (1_spec.md, etc.)
+      only on demand when you need a specific detail the summary does not
+      carry." Match the surrounding gate's bullet vs numbered list style
+      per file.
+    - The template.yaml's new summary field should include an example block
+      scalar in a comment underneath the field — the other free-text fields
+      (checkpoint, escalation_reason) have no examples, but the summary's
+      three required content areas are hard to convey in a one-line comment.
+      Lift a trimmed example from the in-flight context.yaml.
+    - Three open questions surfaced for Plan to decide:
+      (1) Pre-existing spec **Status:** Draft vs research agent's gate check
+          for **Status:** Approved is out of scope for this feature. Flag for
+          visibility, do not fix here.
+      (2) Bare /compact matches the spec; no focus instructions needed
+          unless Planner explicitly wants to revisit.
+      (3) Whether each downstream agent should explicitly acknowledge "I
+          read the summary" in its opening message. Recommended yes — makes
+          the acceptance criterion auditable without extra tooling. Add as
+          a Plan task per agent if accepted.
+    - Dry run is exercisable in this repo by running /feature against a
+      small throwaway feature once the changes land. This feature's own
+      in-flight context.yaml is already a working Define-written example;
+      this Research summary will be the next example after commit.
+    - No tests to write. Validation is the dry-run acceptance criterion
+      plus an eyeball check on markdown rendering and YAML correctness.
 
 artifacts: []
 # Each entry describes a file created in the feature's artifacts/ folder.
