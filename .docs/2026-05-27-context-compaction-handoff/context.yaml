@@ -17,51 +17,53 @@ workflow:
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
   summary: |
-    Define produced 1_spec.md for the "Context compaction handoff" feature.
+    Define produced 1_spec.md for the "Context compaction handoff" feature and
+    then revised it in response to user feedback that reframed the purpose of
+    the summary field.
 
-    What the feature is: add a context-compaction step to the /feature pipeline.
-    Each of the six pipeline agents (Define, Research, Plan, Implement, Validate,
-    Document) overwrites workflow.summary in context.yaml with a fresh ~300-500
-    token outcome-focused prose summary immediately before returning. The
-    /feature orchestrator then invokes /compact in its post-return protocol so
-    its own context window stays slim across a long pipeline run. The summary
-    that the agent leaves behind is also consumed by the next agent at the start
-    of its step, giving it a concise narrative of outcomes, decisions, and
-    gotchas without forcing it to re-read the prior step doc just to extract
-    that signal.
+    What was accomplished: a complete spec landed at
+    .docs/2026-05-27-context-compaction-handoff/1_spec.md describing a new
+    workflow.summary field in context.yaml, written by every pipeline agent
+    before returning, plus a /compact invocation in the /feature orchestrator's
+    post-return protocol. After the first draft, the user clarified that the
+    summary is not supplementary — it IS the primary handoff narrative. The
+    spec was rewritten so that progressive context loading is an explicit goal:
+    the next agent reads workflow.summary as its primary context source and
+    only opens prior step docs/artifacts on demand when it needs detail the
+    summary deliberately omits.
 
-    Key decisions locked in during discovery:
-    - Summary shape is outcome-focused prose (Option A), not bullet lists or
-      structured YAML. It covers what was accomplished, key non-obvious
-      decisions, and gotchas/constraints for the next agent. It does NOT recap
-      the step doc — the next agent reads that fresh.
-    - Token budget is ~300-500 tokens. This is a guideline, not enforced by
-      tooling.
-    - Each agent writes its own summary before returning (no separate
-      summarize step or agent).
-    - Summary is overwritten each step, not appended. Only the most recent
-      step's summary lives in the field at any time.
-    - The summary write is folded into the existing per-step commit alongside
-      the step doc and context.yaml — no separate commit.
-    - /compact runs unconditionally after every step transition EXCEPT when
-      the orchestrator is halting due to an escalation. On escalation, the
-      conversation stays intact for the user to inspect.
+    Key findings and decisions:
+    - Summary shape: outcome-focused prose, ~300-500 tokens, overwritten each
+      step. Three required content areas, in order: (1) what was accomplished,
+      (2) key findings and decisions, (3) relevant context for the next phase
+      (gotchas, constraints, scope boundaries).
+    - Authorship: each agent writes its own summary inline before returning.
+      No separate summarize step or agent.
+    - Purpose: primary handoff narrative for progressive context loading. The
+      summary is self-contained — the next agent should be able to start work
+      from it alone in the common case. Prior step docs remain authoritative
+      but are read on demand only.
+    - Orchestrator change: /compact runs unconditionally after every step
+      transition (including after Define on spec approval) EXCEPT when halting
+      on an escalation. On escalation, the conversation stays intact.
+    - Lifecycle: summary write is folded into the existing per-step commit
+      alongside the step doc and context.yaml. No separate commit. No change
+      to commit/push cadence or escalation semantics.
 
-    Gotchas for Research:
-    - Six agent files, the /feature orchestrator skill, the agent-context
-      skill doc, and the context.yaml template all need touching. The in-flight
-      context.yaml for this feature already carries the summary field; the
-      template change makes future features inherit it.
-    - No existing fields (checkpoint, escalated, escalation_reason,
-      completed_steps, current_step) change semantics. The new field is purely
-      additive.
-    - Multi-line summary content must use YAML block scalar syntax (| or >)
-      so existing YAML tooling parses cleanly. The current file already
-      demonstrates this pattern.
-    - Acceptance criteria call for a dry-run validation that shows the summary
-      reflects the just-completed step, /compact ran, and the next agent
-      logged reading the summary. Plan should account for how that dry-run
-      gets exercised.
+    Relevant context for Research:
+    - Files to study: six agent files in .claude/agents/ (define, research,
+      plan, implement, validate, document), the orchestrator skill at
+      .claude/skills/feature/SKILL.md, the agent-context skill at
+      .claude/skills/agent-context/ (both SKILL.md and template.yaml), and the
+      in-flight context.yaml for this feature (which already demonstrates the
+      field shape and YAML block scalar pattern).
+    - No existing fields change semantics — checkpoint, escalated,
+      escalation_reason, completed_steps, current_step all retain meaning.
+      The new field is purely additive.
+    - Acceptance criteria include a dry-run validation: summary reflects the
+      just-completed step, covers all three content areas, /compact ran, and
+      the next agent's gate logs reading the summary as its primary handoff.
+      Research should surface how that dry-run can be exercised in this repo.
 
 artifacts: []
 # Each entry describes a file created in the feature's artifacts/ folder.
