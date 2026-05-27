@@ -1,0 +1,28 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Fix validate agent to run and fix e2e tests before PR is ready for review"
+  short_name: "validate-e2e-fix"
+  folder: ".docs/2026-05-26-validate-e2e-fix"
+  date: "2026-05-26"
+  branch: "feature/validate-e2e-fix"
+  base_branch: "main"
+
+workflow:
+  current_step: complete
+  completed_steps: [define, research, plan, implement, validate, document]
+  checkpoint: ""
+  escalated: false
+  escalation_reason: ""
+
+artifacts: []
+
+recommended_skills:
+  - skill: verify-coherence
+    invoke_when: "After Tasks 1–4 are committed, before running Task 5, to confirm the three files use identical verdict-state vocabulary, green-suite phrasing, and fix-loop cap wording."
+
+output_artifacts: []
+
+documentation_created: []
