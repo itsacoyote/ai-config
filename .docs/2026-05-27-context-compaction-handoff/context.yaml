@@ -17,41 +17,35 @@ workflow:
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
   summary: |
-    Validate completed a full dry-run coherence check of the nine-file
-    implementation. Senior code review passed in one iteration with no
-    findings. QA review was not applicable — the feature is
-    documentation-only with no application code, test suite, or runtime
-    behavior. E2E testing is not configured for this repository.
+    Document completed the documentation audit for the context-compaction-handoff
+    feature. This is a pure documentation/instruction change — nine Markdown and
+    YAML files modified, no application code. Two documentation surfaces required
+    updates: CLAUDE.md and README.md.
 
-    Key findings and decisions during validation:
-    All nine acceptance criteria passed without any fixes required.
-    template.yaml has workflow.summary as the last field in the workflow
-    block with a correct inline comment and a trimmed example block; the
-    file contains no tabs and is structurally valid YAML. agent-context/
-    SKILL.md has a new "## Workflow summary" section in the correct
-    position (between Resuming and Artifacts), documenting all six
-    required attributes: purpose, shape, three content areas, lifecycle,
-    who writes, who reads, and the escalation interaction. feature/SKILL.md
-    has step 8 appended to the post-return protocol with the explicit
-    no-compact-on-escalation note; steps 1–8 are gapless. All six agent
-    files carry both the gate-read bullet (research through document) and
-    the summary-write instruction (define through document). Define
-    correctly has only the write, not the read. Gate-read wording and
-    summary-write wording are consistent across all agents with correct
-    per-task substitutions (next agent, prior agent, prior step doc list).
-    No out-of-scope items were introduced. No existing fields were renamed,
-    removed, or changed in meaning.
+    Key decisions during the documentation audit: CLAUDE.md's "context.yaml
+    workflow fields" section was missing workflow.summary entirely — added it with
+    a description of its purpose as the primary handoff narrative, its prose shape,
+    and its overwrite-per-step lifecycle. The sentence listing which fields agents
+    write was updated to include summary. README.md's context.yaml example in the
+    "Key concepts" section showed the workflow block without the summary field —
+    updated to include a representative summary block scalar so developers see the
+    expected shape. The manual-resume instructions in "If the pipeline gets
+    disrupted" referenced checkpoint but not summary — added a step directing
+    developers to read workflow.summary first for orientation before checking
+    checkpoint. No other README sections required changes: the pipeline stage
+    descriptions don't cover internal orchestrator protocol, so the /compact
+    invocation is correctly omitted from those prose descriptions. No new
+    documentation files were created. agent-context/SKILL.md was already updated
+    as part of the feature implementation itself and needed no further changes here.
 
-    Relevant context for Document:
-    The diff is nine files of Markdown and YAML — no code surfaces changed.
-    Documentation audit should check CLAUDE.md (the workflow entry point
-    and context.yaml workflow fields sections may warrant an update
-    mentioning workflow.summary) and the agent-context/SKILL.md which is
-    already updated as part of the feature itself. The README is unlikely
-    to need changes. The PR description should highlight that this is a
-    pure documentation/instruction change enabling progressive context
-    loading across the pipeline, with no behavioral changes beyond the
-    /compact invocation in the orchestrator.
+    Relevant context for the human reviewer: the PR is PR #19
+    (feat(workflow): context compaction handoff). The diff is nine files of
+    Markdown and YAML. The highest-value things to review are (1) the wording
+    consistency of the gate-read bullet and summary-write instruction across all
+    six agent files in .claude/agents/, (2) the new "## Workflow summary" section
+    in .claude/skills/agent-context/SKILL.md, and (3) the template.yaml addition.
+    The CLAUDE.md and README.md documentation updates are light and can be
+    reviewed quickly.
 
 artifacts: []
 # Each entry describes a file created in the feature's artifacts/ folder.
