@@ -13,84 +13,47 @@ feature:
 workflow:
   current_step: implement  # Active step: define | research | plan | implement | validate | document | complete
   completed_steps: [define, research, plan]   # Ordered list of steps that have completed and handed off
-  checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
+  checkpoint: "All 9 tasks complete. verify-coherence passed. Ready for Validate step."        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
   summary: |
-    Plan produced 3_plan.md at
-    .docs/2026-05-27-context-compaction-handoff/3_plan.md — a nine-task
-    linear plan covering every file in scope: the agent-context template,
-    the agent-context SKILL.md, the feature orchestrator SKILL.md, and all
-    six pipeline agents (Define, Research, Plan, Implement, Validate,
-    Document). No new files, no deletions. Each task ends in a single
-    conventional commit; commit count for this feature is nine.
+    Implement completed all nine tasks across nine individual commits.
+    The diff spans nine files: template.yaml, agent-context/SKILL.md,
+    feature/SKILL.md, and the six pipeline agent files (define.md,
+    research.md, plan.md, implement.md, validate.md, document.md).
+    No new files were created; no files were deleted. verify-coherence
+    passed after all six agent edits landed.
 
-    Key findings and decisions:
-    - Task ordering is template-first (Task 1: template.yaml), then
-      orchestrator + skill doc (Tasks 2–3), then one agent per task
-      (Tasks 4–9). The agent tasks are functionally independent of each
-      other but ordered Define → Research → Plan → Implement → Validate →
-      Document to mirror pipeline order — easier to review, easier to
-      revert one step at a time.
-    - DRY for the cross-agent edits is enforced via a Shared wording
-      reference section at the bottom of 3_plan.md. The gate-read bullet
-      and the summary-write instruction are each codified once with
-      per-task substitution tables. The Implementer reuses the wording
-      verbatim across all six agents rather than re-deriving it per task.
-      This is the single biggest coherence risk and the single biggest
-      reason to invoke verify-coherence during Implement.
-    - Three open questions from Research are now closed: (1) the spec
-      Status flip is explicitly Out of Scope and called out as a
-      pre-existing inconsistency — Implement must not fix it; (2) /compact
-      stays bare (no focus instructions); (3) the "I read the summary"
-      acknowledgment is accepted — every downstream agent's gate-read
-      bullet now includes a one-sentence instruction that the agent
-      acknowledge the read in its opening message ("Per workflow.summary,
-      <prior agent> produced ..."), making spec Acceptance Criterion #8
-      auditable without extra tooling.
-    - Define is the only agent with a single edit (after-section write
-      only, no gate-read) — explicit Task 4 acceptance criterion flags
-      this so the Implementer does not accidentally add a gate-read line
-      to Define.
-    - Implement and Document are the structurally non-standard agents.
-      Implement's summary write is inserted as a new step BEFORE the
-      existing `git status --porcelain` check in "After all tasks
-      complete", which naturally folds the summary write into the
-      existing context.yaml commit path. Document's summary write is
-      inserted into "Commit and push documentation" BEFORE the existing
-      commit prose, not into a separate "After" section.
-    - The /compact addition is a single new step 8 in the orchestrator's
-      post-return protocol, after `git push`. The existing step 2 already
-      halts on workflow.escalated: true before reaching step 8, so the
-      "no compact on escalation" requirement is satisfied structurally;
-      an explicit prose note in step 8 documents the intent.
-    - Validation strategy is a dry-run-only model: the repo has no test
-      suite, so per-task tests are replaced with acceptance criteria
-      blocks under each task. End-to-end validation happens in the
-      Validate step via the dry-run acceptance criterion from the spec.
+    Key findings and decisions during implementation:
+    Task 1 (template.yaml) was already modified in the working tree
+    before the implementation loop started — it was committed as the
+    first task with no additional edits needed. The plan was followed
+    exactly with zero deviations. Each task's acceptance criteria block
+    was verified before committing: gate sections unchanged where
+    required, correct renumbering in after-workflow sections, summary
+    wording verbatim from the Shared wording reference in 3_plan.md,
+    and correct per-task substitutions (next agent, prior agent, prior
+    step doc list) in each. The non-standard structural placements
+    (Implement's summary write as new step 1 before the porcelain check;
+    Document's summary write inside "Commit and push documentation"
+    before the commit sentence) were applied as specified. Define
+    correctly received only a summary-write step and no gate-read bullet.
+    The /compact step in feature/SKILL.md is bare — no focus instructions.
+    The **Status:** Draft inconsistency in the spec was not touched.
 
-    Relevant context for Implement:
-    - Recommended skill: verify-coherence. Invoke it AFTER completing
-      Tasks 4–9 (the six agent edits) and BEFORE the Validate step.
-      The gate-read bullet wording and summary-write instruction wording
-      must match exactly across all six agents (with only the listed
-      substitutions varying). Verify-coherence is the right tool for
-      catching drift here.
-    - The Shared wording reference at the bottom of 3_plan.md is the
-      source of truth for the cross-agent wording. Do not paraphrase.
-      Copy verbatim and substitute the per-task tokens listed in the
-      substitution tables.
-    - No tests to write. Each task's acceptance block is a manual
-      check the Implementer should walk through after the edits land,
-      before the commit, to catch obvious misses (wrong renumbering,
-      missing renumbering, accidentally touched neighboring sections).
-    - Out of Scope items are explicitly listed at the bottom of
-      3_plan.md. Do not pull any of them in during Implement — in
-      particular, do NOT fix the **Status:** Draft → Approved
-      inconsistency, and do NOT add focus instructions to /compact.
-    - All nine commits use Conventional Commits format. Each task block
-      specifies its exact commit message. The commit cadence is
-      one-task-one-commit; do not squash and do not interleave.
+    Relevant context for Validate:
+    This feature is documentation-only — all nine modified files are
+    Markdown instruction documents and one YAML template. There is no
+    application code, no test suite, and no runtime behavior to exercise.
+    Validate should run a dry-run coherence check: (1) verify all nine
+    files match the plan's file map and acceptance criteria, (2) confirm
+    the gate-read bullet wording and summary-write instruction wording are
+    consistent across the six agent files with correct per-task tokens,
+    (3) confirm template.yaml parses as valid YAML, (4) confirm the
+    feature/SKILL.md post-return protocol steps are numbered 1–8 with
+    no gaps, (5) confirm no Out of Scope items were pulled in. The
+    spec's acceptance criteria (#1–#8) are the primary checklist.
+    No code review or QA browser session is needed.
 
 artifacts: []
 # Each entry describes a file created in the feature's artifacts/ folder.
