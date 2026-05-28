@@ -22,7 +22,8 @@ Before doing anything:
 2. Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
 3. Verify `1_spec.md`, `2_research.md`, and `3_plan.md` all exist. If any are missing, stop and identify which step is incomplete.
 4. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD` and read the full diff. This is your source of truth for what changed.
-5. Read `1_spec.md` to understand what the feature is and what it does.
+5. Read `workflow.summary` from `context.yaml` first — this is your primary handoff narrative. Read prior step docs (`1_spec.md`, `2_research.md`, `3_plan.md`, `4_validate.md`) only on demand when you need a specific detail the summary does not carry. Acknowledge in your opening message that you have read the summary (e.g. "Per `workflow.summary`, Validate produced …") so the read is auditable.
+6. Read `1_spec.md` to understand what the feature is and what it does.
 
 ## Documentation Audit
 
@@ -102,7 +103,9 @@ If no changelog exists but the project is public-facing or has external consumer
 
 ## Commit and push documentation
 
-Once the documentation audit is complete and every affected documentation surface has been updated, commit those changes and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage only the files you actually modified — do **not** use `git add -A` or `git add .`.
+Once the documentation audit is complete and every affected documentation surface has been updated, overwrite `workflow.summary` in `context.yaml` with a fresh ~300–500 token prose summary of this step's outcome. The summary is prose (not bullets), overwritten (not appended), and written to be self-contained — even though Document is the last pipeline step, the summary serves as the final orientation record for a developer who picks up the PR. Cover three areas in order: (1) what Document accomplished (what documentation surfaces were updated, what new docs were created), (2) key findings and decisions during the documentation audit (gaps closed, surfaces deliberately not updated and why), (3) relevant context for the human reviewer — what to look at first in the PR, anything in the diff or docs that warrants scrutiny.
+
+Then commit those changes and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage only the files you actually modified — do **not** use `git add -A` or `git add .`.
 
 ```bash
 # Example — replace the paths with the exact files you touched
