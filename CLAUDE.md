@@ -45,8 +45,9 @@ Every feature has a `context.yaml`. The `workflow` block tracks pipeline state:
 - `checkpoint` — free-text resume point within a step (written by agents, cleared on handoff)
 - `escalated` — set to `true` by an agent that cannot resolve an issue after 3 attempts, or when `git push` fails; the orchestrator halts when it sees this
 - `escalation_reason` — human-readable description of what caused the escalation
+- `summary` — outcome-focused prose summary of the most recently completed step, written by each pipeline agent before returning. This is the primary handoff narrative for the next agent — the next agent reads it first and only opens prior step docs on demand when a specific detail is needed beyond what the summary carries. Overwritten per step (not appended). Target length 300–500 tokens.
 
-Only the `/feature` orchestrator writes `current_step` and `completed_steps`. Agents write `checkpoint`, `escalated`, and `escalation_reason`. When resuming after an escalation, the orchestrator resets `escalated` to `false` and `escalation_reason` to `""` before re-invoking the step.
+Only the `/feature` orchestrator writes `current_step` and `completed_steps`. Agents write `checkpoint`, `escalated`, `escalation_reason`, and `summary`. When resuming after an escalation, the orchestrator resets `escalated` to `false` and `escalation_reason` to `""` before re-invoking the step.
 
 ## Per-step commit and push
 

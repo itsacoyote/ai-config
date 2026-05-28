@@ -135,8 +135,9 @@ If you need to resume manually without the orchestrator:
 
 1. Open `context.yaml` in the feature's `.docs/` folder
 2. Check `workflow.current_step` — this is the step to resume at
-3. Check `workflow.checkpoint` — this tells you where within that step things left off
-4. Invoke that agent directly, passing the feature folder path:
+3. Read `workflow.summary` — this is the prose handoff narrative written by the most recently completed step. It tells you what was accomplished, the key decisions, and what the current step needs to know. Read this first for orientation.
+4. Check `workflow.checkpoint` — this tells you where within the current step things left off
+5. Invoke that agent directly, passing the feature folder path:
 
 ```text
 Use the [step name] agent — feature folder is .docs/2026-05-11-my-feature
@@ -184,6 +185,10 @@ workflow:
   checkpoint: "Completed tasks 1-4 of 9. Next: Task 5 - Add usePayment hook."
   escalated: false # Set to true by an agent that cannot continue after 3 attempts
   escalation_reason: "" # Human-readable description shown to you when the pipeline halts
+  summary: |
+    Plan produced 3_plan.md — a 9-task linear plan covering every file in scope.
+    Key decisions: task ordering is template-first, then agents in pipeline order.
+    Relevant context for Implement: invoke verify-coherence after all six agent edits.
 
 artifacts: [] # Research reference files (schemas, diagrams, etc.)
 output_artifacts: [] # QA screenshots and recordings

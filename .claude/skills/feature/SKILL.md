@@ -70,6 +70,7 @@ Run this after every agent returns:
 
    Substitute `<next step>` with the value just written to `workflow.current_step` (e.g. `research`, `plan`, `implement`, `validate`, `document`, `complete`). Do not use `git add -A` or `git add .`.
 7. Push the branch with `git push`. If the push fails (non-zero exit), halt the orchestrator: announce `"Pipeline halted — git push failed during post-return protocol: <stderr>"` to the user and stop. Do not invoke the next agent. The orchestrator has no agent above it to surface escalation through, so it halts itself rather than writing to `workflow.escalated`.
+8. Invoke `/compact` to summarize the orchestrator's conversation history so far. Run this on every successful step transition. Do not run `/compact` when the post-return protocol halted at step 2 (`workflow.escalated: true`) — the escalation halt occurs before this step is reached, so the escalation conversation stays intact for the user to inspect. This is structurally enforced, but documented here so the contract is explicit.
 
 ### Approval Gate (after Define)
 

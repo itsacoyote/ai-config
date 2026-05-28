@@ -25,7 +25,8 @@ Read and follow `.claude/skills/define/SKILL.md`.
 ## After the workflow completes
 
 1. Use the `spec` skill to format the agreed design into a `1_spec.md` document. Write it to `<feature.folder>/1_spec.md`.
-2. Commit the spec and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage and commit only those two files:
+2. Overwrite `workflow.summary` in `context.yaml` with a fresh ~300–500 token prose summary of this step's outcome. The summary is prose (not bullets), overwritten (not appended), and written to be self-contained — the next agent (Research) should be able to start from `workflow.summary` alone in the common case. Cover three areas in order: (1) what Define accomplished, (2) key findings and decisions made during discovery (including why, when non-obvious), (3) relevant context for the Research phase — scope boundaries, anything from the conversation that shaped `1_spec.md` but isn't self-evident from the spec itself.
+3. Commit the spec and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage and commit only those two files:
 
    ```bash
    git add <feature.folder>/1_spec.md <feature.folder>/context.yaml
@@ -33,9 +34,9 @@ Read and follow `.claude/skills/define/SKILL.md`.
    ```
 
    Do not use `git add -A` or `git add .` — stage explicit paths only.
-3. Push the branch to remote with `git push -u origin <feature.branch from context.yaml>`. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return — do not proceed to the PR step.
-4. Run `gh pr create --draft --base <feature.base_branch from context.yaml> --title "<feature name>"`. Use the `create-pr` skill for title format. Leave the PR body minimal — it will be written by the Document agent at the end of the workflow.
-5. Return. The feature orchestrator will present the spec for user approval.
+4. Push the branch to remote with `git push -u origin <feature.branch from context.yaml>`. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return — do not proceed to the PR step.
+5. Run `gh pr create --draft --base <feature.base_branch from context.yaml> --title "<feature name>"`. Use the `create-pr` skill for title format. Leave the PR body minimal — it will be written by the Document agent at the end of the workflow.
+6. Return. The feature orchestrator will present the spec for user approval.
 
 ## Push-failure escalation
 

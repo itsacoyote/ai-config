@@ -17,7 +17,8 @@ Before doing anything:
 2. Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
 3. Check that `3_plan.md` exists. If not, stop — the Plan step wasn't completed.
 4. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD --stat` to confirm there are changes to review. If there's no diff, stop and tell the user there's nothing to validate.
-5. Read `1_spec.md`, `2_research.md`, and `3_plan.md` fully.
+5. Read `workflow.summary` from `context.yaml` first — this is your primary handoff narrative. Read prior step docs (`1_spec.md`, `2_research.md`, `3_plan.md`) only on demand when you need a specific detail the summary does not carry. Acknowledge in your opening message that you have read the summary (e.g. "Per `workflow.summary`, Implement produced …") so the read is auditable.
+6. Read `1_spec.md`, `2_research.md`, and `3_plan.md` fully.
 
 ## Workflow
 
@@ -62,6 +63,8 @@ Write `4_validate.md` to `<feature.folder>` with this structure:
 
 List each entry from `output_artifacts` in `context.yaml` with its description and the user story it demonstrates.
 ```
+
+Then overwrite `workflow.summary` in `context.yaml` with a fresh ~300–500 token prose summary of this step's outcome. The summary is prose (not bullets), overwritten (not appended), and written to be self-contained — the next agent (Document) should be able to start from `workflow.summary` alone in the common case. Cover three areas in order: (1) what Validate accomplished (senior-review and QA verdicts, iteration counts, e2e result), (2) key findings and decisions during review and any fixes applied, (3) relevant context for the Document phase — surfaces that changed in unexpected ways during fixes, any tradeoffs the user should know about in the PR description, anything that isn't self-evident from `4_validate.md`.
 
 Then commit the validation report and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage and commit only those files:
 

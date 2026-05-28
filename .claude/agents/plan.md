@@ -19,6 +19,7 @@ Before doing anything else, read `context.yaml` from the feature folder passed a
 - Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
 - If `1_spec.md` is missing, stop. Recommend the Define agent.
 - If `2_research.md` is missing, stop. Recommend the Research agent.
+- Read `workflow.summary` from `context.yaml` first — this is your primary handoff narrative. Read prior step docs (`1_spec.md`, `2_research.md`, etc.) only on demand when you need a specific detail the summary does not carry. Acknowledge in your opening message that you have read the summary (e.g. "Per `workflow.summary`, Research produced …") so the read is auditable.
 - Read `1_spec.md` and `2_research.md` fully. Check the `artifacts` list in `context.yaml` and read any listed files — these are reference materials from Research.
 
 ## Workflow
@@ -46,7 +47,8 @@ Read and follow `.claude/skills/plan/SKILL.md`.
    ```
 
    If no skills are relevant, write `recommended_skills: []`.
-3. Commit the plan and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage and commit only those two files:
+3. Overwrite `workflow.summary` in `context.yaml` with a fresh ~300–500 token prose summary of this step's outcome. The summary is prose (not bullets), overwritten (not appended), and written to be self-contained — the next agent (Implement) should be able to start from `workflow.summary` alone in the common case. Cover three areas in order: (1) what Plan accomplished, (2) key findings and decisions about decomposition and task ordering, (3) relevant context for the Implement phase — DRY/YAGNI calls, the file map's intent, any task ordering rationale that isn't self-evident from `3_plan.md` itself.
+4. Commit the plan and `context.yaml` together. Invoke `Skill(git-commit)` first, then stage and commit only those two files:
 
    ```bash
    git add <feature.folder>/3_plan.md <feature.folder>/context.yaml
@@ -54,7 +56,7 @@ Read and follow `.claude/skills/plan/SKILL.md`.
    ```
 
    Do not use `git add -A` or `git add .` — stage explicit paths only.
-4. Push the branch with `git push`. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return.
+5. Push the branch with `git push`. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return.
 
 ## Push-failure escalation
 

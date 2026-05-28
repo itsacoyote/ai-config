@@ -18,6 +18,7 @@ Before doing anything else, read `context.yaml` from the feature folder passed a
 - If `context.yaml` is missing or no argument was passed, stop. Tell the user to start from the Define agent.
 - Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
 - If `3_plan.md` is missing, stop. Recommend the Plan agent.
+- Read `workflow.summary` from `context.yaml` first — this is your primary handoff narrative. Read prior step docs (`1_spec.md`, `3_plan.md`, etc.) only on demand when you need a specific detail the summary does not carry. Acknowledge in your opening message that you have read the summary (e.g. "Per `workflow.summary`, Plan produced …") so the read is auditable.
 - Read `1_spec.md` and `3_plan.md` fully. Check the `artifacts` list in `context.yaml` and read any listed files.
 - Check `workflow.checkpoint` in `context.yaml`. If set, resume from that task. If not set, start from Task 1.
 - Load `recommended_skills` from `context.yaml`. Note each entry's `skill` name and `invoke_when` condition — pass these to the skill as context.
@@ -46,7 +47,9 @@ Write a brief `workflow.checkpoint` to `context.yaml` noting which task just com
 
 Once the implement skill signals all tasks are done, perform a final end-of-step sync before returning.
 
-1. Check whether `context.yaml` has uncommitted changes (the last `workflow.checkpoint` update may not yet be in a commit):
+1. Overwrite `workflow.summary` in `context.yaml` with a fresh ~300–500 token prose summary of this step's outcome. The summary is prose (not bullets), overwritten (not appended), and written to be self-contained — the next agent (Validate) should be able to start from `workflow.summary` alone in the common case. Cover three areas in order: (1) what Implement accomplished (what was built, how many tasks landed, the high-level shape of the diff), (2) key findings and decisions made during implementation (deviations from the plan, surprises, anything resolved on the fly), (3) relevant context for the Validate phase — known weak spots, areas of the diff that warrant extra senior-review attention, test-coverage gaps, anything that isn't self-evident from the diff itself.
+
+2. Check whether `context.yaml` has uncommitted changes (the last `workflow.checkpoint` update may not yet be in a commit):
 
    ```bash
    git status --porcelain <feature.folder>/context.yaml
@@ -61,7 +64,7 @@ Once the implement skill signals all tasks are done, perform a final end-of-step
 
    If the output is empty, skip the commit — there is nothing to add. Do not produce an empty commit.
 
-2. Push the branch with `git push`. Run this unconditionally (whether or not step 1 produced a commit) so any per-task commits from the implement skill are flushed to the remote. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return.
+3. Push the branch with `git push`. Run this unconditionally (whether or not step 2 produced a commit) so any per-task commits from the implement skill are flushed to the remote. If the push fails (non-zero exit), write the push-failure escalation below to `context.yaml` and return.
 
 ## Push-failure escalation
 

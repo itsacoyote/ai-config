@@ -16,6 +16,21 @@ workflow:
   checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
+  summary: ""           # Outcome-focused prose summary of the most recent completed step. Overwritten per step. Primary handoff narrative for the next agent — enables progressive context loading.
+  # Example of a well-formed summary (block scalar with three content areas):
+  # summary: |
+  #   Plan produced 3_plan.md — a nine-task linear plan covering every file in
+  #   scope. No new files, no deletions. Each task ends in a single conventional
+  #   commit; commit count for this feature is nine.
+  #
+  #   Key findings and decisions: task ordering is template-first, then skill
+  #   docs, then agents in pipeline order. Shared wording for gate-read and
+  #   summary-write is codified once at the bottom of 3_plan.md to prevent
+  #   drift across the six near-identical agent edits.
+  #
+  #   Relevant context for Implement: invoke verify-coherence after completing
+  #   all six agent edits. Do not paraphrase the shared wording — copy verbatim
+  #   and substitute only the per-task tokens listed in the substitution tables.
 
 artifacts: []
 # Each entry describes a file created in the feature's artifacts/ folder.
