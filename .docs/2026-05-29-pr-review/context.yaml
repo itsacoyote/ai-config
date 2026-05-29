@@ -13,57 +13,53 @@ feature:
 workflow:
   current_step: implement  # Active step: define | research | plan | implement | validate | document | complete
   completed_steps: [define, research, plan]   # Ordered list of steps that have completed and handed off
-  checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
+  checkpoint: "All 7 tasks complete. SKILL.md fully written and verified against AC1-AC13. Ready for Validate."
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
   summary: |
-    Plan produced 3_plan.md decomposing the pr-review skill into seven
-    tasks. The file map has exactly one entry — New Files →
-    .claude/skills/pr-review/SKILL.md — and no modified or deleted files.
-    Decomposition happens inside the file via H2 sections (one section per
-    spec requirement) rather than across files, because every directive the
-    model executes is part of the same prose contract and splitting would
-    violate YAGNI. There is no code to test, no template document to
-    render, no helper script — the deliverable is a single markdown file
-    with YAML frontmatter, verified by reading it against the spec's
-    acceptance criteria.
+    Implement produced .claude/skills/pr-review/SKILL.md in six commits
+    across seven tasks (Task 7 required no edits). The file is 137 lines:
+    YAML frontmatter + H1 + five H2 sections. The diff is entirely additive
+    — one new file, no modifications to any existing file.
 
-    Task ordering and rationale. Task 1 creates the directory and writes
-    frontmatter + the five H2 skeleton headers, so the file is born valid
-    and every subsequent task fills one section without breaking the others.
-    Tasks 2–6 each own one H2 section in the order the user-facing workflow
-    runs (What this does + input validation → Fetch → Delegate → Triage →
-    Non-Goals/refusal). This ordering matches the model's top-to-bottom
-    reading order so each commit can be reviewed by reading the new section
-    in isolation. Task 7 is a verification pass that maps each acceptance
-    criterion (AC1–AC13) to a specific sentence in the file and adds a
-    final tightening commit only if a gap is found.
+    What was built. Task 1 created the directory and wrote frontmatter with
+    name: pr-review, a one-sentence description, argument-hint: "[pr-number]",
+    disable-model-invocation: true, and allowed-tools: Read Bash(gh *)
+    Bash(git *) Agent. Tasks 2–6 filled each H2 section in workflow order.
+    "What this does" opens with the Skill(github-tool-preference) invocation
+    directive, states the /pr-review $ARGUMENTS invocation pattern, and
+    enumerates four input-validation branches with a positive-integer regex
+    guard. "Fetch the PR" specifies three ordered gh commands (repo view,
+    pr view with JSON fields, pr diff) and the four data points carried
+    forward. "Delegate to code-reviewer" reproduces the no-plan handoff text
+    verbatim and handles the approval-string / no-findings branch. "Triage
+    findings" includes the numbered overview, one-by-one default with
+    batch opt-in, a six-row accepted-inputs table (keep/drop/edit/show
+    checklist/go to N/anything else), batch mode, comment formatting with
+    em-dash and bold path:line prefix, a state section confirming
+    checklist-in-conversation-only, and the Post step with the
+    printf/--body-file posting command and per-finding error handling.
+    "What this skill will not do" names gh pr review --approve and
+    gh pr review --request-changes by exact flag, lists eight additional
+    hard constraints, and closes with the Refusal paragraph.
 
-    DRY/YAGNI calls the Implement agent must respect. (1) Do not create
-    template.md, scripts/, or references/ under pr-review/ — Research is
-    explicit the skill is a single SKILL.md file. (2) Do not add
-    unit-test, lint, or coverage tasks — there is nothing to test except
-    the markdown. (3) Do not modify the code-reviewer agent; the skill
-    consumes it unchanged and supplies the no-plan handoff text in prose.
-    (4) Do not invent severity tags on findings — the code-reviewer's
-    Location/Problem/Fix shape passes through verbatim.
+    Key decisions made during implementation. No deviations from the plan.
+    The no-plan handoff text was reproduced verbatim as specified. The
+    printf '%s' ... | gh pr comment --body-file - form was used exclusively
+    in the Post step. The accepted-inputs table is a literal markdown table
+    as the plan required. Task 7's AC walk confirmed all thirteen criteria
+    were satisfied without any tightening edits needed.
 
-    Load-bearing wording for Implement. The forbidden commands `gh pr
-    review --approve` and `gh pr review --request-changes` must be named
-    by exact flag in the Non-Goals section (Task 6) — this is the entire
-    enforcement layer. The no-plan handoff text in Task 4 is quoted
-    verbatim from Research and must be reproduced word-for-word in the
-    SKILL.md so the code-reviewer agent does not error on the missing
-    feature folder. The Post step (Task 5) must specify `printf '%s' "..."
-    | gh pr comment <n> --body-file -` (not `--body "<text>"`) to avoid
-    shell-escaping bugs on findings containing backticks, dollar signs, or
-    newlines. The triage accepted-inputs table in Task 5 is a literal
-    markdown table — the model needs a deterministic decision surface, not
-    prose interpretation. Frontmatter sets disable-model-invocation: true
-    so the skill never auto-fires. recommended_skills is empty: the
-    feature has no auth, no external APIs new to the repo, no algorithms,
-    and no multi-file consistency concerns, so none of the four optional
-    review skills are warranted.
+    Context for Validate. The single file to review is
+    .claude/skills/pr-review/SKILL.md. The Validate agent should check: (1)
+    frontmatter parses as valid YAML with the five expected keys; (2) the
+    five H2 sections appear in the specified order with no placeholders;
+    (3) both forbidden commands are named by exact flag in the Non-Goals
+    section; (4) the post command uses --body-file not --body; (5) the
+    affirmative list is exactly yes/post/ship it; (6) no gh pr review
+    appears anywhere as an instruction to run. The file contains no code,
+    no tests, and no external dependencies — correctness is entirely
+    textual and structural.
 
 artifacts: []
 
