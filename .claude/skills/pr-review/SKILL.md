@@ -23,6 +23,14 @@ This skill is invoked as `/pr-review $ARGUMENTS`. It fetches PR `$ARGUMENTS` fro
 
 ## Fetch the PR
 
+Confirm the current directory is inside a GitHub repo, fetch PR metadata, and fetch the diff — all via `gh`.
+
+1. Run `gh repo view --json nameWithOwner -q .nameWithOwner`. If it exits non-zero, print the stderr and stop.
+2. Run `gh pr view $ARGUMENTS --json number,title,body,author,state,baseRefName,headRefName,isDraft,url,files`. If it exits non-zero, print the stderr and stop. If the `state` field is not `OPEN`, print "PR #$ARGUMENTS is `<state>`. Only OPEN PRs can be reviewed." and stop without invoking the agent.
+3. Run `gh pr diff $ARGUMENTS`. If it exits non-zero, print the stderr and stop.
+
+Carry forward to the Delegate step: PR title, PR body, changed-file list (the `files` array from step 2), and the unified diff text from step 3.
+
 ## Delegate to code-reviewer
 
 ## Triage findings
