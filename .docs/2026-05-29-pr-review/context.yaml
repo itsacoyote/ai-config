@@ -1,0 +1,55 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "PR Review Skill"
+  short_name: "pr-review"
+  folder: ".docs/2026-05-29-pr-review"
+  date: "2026-05-29"
+  branch: "feature/pr-review"
+  base_branch: "main"
+
+workflow:
+  current_step: complete  # Active step: define | research | plan | implement | validate | document | complete
+  completed_steps: [define, research, plan, implement, validate, document]   # Ordered list of steps that have completed and handed off
+  checkpoint: ""
+  escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
+  escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
+  summary: |
+    Document updated README.md in two places: (1) a new "PR review skill"
+    section was added after the Utility skills table, describing /pr-review,
+    its human-only-verdict policy, and usage syntax; (2) the File reference
+    tree was extended with the pr-review/ entry. CLAUDE.md required no
+    changes — the skill introduces no new internal conventions, patterns, or
+    architectural decisions that affect how Claude reasons about the
+    codebase. No new documentation files were created; SKILL.md is
+    self-documenting by convention and serves as the authoritative feature
+    doc for this skill.
+
+    Audit findings: the diff is purely additive — one new file
+    (.claude/skills/pr-review/SKILL.md, 136 lines) with no modifications
+    to any existing file. No API endpoints, environment variables, build
+    steps, test commands, or configuration changed. The only documentation
+    gap was the README's skills tables and file reference, which have been
+    closed. No changelog was created — this project has no changelog
+    convention and no external consumers.
+
+    For the human reviewer: the PR description covers the three key design
+    decisions Validate flagged — the human-only-verdict policy encoded in
+    the Non-Goals and Refusal sections, the explicit post-now affirmative
+    gate (only `yes`, `post`, or `ship it` trigger posting), and the
+    session-integrity guarantee (checklist lives only in the conversation,
+    nothing posted on abandon or ambiguous response). Start your review at
+    .claude/skills/pr-review/SKILL.md — that is the entire changeset.
+    Pay particular attention to the "What this skill will not do" and
+    "Refusal" sections, which are the enforcement surface for the
+    human-only-verdict policy.
+
+artifacts: []
+
+recommended_skills: []
+
+output_artifacts: []
+
+documentation_created: []
