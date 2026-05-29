@@ -47,4 +47,73 @@ If the agent's response is the approval string (e.g. "Approved — continue impl
 
 ## Triage findings
 
+When the code-reviewer returns findings, present them to the user and walk through each one before anything is posted to GitHub.
+
+### Overview
+
+Before per-finding triage, print a numbered list of all findings with a one-line summary each. Example:
+
+```
+1. src/foo.ts:42 — useAuthToken does not handle expired tokens.
+2. src/bar.ts:17 — Missing null check on response.data.
+```
+
+### Triage mode
+
+Default to one-by-one. At the very first triage prompt, if the user replies `batch` or `review all`, switch to batch mode (described below). Otherwise stay one-by-one for the entire session.
+
+### One-by-one mode
+
+For each finding, print the finding number, location, problem, and fix in full. Then ask the user for input.
+
+Accepted inputs:
+
+| Input | Effect |
+|-------|--------|
+| `keep` | Mark finding as kept. Advance to next finding. |
+| `drop` | Mark finding as dropped. Advance to next finding. |
+| `edit` | Print the current finding in a fenced block. Ask "Paste the revised version." Store the user's reply verbatim as the new finding body. Re-prompt keep/drop on the revised text. Do not interpret or paraphrase the revised text. |
+| `show checklist` | Print the current state: kept findings (with numbers), dropped findings (with numbers), remaining findings (with numbers). Do not advance. |
+| `go to N` / `back to N` | Re-open finding N for re-decision. The previous decision on N is cleared. After N is re-decided, resume from where you left off. |
+| anything else | Re-prompt the current finding without advancing. Do not interpret as `keep` or `drop`. |
+
+### Batch mode
+
+Print all findings numbered with full text. Ask the user to reply with one line per finding in the form `<n> keep`, `<n> drop`, or `<n> edit`, separated by commas or newlines. Apply the keep/drop decisions in one pass. For each `edit`, drop back into per-finding one-by-one mode just for those findings. Then resume to the Post step.
+
+### Comment formatting
+
+Every kept finding is posted with the location as a bold prefix. If the agent gave a file and line number, the body is:
+
+```
+**<path>:<line>** — <finding text>
+```
+
+If the agent gave a file and a function name instead of a line number, the body is:
+
+```
+**<path>** (`<function>`) — <finding text>
+```
+
+The separator is the em-dash `—` (U+2014, not a hyphen-minus). The finding text is the agent's wording, or the user's revised wording if the finding was edited.
+
+### State
+
+The running checklist exists only in this conversation. Never persist it to disk. Never write to `.docs/` for this skill. If the user closes the session before the Post step, the checklist is lost and nothing is posted.
+
+### Post step
+
+After every finding has been triaged (kept, dropped, or edited-then-decided):
+
+1. Summarize the final checklist: list kept findings by number and location prefix, and list dropped findings by number.
+2. Ask verbatim: "Post these N comments to PR #$ARGUMENTS now? (yes/no)"
+3. Accept only `yes`, `post`, or `ship it` as affirmatives. Anything else — including silence, "looks good", "let me think", "later", emoji, or any ambiguous response — is a no. Reply "Nothing was posted." and stop.
+4. On affirmative: for each kept finding in order, invoke `Skill(github-tool-preference)`, then run:
+   ```
+   printf '%s' "<finding-body>" | gh pr comment $ARGUMENTS --body-file -
+   ```
+   One invocation per kept finding. Do not use `--body "<text>"` — shell escaping breaks on findings containing backticks, dollar signs, or newlines.
+5. Capture the comment URL from stdout on success, or the stderr on failure. Do not retry silently. If any call exits non-zero, print the `gh` stderr and ask: "Finding N failed to post. Continue posting the rest, retry, or stop?"
+6. After all posts, print a per-finding result list: each kept finding's number, location prefix, and either the resulting comment URL or the error from `gh`.
+
 ## What this skill will not do
