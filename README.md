@@ -232,6 +232,16 @@ Used by the pipeline internally. Also available for direct invocation outside a 
 | `/security-review`     | Security audit — auth, input validation, injection vectors, secrets |
 | `/ui-design-brain`     | UI design planning and component patterns                           |
 
+### PR review skill
+
+Invoke directly — not part of the `/feature` pipeline.
+
+| Skill        | What it does                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------ |
+| `/pr-review` | AI-assisted review of a GitHub PR — fetches diff, delegates to `code-reviewer`, walks you through each finding (keep/drop/edit), and posts only the findings you approve after an explicit "post now" confirmation. Never submits an Approve or Request Changes review — those verdicts are human-only. |
+
+Usage: `/pr-review <pr-number>` (e.g. `/pr-review 1250`). Invoke without an argument to be prompted for a PR number.
+
 ### The .docs/ folder
 
 Each feature gets its own folder inside `.docs/`:
@@ -309,6 +319,7 @@ It explores the codebase from scratch, writes a `.ONBOARD.md` to the project roo
     ├── verify-coherence/    # checks design and pattern consistency
     ├── security-review/   # security audit
     ├── ui-design-brain/   # UI design planning
+    ├── pr-review/         # /pr-review — interactive AI-assisted PR review
     └── agent-context/     # documents context.yaml protocol and template
 ```
 

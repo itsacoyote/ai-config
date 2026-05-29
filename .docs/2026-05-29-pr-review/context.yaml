@@ -17,34 +17,34 @@ workflow:
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
   summary: |
-    Validate approved .claude/skills/pr-review/SKILL.md on the first pass
-    with zero findings. Senior-review verdict: Approved, 1 iteration. QA
-    verdict: Approved, 13/13 acceptance criteria satisfied, 1 iteration.
-    E2E is not applicable — the deliverable is a prose instruction document
-    with no executable code or external dependencies.
+    Document updated README.md in two places: (1) a new "PR review skill"
+    section was added after the Utility skills table, describing /pr-review,
+    its human-only-verdict policy, and usage syntax; (2) the File reference
+    tree was extended with the pr-review/ entry. CLAUDE.md required no
+    changes — the skill introduces no new internal conventions, patterns, or
+    architectural decisions that affect how Claude reasons about the
+    codebase. No new documentation files were created; SKILL.md is
+    self-documenting by convention and serves as the authoritative feature
+    doc for this skill.
 
-    All six structural checks specified in the Implement handoff passed
-    without requiring any edits: (1) frontmatter has the five expected YAML
-    keys (name, description, argument-hint, disable-model-invocation,
-    allowed-tools); (2) the five H2 sections appear in the correct order
-    with no placeholders; (3) gh pr review --approve and
-    gh pr review --request-changes are both named by exact flag in the
-    Non-Goals section; (4) the post command uses --body-file exclusively;
-    (5) the affirmative list is exactly `yes`, `post`, `ship it`; (6)
-    `gh pr review` appears only as named prohibitions, never as an
-    instruction to run. No fixes were applied — the file was complete and
-    correct as delivered by Implement.
+    Audit findings: the diff is purely additive — one new file
+    (.claude/skills/pr-review/SKILL.md, 136 lines) with no modifications
+    to any existing file. No API endpoints, environment variables, build
+    steps, test commands, or configuration changed. The only documentation
+    gap was the README's skills tables and file reference, which have been
+    closed. No changelog was created — this project has no changelog
+    convention and no external consumers.
 
-    Context for Document. The single deliverable is
-    .claude/skills/pr-review/SKILL.md (136 lines). The feature is purely
-    additive — one new file, no modifications to any existing file. There
-    are no tradeoffs or unexpected surface changes to call out. The PR
-    description should emphasize: the human-only-verdict policy baked into
-    the Non-Goals and Refusal sections; the explicit post-now affirmative
-    gate before any gh pr comment executes; and the session-integrity
-    guarantee (checklist is conversation-only, nothing posted on abandon).
-    The Document agent can derive all detail from 4_validate.md and the
-    SKILL.md itself.
+    For the human reviewer: the PR description covers the three key design
+    decisions Validate flagged — the human-only-verdict policy encoded in
+    the Non-Goals and Refusal sections, the explicit post-now affirmative
+    gate (only `yes`, `post`, or `ship it` trigger posting), and the
+    session-integrity guarantee (checklist lives only in the conversation,
+    nothing posted on abandon or ambiguous response). Start your review at
+    .claude/skills/pr-review/SKILL.md — that is the entire changeset.
+    Pay particular attention to the "What this skill will not do" and
+    "Refusal" sections, which are the enforcement surface for the
+    human-only-verdict policy.
 
 artifacts: []
 
