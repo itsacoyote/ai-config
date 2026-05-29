@@ -1,0 +1,61 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "PR Review Skill"
+  short_name: "pr-review"
+  folder: ".docs/2026-05-29-pr-review"
+  date: "2026-05-29"
+  branch: "feature/pr-review"
+  base_branch: "main"
+
+workflow:
+  current_step: define  # Active step: define | research | plan | implement | validate | document | complete
+  completed_steps: []   # Ordered list of steps that have completed and handed off
+  checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
+  escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
+  escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
+  summary: |
+    Define produced 1_spec.md for a new pr-review skill. The skill is invoked as
+    /pr-review <pr-number> directly by the user (not part of the /feature
+    pipeline). It fetches a GitHub PR via the gh CLI, delegates code review to
+    the existing code-reviewer agent, then walks the user through each finding
+    interactively with keep/drop/edit choices tracked in a running checklist.
+    Only on an explicit "post now" affirmation does the skill post kept findings
+    as ordinary top-level PR comments (one gh pr comment call per finding). The
+    skill is hard-coded to never submit an Approve or Request-Changes review,
+    even if asked — those verdicts are reserved for a human. It also never
+    auto-posts: silence, ambiguity, abandonment, or session cancellation all
+    result in zero comments hitting GitHub.
+
+    Key decisions made during Define: (1) reuse the existing code-reviewer
+    agent unchanged, since it already returns the right finding shape (location,
+    problem, fix) — plan-alignment checks are simply N/A for external PRs and
+    the agent is told to skip them. (2) Use gh CLI exclusively per the
+    github-tool-preference skill; mcp__github__* is fallback only. (3) Findings
+    post as top-level PR comments (gh pr comment), not inline review threads
+    anchored to diff lines — inline threads are explicitly out of scope and can
+    be reconsidered later. (4) The skill is intentionally not wired into the
+    /feature pipeline; it is a standalone reviewer-assist tool.
+
+    Context for Research: the new skill lives at .claude/skills/pr-review/
+    SKILL.md following existing skill conventions (frontmatter with name,
+    description, argument-hint, disable-model-invocation, allowed-tools).
+    Research should look at how other slash-command skills handle arg parsing
+    and missing-arg prompts (compare /feature's $ARGUMENTS pattern), how the
+    code-reviewer agent is currently invoked in-pipeline so we can adapt the
+    invocation for an external-PR context with no 3_plan.md, and what gh
+    subcommands are needed (gh repo view, gh pr view, gh pr diff, gh pr
+    comment). Three open questions to resolve in Plan: batch-vs-one-by-one
+    triage UX, exact comment body formatting (file:line prefix), and the edit
+    mechanism (inline rewrite vs. conversational). Recommendations are noted
+    in the spec's Open Questions section.
+
+artifacts: []
+
+recommended_skills: []
+
+output_artifacts: []
+
+documentation_created: []
