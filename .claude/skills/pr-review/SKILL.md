@@ -33,6 +33,18 @@ Carry forward to the Delegate step: PR title, PR body, changed-file list (the `f
 
 ## Delegate to code-reviewer
 
+Invoke the `code-reviewer` agent. Pass the PR title, PR body, changed-file list, and full diff as context.
+
+Use this handoff text verbatim:
+
+```
+This is an external PR review, not a pipeline feature. No `3_plan.md` exists. Skip plan alignment entirely and review against engineering quality only (correctness, security, code quality, test quality). Here is the PR title, body, changed-file list, and full diff. Return findings in your standard Location / Problem / Fix shape.
+```
+
+The agent returns a list of findings. Each finding has a Location (file + line or function), a Problem statement, and a Fix suggestion. Do not modify, summarize, or re-rank the findings — they pass through verbatim to the Triage step.
+
+If the agent's response is the approval string (e.g. "Approved — continue implementation.") or otherwise reports no findings, tell the user "PR #$ARGUMENTS has no findings — nothing to triage." and stop. Do not post anything.
+
 ## Triage findings
 
 ## What this skill will not do
