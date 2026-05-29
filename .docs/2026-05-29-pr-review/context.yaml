@@ -11,9 +11,9 @@ feature:
   base_branch: "main"
 
 workflow:
-  current_step: implement  # Active step: define | research | plan | implement | validate | document | complete
-  completed_steps: [define, research, plan]   # Ordered list of steps that have completed and handed off
-  checkpoint: "All 7 tasks complete. SKILL.md fully written and verified against AC1-AC13. Ready for Validate."
+  current_step: validate  # Active step: define | research | plan | implement | validate | document | complete
+  completed_steps: [define, research, plan, implement]   # Ordered list of steps that have completed and handed off
+  checkpoint: ""
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
   summary: |
