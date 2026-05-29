@@ -17,40 +17,51 @@ workflow:
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
   summary: |
-    Define produced 1_spec.md for a new pr-review skill. The skill is invoked as
-    /pr-review <pr-number> directly by the user (not part of the /feature
-    pipeline). It fetches a GitHub PR via the gh CLI, delegates code review to
-    the existing code-reviewer agent, then walks the user through each finding
-    interactively with keep/drop/edit choices tracked in a running checklist.
-    Only on an explicit "post now" affirmation does the skill post kept findings
-    as ordinary top-level PR comments (one gh pr comment call per finding). The
-    skill is hard-coded to never submit an Approve or Request-Changes review,
-    even if asked — those verdicts are reserved for a human. It also never
-    auto-posts: silence, ambiguity, abandonment, or session cancellation all
-    result in zero comments hitting GitHub.
+    Research produced 2_research.md by surveying every SKILL.md in
+    .claude/skills/, the code-reviewer and senior-reviewer agents, and the gh
+    CLI surface (v2.92.0). The new skill is a single-file addition at
+    .claude/skills/pr-review/SKILL.md — no template.md, no scripts/, no
+    references/. Frontmatter mirrors the four existing slash-command skills
+    that use $ARGUMENTS (analyze-code, find-patterns, web-search, feature):
+    name: pr-review, a tight one-sentence description, argument-hint:
+    "[pr-number]", disable-model-invocation: true (to block auto-invocation
+    per spec), and allowed-tools: Read Bash(gh *) Bash(git *) Agent. The
+    Agent permission is what lets the skill delegate to code-reviewer the way
+    implement and validate already do — by prose, no formal protocol.
 
-    Key decisions made during Define: (1) reuse the existing code-reviewer
-    agent unchanged, since it already returns the right finding shape (location,
-    problem, fix) — plan-alignment checks are simply N/A for external PRs and
-    the agent is told to skip them. (2) Use gh CLI exclusively per the
-    github-tool-preference skill; mcp__github__* is fallback only. (3) Findings
-    post as top-level PR comments (gh pr comment), not inline review threads
-    anchored to diff lines — inline threads are explicitly out of scope and can
-    be reconsidered later. (4) The skill is intentionally not wired into the
-    /feature pipeline; it is a standalone reviewer-assist tool.
+    Key findings and decisions. (1) The code-reviewer agent's existing gate
+    reads context.yaml and 3_plan.md, so the skill's handoff text must
+    explicitly tell it "this is an external PR, no plan exists, skip plan
+    alignment, review engineering quality only" — otherwise the agent errors
+    on the missing feature folder. The agent's existing Location / Problem /
+    Fix output shape is reused unchanged. (2) gh has every subcommand needed:
+    gh repo view --json nameWithOwner, gh pr view <n> --json
+    number,title,body,author,state,baseRefName,headRefName,files, gh pr diff
+    <n>, and gh pr comment <n> --body-file -. The --body-file - form is
+    safer than --body "<text>" because findings contain backticks, dollar
+    signs, and newlines that are awkward to shell-escape. (3) The forbidden
+    commands gh pr review --approve and gh pr review --request-changes are
+    real and must be named in the skill body as explicit negatives — the only
+    enforcement layer is the prose, so wording is load-bearing.
 
-    Context for Research: the new skill lives at .claude/skills/pr-review/
-    SKILL.md following existing skill conventions (frontmatter with name,
-    description, argument-hint, disable-model-invocation, allowed-tools).
-    Research should look at how other slash-command skills handle arg parsing
-    and missing-arg prompts (compare /feature's $ARGUMENTS pattern), how the
-    code-reviewer agent is currently invoked in-pipeline so we can adapt the
-    invocation for an external-PR context with no 3_plan.md, and what gh
-    subcommands are needed (gh repo view, gh pr view, gh pr diff, gh pr
-    comment). Three open questions to resolve in Plan: batch-vs-one-by-one
-    triage UX, exact comment body formatting (file:line prefix), and the edit
-    mechanism (inline rewrite vs. conversational). Recommendations are noted
-    in the spec's Open Questions section.
+    Three open questions resolved with recommendations for Plan. Triage UX:
+    default to one-by-one with a `batch` opt-in at the first prompt for >10
+    findings. Comment formatting: prefix every posted comment with
+    **path/to/file:line** — , using the em-dash separator to match project
+    style. Edit mechanism: inline rewrite — skill prints the finding, user
+    pastes the revised version verbatim, no conversational interpretation.
+
+    Context for Plan. File map is one entry: New Files → .claude/skills/
+    pr-review/SKILL.md. No tests, no linter, no coverage tasks — there is
+    nothing to test except the markdown. The skill body needs five sections:
+    (a) what it does + $ARGUMENTS handling, (b) Fetch workflow (gh repo view
+    → validate PR number → gh pr view + gh pr diff), (c) Delegate to
+    code-reviewer with the no-plan handoff text, (d) Triage UX with explicit
+    accepted-input table, (e) hard-bounded "What this skill will not do"
+    section that names gh pr review --approve and --request-changes by flag.
+    Skill(github-tool-preference) is invoked once near the top of the
+    workflow per the project memory rule. No artifacts were produced — all
+    findings live in 2_research.md.
 
 artifacts: []
 
