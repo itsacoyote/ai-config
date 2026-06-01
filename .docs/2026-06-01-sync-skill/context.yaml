@@ -19,56 +19,56 @@ workflow:
   escalated: false
   escalation_reason: ""
   summary: |
-    Research produced 2_research.md for the sync skill. The deliverable is exactly two
-    edits: a new `.claude/skills/sync/SKILL.md` and updates to `README.md`. There is no
-    library code, no settings registration, no agent file, no template, no artifacts —
-    Claude Code discovers skills purely by directory presence under `.claude/skills/`,
-    confirmed by inspecting `.claude/settings.json` (only a hooks block) and
-    `.claude/settings.local.json` (only Bash permissions). Plan can treat this as a
-    documentation-shaped task, not a code-shaped one.
+    Plan produced 3_plan.md for the sync skill — a two-task plan against two files. The
+    deliverable is unchanged from Research's framing: a new `.claude/skills/sync/SKILL.md`
+    and a small set of edits to `README.md`. Plan resolved the three open decisions
+    Research flagged and locked the exact wording for the dirty-tree prompt, the
+    per-ecosystem install confirmation, and the eight-section final summary into a
+    Shared wording section at the bottom of 3_plan.md. Implement copies those blocks
+    verbatim — no paraphrasing.
 
-    `pr-review/SKILL.md` is the structural template to mirror: developer-invoked
-    (`disable-model-invocation: true`), shell-heavy `allowed-tools`, ordered phase
-    sections, table-driven confirmation prompts, exact-command fenced blocks, and a
-    closing "What this skill will not do" enumeration. The lightweight skills
-    (`git-commit`, `find-patterns`) confirm the minimum frontmatter shape but Sync needs
-    more than the minimum.
+    Decisions locked: (1) `allowed-tools` uses the enumerated form, one line:
+    `Read Bash(git *) Bash(gh *) Bash(npm *) Bash(yarn *) Bash(pnpm *) Bash(bun *)
+    Bash(bundle *) Bash(uv *) Bash(poetry *) Bash(pipenv *) Bash(go *) Bash(cargo *)
+    Bash(composer *) Bash(mix *) Bash(docker *) Bash(diff *) Bash(cat *) Bash(ls *)
+    Bash(find *) Bash(grep *)`. Rejected `Bash(*)` — Sync is a read-mostly utility
+    against the local environment and narrow permissions match the spec's
+    non-destructive contract. (2) The README's `### PR review skill` heading is renamed
+    to `### Standalone skills` so `/sync` and `/pr-review` sit together in one table,
+    `/sync` as the first row (alphabetical). (3) `Skill(github-tool-preference)` is
+    invoked at exactly two seams in SKILL.md prose: immediately before `git fetch
+    origin` and immediately before `git pull --ff-only origin <main>`. Both seams sit
+    inside the `## Branch switch and pull` section.
 
-    Frontmatter for Sync: `name: sync`, `description: ...`, `disable-model-invocation:
-    true` (the field is used by 8 existing skills — confirmed convention, not flagged),
-    and `allowed-tools`. No `argument-hint` (Sync takes no positional arg), no
-    `user-invocable`, no `version`, no `license`.
+    Task ordering rationale: Task 1 lands the skill file (the substantive deliverable),
+    Task 2 surfaces it through the README. Reversing this would briefly point the README
+    at a non-existent skill. Each task ends in one Conventional Commit:
+    `feat(skills): add sync skill for pre-feature local refresh` and
+    `docs(readme): document /sync skill alongside /pr-review`.
 
-    `allowed-tools` syntax in this repo is one-line space-separated with `Bash(<cmd> *)`
-    glob form (literal space + asterisk — never `Bash(<cmd>:*)` and never bare `Bash`).
-    Plan has a real trade-off to resolve: enumerate every binary the spec lists (~20
-    `Bash(<x> *)` entries — safer, matches the spec's narrow non-destructive contract)
-    versus `Bash(*)` (simpler, matches `implement` and `validate`, but overbroad).
-    Research recommends the enumerated form because Sync is a read-mostly utility against
-    the developer's local environment. `Read` should also appear because the skill reads
-    `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.windsurfrules`, `.env.example`, `.env`.
+    File map: SKILL.md is the only new file. README.md gets four discrete edits — heading
+    rename, new `/sync` row above `/pr-review`, updated Usage line covering both skills,
+    and one new `sync/` entry in the file-reference block alphabetically between `spec/`
+    and `validate/`. No `.claude/settings.json` change is needed (Research confirmed
+    skills register by directory presence). No subdirectories under `.claude/skills/sync/`
+    — the skill prints to the user and writes no disk state.
 
-    `Skill(github-tool-preference)` must be invoked before each `git fetch` / `git pull`
-    from origin, mirroring how `pr-review` invokes it before every `gh` shell-out. Plan
-    should specify the seams explicitly in the SKILL.md prose. Sync never runs
-    `git commit` or `gh pr create|edit`, so the `.claude/hooks/skill-check.sh` hook
-    never fires during a `/sync` run.
+    DRY/YAGNI calls: Plan deliberately omits a `references/` directory, a `template.md`,
+    a separate agent file, and any settings.json registration. Each was considered and
+    cut because Sync neither persists state nor produces structured artifacts. The skill
+    is a single prose file plus README discoverability — nothing more.
 
-    README.md needs two edits, not one: a new row in (or near) the existing "PR review
-    skill" table (consider renaming that heading to a broader "Developer-invoked skills"
-    or "Standalone skills" so `/sync` and `/pr-review` sit together), and a new
-    `sync/` entry in the file-reference block at the bottom of the README, alphabetically
-    between `spec/` and `validate/`.
-
-    Open questions: none blocking. One trade-off (broad vs. enumerated `allowed-tools`)
-    is flagged for Plan; both are valid per repo convention. The eight-section final
-    summary and all confirmation prompts should be rendered as fenced exact-text blocks
-    plus an "accepted inputs" table — the same pattern `pr-review` uses for its triage
-    decisions — so the implementer has zero room to drift on wording or sequence.
+    Implement should pay special attention to the Shared wording section. The em-dash
+    character (—, U+2014) is intentional throughout — it matches the punctuation
+    convention used in `pr-review/SKILL.md`. The eight-section final summary's numeric
+    prefixes (`1.` through `8.`) are required by the spec's "fixed order" language; do
+    not convert them to bullets.
 
 artifacts: []
 
-recommended_skills: []
+recommended_skills:
+  - skill: verify-coherence
+    invoke_when: "After both tasks land, before the Validate step — confirm SKILL.md's structure, frontmatter, and prompt patterns mirror `pr-review/SKILL.md`, and that the README edits are internally consistent (heading rename matches the table caption, file-reference block matches the new directory, alphabetical placement is correct)."
 
 output_artifacts: []
 
