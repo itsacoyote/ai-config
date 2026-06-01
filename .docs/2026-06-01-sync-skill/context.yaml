@@ -11,9 +11,10 @@ feature:
   base_branch: "main"
 
 workflow:
-  current_step: research
+  current_step: plan
   completed_steps:
     - define
+    - research
   checkpoint: ""
   escalated: false
   escalation_reason: ""
