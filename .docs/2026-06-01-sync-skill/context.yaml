@@ -1,0 +1,75 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Sync Skill"
+  short_name: "sync-skill"
+  folder: ".docs/2026-06-01-sync-skill"
+  date: "2026-06-01"
+  branch: "feature/sync-skill"
+  base_branch: "main"
+
+workflow:
+  current_step: define
+  completed_steps: []
+  checkpoint: ""
+  escalated: false
+  escalation_reason: ""
+  summary: |
+    Define produced 1_spec.md for a new Claude Code skill called `sync` that a developer
+    runs before starting new feature work. The skill safely brings the local checkout up
+    to date with `main` and refreshes project-specific environment state (dependencies,
+    migrations, env vars, Docker), then prints a structured summary so the developer
+    starts the next feature against a fresh checkout instead of a stale one.
+
+    Key decisions captured in the spec:
+
+    - Skill name is `sync`, lives at `.claude/skills/sync/SKILL.md`, follows the existing
+      skill pattern in this repo (frontmatter with name/description/allowed-tools,
+      `disable-model-invocation: true` so it only runs on explicit `/sync` invocation),
+      and is documented in the repo `README.md` alongside `/feature` and `/pr-review`.
+    - Preflight cleanliness check is hard: `git status --porcelain` must be empty before
+      any branch switch. The skill never stashes, commits, or discards work for the
+      developer — it stops and lists dirty paths. This was an explicit user requirement.
+    - Pull uses `git fetch` + `git pull --ff-only`. No rebase, no merge, no force. If
+      pull fails, the skill prints the exact stderr and stops; the local branch is
+      unchanged.
+    - The previous-main SHA used for the change summary is captured in-run (immediately
+      before pull) — no persisted "last sync" timestamp file. This keeps the skill
+      stateless across sessions.
+    - Package-manager detection is by lockfile and runs each ecosystem independently
+      (polyglot repos run all matching installs). The spec enumerates 13 lockfiles
+      mapped to install commands. Each install is prompted (yes/no/all) before running;
+      missing binaries skip rather than fail. `requirements.txt` (pip) is surfaced as a
+      recommendation only because the right env manager is project-dependent.
+    - Migrations are detected (Rails, Alembic, Prisma, Flyway, Django, Knex, Drizzle,
+      Supabase) and surfaced as recommended commands — never auto-run. This was
+      explicitly requested to avoid destructive automation on the developer's db.
+    - `.env.example` vs `.env` diff reports missing keys by name only; values are never
+      read or printed, and `.env` is never modified.
+    - `docker-compose.yml` (and variants) presence triggers a stale-image warning. No
+      `docker compose` command is ever invoked.
+    - `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, and `.windsurfrules` are scanned for a
+      `Sync` / `Post-pull` / `After pulling` / `Bootstrap` section; matched content is
+      printed verbatim in a "Project-specific sync steps" section so project authors can
+      ship custom post-pull guidance.
+    - Final output is a single structured summary in a fixed 8-section order (Branch
+      state → Recent commits → Dependencies refreshed → Migrations to consider →
+      Environment variables → Docker → Project-specific steps → Next step). The "Next
+      step" line nudges the developer toward `/feature`.
+
+    For Research: the spec is fully self-contained — no open questions. The Researcher
+    should study existing skill patterns (`pr-review/SKILL.md` is the closest analog for
+    a developer-invoked, multi-step shell skill with confirmation prompts; `git-commit`
+    and `find-patterns` show the lightweight frontmatter style). The spec deliberately
+    excludes Windows, non-`origin` remotes, non-`git` VCS, and pipeline integration — the
+    `sync` skill is invoked by the developer directly, never from a pipeline agent.
+
+artifacts: []
+
+recommended_skills: []
+
+output_artifacts: []
+
+documentation_created: []
