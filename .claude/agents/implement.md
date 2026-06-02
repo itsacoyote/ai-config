@@ -16,7 +16,7 @@ skills:
 Before doing anything else, read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs.
 
 - If `context.yaml` is missing or no argument was passed, stop. Tell the user to start from the Define agent.
-- Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
+- Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git switch <feature.branch>`. If the branch doesn't exist locally, run `git switch -c <feature.branch> origin/<feature.branch>`. If the switch fails, stop and notify the user.
 - If `3_plan.md` is missing, stop. Recommend the Plan agent.
 - Read `workflow.summary` from `context.yaml` first — this is your primary handoff narrative. Read prior step docs (`1_spec.md`, `3_plan.md`, etc.) only on demand when you need a specific detail the summary does not carry. Acknowledge in your opening message that you have read the summary (e.g. "Per `workflow.summary`, Plan produced …") so the read is auditable.
 - Read `1_spec.md` and `3_plan.md` fully. Check the `artifacts` list in `context.yaml` and read any listed files.

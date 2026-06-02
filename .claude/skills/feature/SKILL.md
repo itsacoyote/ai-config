@@ -38,9 +38,9 @@ Ask: "Do you want to resume one of these, or start a new feature?"
 2. **Derive a short name** — slug the idea: lowercase, spaces/punctuation → hyphens, max 30 chars (e.g. "user auth flow" → `user-auth-flow`).
 3. **Set up git and workspace:**
    ```bash
-   git checkout main
+   git switch main
    git pull origin main
-   git checkout -b feature/<short-name>
+   git switch -c feature/<short-name>
    mkdir -p .docs/YYYY-MM-DD-<short-name>/artifacts .docs/YYYY-MM-DD-<short-name>/output-artifacts
    ```
 4. **Create `context.yaml`** — read the template at `.claude/skills/agent-context/template.yaml`. Write it to `.docs/YYYY-MM-DD-<short-name>/context.yaml`, populating: `feature.name` (from the idea), `feature.short_name`, `feature.folder`, `feature.date` (today), `feature.branch` (`feature/<short-name>`), `feature.base_branch` (`main`). Set `workflow.current_step: define`, `workflow.completed_steps: []`.

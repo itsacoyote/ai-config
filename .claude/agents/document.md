@@ -19,7 +19,7 @@ You do not cut corners. "This seems obvious" is not a reason to skip documentati
 Before doing anything:
 
 1. Read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs. If missing, stop and tell the user to start from the Define agent.
-2. Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
+2. Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git switch <feature.branch>`. If the branch doesn't exist locally, run `git switch -c <feature.branch> origin/<feature.branch>`. If the switch fails, stop and notify the user.
 3. Verify `1_spec.md`, `2_research.md`, and `3_plan.md` all exist. If any are missing, stop and identify which step is incomplete.
 4. Run `BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'); git diff $(git merge-base HEAD ${BASE:-main}) HEAD` and read the full diff. This is your source of truth for what changed.
 5. Read `workflow.summary` from `context.yaml` first — this is your primary handoff narrative. Read prior step docs (`1_spec.md`, `2_research.md`, `3_plan.md`, `4_validate.md`) only on demand when you need a specific detail the summary does not carry. Acknowledge in your opening message that you have read the summary (e.g. "Per `workflow.summary`, Validate produced …") so the read is auditable.

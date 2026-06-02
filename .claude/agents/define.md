@@ -16,7 +16,7 @@ skills:
 Before doing anything else, read `context.yaml` from the feature folder passed as your argument. Use `feature.folder` to locate all docs.
 
 - If `context.yaml` is missing or no argument was passed, stop. Tell the user to use the `/feature` skill to start a new feature.
-- Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git checkout <feature.branch>`. If the branch doesn't exist locally, run `git checkout -b <feature.branch> origin/<feature.branch>`. If checkout fails, stop and notify the user.
+- Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch` in `context.yaml`. If they differ, run `git switch <feature.branch>`. If the branch doesn't exist locally, run `git switch -c <feature.branch> origin/<feature.branch>`. If the switch fails, stop and notify the user.
 
 ## Workflow
 
