@@ -21,46 +21,39 @@ workflow:
   escalated: false
   escalation_reason: ""
   summary: |
-    Implement landed both tasks in two commits against two files. The diff is
-    entirely additive for the skill file and a net +4 lines for README.md. No
-    existing files were modified beyond README.md, and no settings or agent files
-    were touched.
+    Validate passed with one fix applied during senior code review and a clean QA pass
+    on first iteration. The validation report is at `.docs/2026-06-01-sync-skill/4_validate.md`.
 
-    Task 1 created `.claude/skills/sync/SKILL.md` (344 lines, committed as
-    `feat(skills): add sync skill for pre-feature local refresh`). The file has
-    the five-field frontmatter block — `name: sync`, `description`, `disable-model-
-    invocation: true`, and the full enumerated `allowed-tools` list (20 `Bash(<cmd> *)`
-    patterns plus `Read`) — followed by 13 prose sections in the exact ordering the
-    plan required: What this does, Preflight, Branch switch and pull, Change summary,
-    Environment refresh (package managers, migrations, .env diff, Docker), Project-
-    specific instructions, Final summary, Errors and exits, and What this skill will not
-    do. The three verbatim blocks from the plan's Shared wording section — the dirty-tree
-    two-option prompt, the per-ecosystem install confirmation prompt, and the eight-section
-    final summary template with `═══` borders and numeric `1.`–`8.` prefixes — were copied
-    without alteration. `Skill(github-tool-preference)` appears at exactly two seams
-    inside `## Branch switch and pull`: once before `git fetch origin` and once before
-    `git pull --ff-only origin <main>`. No broad `Bash(*)` pattern was used.
+    Senior code review (2 iterations): One finding was raised and fixed. The first
+    `Skill(github-tool-preference)` seam inside `## Branch switch and pull` was placed
+    after `git checkout <main>` rather than immediately before `git fetch origin` as the
+    plan specified. The `git rev-parse <main>` (pre-pull SHA capture) is a local operation
+    and should not be gated by the tool-preference check; the seam was moved to appear
+    after `git rev-parse <main>` and immediately before `git fetch origin`. Fixed in commit
+    `fix(skills): move github-tool-preference seam to immediately before git fetch`. All
+    other checks passed on first pass: frontmatter fields and order correct, no `Bash(*)`
+    or `Bash(<cmd>:*)` patterns, `disable-model-invocation: true` present, all three
+    verbatim blocks match the plan's Shared wording exactly (em-dashes U+2014, `═══` border
+    characters, numeric `1.`–`8.` prefixes), section ordering matches the plan's 12-H2
+    sequence, README has no stray old heading, `/sync` row is alphabetically above `/pr-review`.
 
-    Task 2 made four targeted edits to README.md (committed as `docs(readme): document
-    /sync skill alongside /pr-review`): the `### PR review skill` heading was renamed to
-    `### Standalone skills`; a `/sync` row was inserted above `/pr-review` in the table
-    (alphabetical); the Usage line was updated to cover both `/sync` (no arguments) and
-    `/pr-review <pr-number>`; and `sync/` was added to the file-reference block between
-    `spec/` and `analyze-code/` with a matching comment.
+    QA review (1 iteration, 0 findings): All 19 acceptance criteria from `1_spec.md` are
+    addressed by the SKILL.md prose. Every behavioral requirement — dirty-tree guard with
+    stash/handle prompt, re-prompt on invalid input, outside-git-repo error, ff-only failure
+    handling, polyglot lockfile detection, per-ecosystem confirmation prompt, JS runner
+    substitution for Node migration tools, .env key-name diff, Docker compose warning,
+    project-specific instructions from CLAUDE.md/AGENTS.md, git log capped at 20 with +N
+    footer, eight-section structured summary, errors-and-exits protocol — is covered. All
+    non-goals from the spec are enumerated in `## What this skill will not do`.
 
-    No deviations from the plan. The `sync/` insertion in the file-reference block lands
-    after `spec/` (line 314) — consistent with the plan's "alphabetically between spec/
-    and validate/" intent, since validate/ appears earlier in the list in pipeline order
-    while the utility skills after it are loosely grouped.
-
-    For Validate: the primary verification surface is SKILL.md prose fidelity — confirm
-    the three verbatim blocks match the plan's Shared wording exactly (em-dashes U+2014,
-    numeric section prefixes, `═══` border characters). Check that the `Skill(github-tool-
-    preference)` seams are at the right positions inside `## Branch switch and pull` and
-    not elsewhere. Verify README has no stray instances of the old `### PR review skill`
-    heading. The skill has no tests and no runtime code — there is nothing to unit-test;
-    all acceptance criteria from `1_spec.md` are structural/prose checks against the
-    two changed files.
+    For Document: the PR should describe this as a developer-facing utility skill that is
+    deliberately out of the `/feature` pipeline. Key design decisions worth surfacing: the
+    enumerated `allowed-tools` form (not `Bash(*)`) was chosen to match the non-destructive
+    contract; `Skill(github-tool-preference)` is invoked only at the two remote-operation
+    seams (not at local git commands); the README section was renamed from `### PR review skill`
+    to `### Standalone skills` to accommodate both skills under a single heading. No tradeoffs
+    or unexpected surface changes arose during the fix — the seam reorder is a two-line move
+    that doesn't affect the skill's behavior, only its documentation accuracy.
 
 artifacts: []
 
