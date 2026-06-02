@@ -11,12 +11,13 @@ feature:
   base_branch: "main"
 
 workflow:
-  current_step: validate
+  current_step: document
   completed_steps:
     - define
     - research
     - plan
     - implement
+    - validate
   checkpoint: "Completed all tasks (1 and 2 of 2). Both commits landed. Ready for Validate."
   escalated: false
   escalation_reason: ""
