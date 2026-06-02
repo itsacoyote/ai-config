@@ -22,39 +22,20 @@ workflow:
   escalated: false
   escalation_reason: ""
   summary: |
-    Validate passed with one fix applied during senior code review and a clean QA pass
-    on first iteration. The validation report is at `.docs/2026-06-01-sync-skill/4_validate.md`.
+    Document step complete. No documentation surfaces required updating beyond what Implement
+    already applied: CLAUDE.md does not list individual standalone skills (the pattern is that
+    CLAUDE.md covers workflow mechanics only; the skill catalog lives in README.md), so it was
+    deliberately left unchanged. README.md was already correct — `### Standalone skills` heading,
+    `/sync` row, usage line, and `sync/` in the file-reference block were all present from the
+    Implement step. No new documentation files were created; `documentation_created` remains empty.
 
-    Senior code review (2 iterations): One finding was raised and fixed. The first
-    `Skill(github-tool-preference)` seam inside `## Branch switch and pull` was placed
-    after `git checkout <main>` rather than immediately before `git fetch origin` as the
-    plan specified. The `git rev-parse <main>` (pre-pull SHA capture) is a local operation
-    and should not be gated by the tool-preference check; the seam was moved to appear
-    after `git rev-parse <main>` and immediately before `git fetch origin`. Fixed in commit
-    `fix(skills): move github-tool-preference seam to immediately before git fetch`. All
-    other checks passed on first pass: frontmatter fields and order correct, no `Bash(*)`
-    or `Bash(<cmd>:*)` patterns, `disable-model-invocation: true` present, all three
-    verbatim blocks match the plan's Shared wording exactly (em-dashes U+2014, `═══` border
-    characters, numeric `1.`–`8.` prefixes), section ordering matches the plan's 12-H2
-    sequence, README has no stray old heading, `/sync` row is alphabetically above `/pr-review`.
-
-    QA review (1 iteration, 0 findings): All 19 acceptance criteria from `1_spec.md` are
-    addressed by the SKILL.md prose. Every behavioral requirement — dirty-tree guard with
-    stash/handle prompt, re-prompt on invalid input, outside-git-repo error, ff-only failure
-    handling, polyglot lockfile detection, per-ecosystem confirmation prompt, JS runner
-    substitution for Node migration tools, .env key-name diff, Docker compose warning,
-    project-specific instructions from CLAUDE.md/AGENTS.md, git log capped at 20 with +N
-    footer, eight-section structured summary, errors-and-exits protocol — is covered. All
-    non-goals from the spec are enumerated in `## What this skill will not do`.
-
-    For Document: the PR should describe this as a developer-facing utility skill that is
-    deliberately out of the `/feature` pipeline. Key design decisions worth surfacing: the
-    enumerated `allowed-tools` form (not `Bash(*)`) was chosen to match the non-destructive
-    contract; `Skill(github-tool-preference)` is invoked only at the two remote-operation
-    seams (not at local git commands); the README section was renamed from `### PR review skill`
-    to `### Standalone skills` to accommodate both skills under a single heading. No tradeoffs
-    or unexpected surface changes arose during the fix — the seam reorder is a two-line move
-    that doesn't affect the skill's behavior, only its documentation accuracy.
+    PR description written and applied to PR #21 covering: what the skill does and why it exists
+    (the pre-feature environment-refresh problem), key design decisions (enumerated `allowed-tools`
+    vs `Bash(*)`, interactive dirty-tree stash/stop prompt, JS runner detection for Node migration
+    tools, `Skill(github-tool-preference)` seam placement, `disable-model-invocation: true`), the
+    one fix from Validate (seam moved to after `git rev-parse` and immediately before `git fetch`),
+    the full non-goals list, invocation instructions, and a manual verification checklist derived
+    from the 19 acceptance criteria. PR promoted from draft to ready for review.
 
 artifacts: []
 
