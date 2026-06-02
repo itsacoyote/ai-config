@@ -1,0 +1,37 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Iterative PR Review Skill"
+  short_name: "pr-review-iterative"
+  folder: ".docs/2026-06-02-pr-review-iterative"
+  date: "2026-06-02"
+  branch: "feature/pr-review-iterative"
+  base_branch: "main"
+
+workflow:
+  current_step: define  # Active step: define | research | plan | implement | validate | document | complete
+  completed_steps: []   # Ordered list of steps that have completed and handed off
+  checkpoint: ""        # Free-text resume point within the current step. Set after each sub-task commit, cleared on handoff.
+  escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
+  escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
+  summary: |
+    Define completed. The spec at 1_spec.md captures an iterative extension to the existing `pr-review` skill so that re-running `/pr-review <N>` on a PR the reviewer has already commented on filters out duplicates of their prior comments, surfaces stale threads where the anchored code is gone, and only puts genuinely new findings into triage. First-review behavior is preserved unchanged when no prior comments exist; the change is purely additive on top of the existing Fetch → Delegate → Triage → Post flow.
+
+    Key decisions made during discovery (the "why" matters for Research):
+    1. Mode detection is state-based and automatic, not flag-based. The skill queries the PR for comments authored by the authenticated `gh` user (resolved once per session via `gh api user --jq .login`). Non-empty list → follow-up mode; empty → first-review mode. The chosen mode is announced upfront so the reviewer can correct it by replying `fresh` or `follow-up`. Reasoning: keeping the slash-command signature stable (`/pr-review <N>`) was a hard constraint; any flag would creep complexity into the invocation. Auto-detect + announce + override is the lightest UX.
+    2. "Me" is always the authenticated `gh` user. Any comment authored by that login counts as prior reviewer activity — the skill does not try to distinguish comments made via the skill vs. typed manually. This keeps the detection logic small and resilient.
+    3. Deduplication is verbatim/near-verbatim text matching on normalized comment bodies (lowercase, collapsed whitespace, stripped `**<path>:<line>** —` prefix). Two distinct issues at the same file and line both survive — the match is on issue text, not location. Conservative on purpose: a false negative (duplicate slips through) is recoverable via the existing triage `drop`; a false positive (real new finding silently dropped) is not.
+    4. Stale threads are surfaced, never silently dropped. A prior comment is stale if its location prefix references a file not in the current changed-files list or a line not in the current diff hunks. Comments without a parseable location prefix are not marked stale. The skill does not edit, reply to, or resolve threads on GitHub — surfacing is read-only and the reviewer acts manually.
+
+    Context the Research phase needs:
+    - The feature edits the existing `.claude/skills/pr-review/SKILL.md` in place rather than forking a parallel skill. Research should study that file (read it as the starting point) and the `code-reviewer` agent's output shape, and confirm what `gh pr view --json comments` actually returns (field names like `author.login`, `databaseId`, body shape — verify against `gh` docs or a sample call).
+    - No persistence to disk. No `.docs/` writes for this feature at runtime. The "what was reviewed before" signal comes from re-querying GitHub each session.
+    - All hard refusals from the existing skill carry over unchanged: no approve, no request-changes, no merge/close/edit, no inline anchored comments, no AI attribution in posted bodies.
+    - One thing to double-check during Research: the exact JSON shape of `gh pr view --json comments` for a comment's `author.login` and identifier fields, and whether the `comments` array includes review comments or only top-level issue comments. The spec assumes top-level issue comments only (matching what `gh pr comment` posts).
+
+artifacts: []
+recommended_skills: []
+output_artifacts: []
+documentation_created: []
