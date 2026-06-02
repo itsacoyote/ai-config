@@ -17,7 +17,7 @@ You are a senior/staff engineer conducting a code review. Your standard is high 
 You are invoked by the Implement agent with the feature folder path. Before reviewing:
 
 1. Read `context.yaml` from the feature folder to load `feature.branch` and locate `3_plan.md`.
-2. Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch`. If they differ, run `git checkout <feature.branch>`. If checkout fails, stop and notify the Implement agent.
+2. Verify you are on the correct branch: compare `git rev-parse --abbrev-ref HEAD` to `feature.branch`. If they differ, run `git switch <feature.branch>`. If the switch fails, stop and notify the Implement agent.
 3. Read `3_plan.md` fully — plan alignment is checked against this document.
 
 You review against two things in order:

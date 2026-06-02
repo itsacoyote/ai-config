@@ -71,7 +71,7 @@ How do you want to proceed?
 | Input | Effect |
 |-------|--------|
 | `s` / `stash` | Run `git stash push -u -m "sync: auto-stash <timestamp>"`. Capture the stash ref from stdout. Proceed to ## Branch switch and pull. Surface the stash ref and the `git stash pop` recovery command in the final summary's **Branch state** section. |
-| `h` / `handle` | Stop immediately. Do not run `git checkout`, `git stash`, install, migration, or any further command. Leave the working tree exactly as it was. |
+| `h` / `handle` | Stop immediately. Do not run `git switch`, `git stash`, install, migration, or any further command. Leave the working tree exactly as it was. |
 | anything else | Re-prompt the current question without advancing. Do not default to either option. Never run a destructive recovery (no `git reset --hard`, no `git clean`, no `git checkout -- <path>`) regardless of input. |
 
 If `git stash` itself exits non-zero (e.g. partial-merge state, unmerged paths), print the `git` stderr verbatim and stop. Do not retry. Do not attempt any other recovery.
@@ -81,7 +81,7 @@ If `git stash` itself exits non-zero (e.g. partial-merge state, unmerged paths),
 Check out the detected main branch:
 
 ```
-git checkout <main>
+git switch <main>
 ```
 
 Capture the pre-pull SHA:
@@ -309,7 +309,7 @@ After all checks complete, print the following structured summary. Section order
 
 8. Next step
    Ready to start. Run `/feature` to begin a new feature, or
-   `git checkout <previous-branch>` to return to your prior work.
+   `git switch <previous-branch>` to return to your prior work.
 
 ═══════════════════════════════════════════════════════════════════
 ```
