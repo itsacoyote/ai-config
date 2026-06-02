@@ -16,54 +16,50 @@ workflow:
     - define
     - research
     - plan
-  checkpoint: ""
+  checkpoint: "Completed all tasks (1 and 2 of 2). Both commits landed. Ready for Validate."
   escalated: false
   escalation_reason: ""
   summary: |
-    Plan produced 3_plan.md for the sync skill — a two-task plan against two files. The
-    deliverable is unchanged from Research's framing: a new `.claude/skills/sync/SKILL.md`
-    and a small set of edits to `README.md`. Plan resolved the three open decisions
-    Research flagged and locked the exact wording for the dirty-tree prompt, the
-    per-ecosystem install confirmation, and the eight-section final summary into a
-    Shared wording section at the bottom of 3_plan.md. Implement copies those blocks
-    verbatim — no paraphrasing.
+    Implement landed both tasks in two commits against two files. The diff is
+    entirely additive for the skill file and a net +4 lines for README.md. No
+    existing files were modified beyond README.md, and no settings or agent files
+    were touched.
 
-    Decisions locked: (1) `allowed-tools` uses the enumerated form, one line:
-    `Read Bash(git *) Bash(gh *) Bash(npm *) Bash(yarn *) Bash(pnpm *) Bash(bun *)
-    Bash(bundle *) Bash(uv *) Bash(poetry *) Bash(pipenv *) Bash(go *) Bash(cargo *)
-    Bash(composer *) Bash(mix *) Bash(docker *) Bash(diff *) Bash(cat *) Bash(ls *)
-    Bash(find *) Bash(grep *)`. Rejected `Bash(*)` — Sync is a read-mostly utility
-    against the local environment and narrow permissions match the spec's
-    non-destructive contract. (2) The README's `### PR review skill` heading is renamed
-    to `### Standalone skills` so `/sync` and `/pr-review` sit together in one table,
-    `/sync` as the first row (alphabetical). (3) `Skill(github-tool-preference)` is
-    invoked at exactly two seams in SKILL.md prose: immediately before `git fetch
-    origin` and immediately before `git pull --ff-only origin <main>`. Both seams sit
-    inside the `## Branch switch and pull` section.
+    Task 1 created `.claude/skills/sync/SKILL.md` (344 lines, committed as
+    `feat(skills): add sync skill for pre-feature local refresh`). The file has
+    the five-field frontmatter block — `name: sync`, `description`, `disable-model-
+    invocation: true`, and the full enumerated `allowed-tools` list (20 `Bash(<cmd> *)`
+    patterns plus `Read`) — followed by 13 prose sections in the exact ordering the
+    plan required: What this does, Preflight, Branch switch and pull, Change summary,
+    Environment refresh (package managers, migrations, .env diff, Docker), Project-
+    specific instructions, Final summary, Errors and exits, and What this skill will not
+    do. The three verbatim blocks from the plan's Shared wording section — the dirty-tree
+    two-option prompt, the per-ecosystem install confirmation prompt, and the eight-section
+    final summary template with `═══` borders and numeric `1.`–`8.` prefixes — were copied
+    without alteration. `Skill(github-tool-preference)` appears at exactly two seams
+    inside `## Branch switch and pull`: once before `git fetch origin` and once before
+    `git pull --ff-only origin <main>`. No broad `Bash(*)` pattern was used.
 
-    Task ordering rationale: Task 1 lands the skill file (the substantive deliverable),
-    Task 2 surfaces it through the README. Reversing this would briefly point the README
-    at a non-existent skill. Each task ends in one Conventional Commit:
-    `feat(skills): add sync skill for pre-feature local refresh` and
-    `docs(readme): document /sync skill alongside /pr-review`.
+    Task 2 made four targeted edits to README.md (committed as `docs(readme): document
+    /sync skill alongside /pr-review`): the `### PR review skill` heading was renamed to
+    `### Standalone skills`; a `/sync` row was inserted above `/pr-review` in the table
+    (alphabetical); the Usage line was updated to cover both `/sync` (no arguments) and
+    `/pr-review <pr-number>`; and `sync/` was added to the file-reference block between
+    `spec/` and `analyze-code/` with a matching comment.
 
-    File map: SKILL.md is the only new file. README.md gets four discrete edits — heading
-    rename, new `/sync` row above `/pr-review`, updated Usage line covering both skills,
-    and one new `sync/` entry in the file-reference block alphabetically between `spec/`
-    and `validate/`. No `.claude/settings.json` change is needed (Research confirmed
-    skills register by directory presence). No subdirectories under `.claude/skills/sync/`
-    — the skill prints to the user and writes no disk state.
+    No deviations from the plan. The `sync/` insertion in the file-reference block lands
+    after `spec/` (line 314) — consistent with the plan's "alphabetically between spec/
+    and validate/" intent, since validate/ appears earlier in the list in pipeline order
+    while the utility skills after it are loosely grouped.
 
-    DRY/YAGNI calls: Plan deliberately omits a `references/` directory, a `template.md`,
-    a separate agent file, and any settings.json registration. Each was considered and
-    cut because Sync neither persists state nor produces structured artifacts. The skill
-    is a single prose file plus README discoverability — nothing more.
-
-    Implement should pay special attention to the Shared wording section. The em-dash
-    character (—, U+2014) is intentional throughout — it matches the punctuation
-    convention used in `pr-review/SKILL.md`. The eight-section final summary's numeric
-    prefixes (`1.` through `8.`) are required by the spec's "fixed order" language; do
-    not convert them to bullets.
+    For Validate: the primary verification surface is SKILL.md prose fidelity — confirm
+    the three verbatim blocks match the plan's Shared wording exactly (em-dashes U+2014,
+    numeric section prefixes, `═══` border characters). Check that the `Skill(github-tool-
+    preference)` seams are at the right positions inside `## Branch switch and pull` and
+    not elsewhere. Verify README has no stray instances of the old `### PR review skill`
+    heading. The skill has no tests and no runtime code — there is nothing to unit-test;
+    all acceptance criteria from `1_spec.md` are structural/prose checks against the
+    two changed files.
 
 artifacts: []
 
