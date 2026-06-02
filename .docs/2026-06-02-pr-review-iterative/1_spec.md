@@ -25,6 +25,7 @@ These pains show up every time someone uses `pr-review` on a non-trivial PR. The
 - Prior comment threads whose anchored code is gone from the latest diff are surfaced to the reviewer as "code no longer exists" so they can decide whether to resolve them.
 - The deduplication logic is conservative: only verbatim or near-verbatim restatements of a prior comment are filtered. Two distinct issues at the same file and line are both shown.
 - The triage, edit, refusal, and posting behavior of the existing first-review flow is preserved unchanged for the findings that do reach triage.
+- Each finding shown during triage (in both the numbered overview and the one-by-one flow, in both first-review and follow-up modes) displays the severity label the `code-reviewer` agent assigned to that finding, so the reviewer can see how the agent rated it before deciding `keep` / `drop` / `edit`.
 
 ## Non-Goals
 
@@ -59,6 +60,15 @@ These pains show up every time someone uses `pr-review` on a non-trivial PR. The
 **First-review mode (unchanged behavior)**
 
 - When the detected mode is first-review and the reviewer does not override, the skill behaves exactly as the existing `pr-review` skill: Fetch → Delegate → Triage → Post. No deduplication, no stale-thread detection, no extra surfacing.
+
+**Triage display: severity labels (both modes)**
+
+- Every finding from `code-reviewer` carries a severity label assigned by the agent. The skill displays that label next to the finding in both the numbered overview and the one-by-one finding prompt.
+- The label vocabulary is whatever the agent emits. The skill does not invent, normalize, or re-rank labels; it surfaces them verbatim. The currently established label set in this codebase (used by `security-review`, which `senior-reviewer` consumes) is `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`. The `code-reviewer` agent must emit a label per finding from this set for the skill to display it.
+- Numbered overview format with label: `1. [HIGH] src/foo.ts:42 — useAuthToken does not handle expired tokens.`
+- One-by-one finding prompt shows the label on the first line above Location / Problem / Fix.
+- If a finding has no label (e.g. a finding from an older agent run, or a finding the reviewer edited to remove the label), the skill displays it without a label rather than failing or inventing one.
+- Labels are display-only inside the skill. They are not added to the body of posted PR comments — posted bodies retain the existing `**<path>:<line>** — <text>` format with no severity prefix.
 
 **Follow-up mode: fetching prior comments**
 
@@ -128,7 +138,11 @@ These pains show up every time someone uses `pr-review` on a non-trivial PR. The
 - [ ] All existing hard refusals continue to apply: no approve, no request-changes, no merge, no inline anchored comments, no AI attribution in posted bodies, no writes to `.docs/`.
 - [ ] If `gh api user` fails (auth missing, network), the skill prints the `gh` stderr and stops. It does not silently fall back to first-review mode.
 - [ ] If `gh pr view <N> --json comments` fails, the skill prints the `gh` stderr and stops. It does not assume zero prior comments.
+- [ ] In both first-review and follow-up modes, the numbered overview prints each finding with the severity label the `code-reviewer` agent assigned, in the form `<n>. [<LABEL>] <location> — <one-line summary>`.
+- [ ] In both first-review and follow-up modes, the one-by-one finding prompt displays the severity label on the line above Location / Problem / Fix.
+- [ ] Severity labels emitted by `code-reviewer` are passed through verbatim. The skill does not invent, re-rank, normalize, or strip labels from agent output. Labels are not appended to posted PR comment bodies — posting format remains `**<path>:<line>** — <text>` with no label prefix.
+- [ ] A finding that arrives without a severity label is displayed without one (no `[LABEL]` token) and proceeds through triage normally. The skill does not fabricate a label.
 
 ## Open Questions
 
-None — all blockers resolved during discovery. The follow-up review semantics, "me" definition, stale handling, dedup granularity, and mode-detection trigger are all settled. Implementation details (exact normalization thresholds, exact wording of mode-confirmation prompts, exact format of the stale section) can be finalized in Plan without re-opening the spec.
+- **`code-reviewer` agent does not currently emit named severity labels.** The agent at `.claude/agents/code-reviewer.md` returns findings in a `Location / Problem / Fix` shape with no explicit per-finding label. The established label vocabulary in this codebase lives on `security-review` (CRITICAL / HIGH / MEDIUM / LOW / INFO) and is surfaced through `senior-reviewer`. The triage-display requirement above assumes the agent emits a label per finding. Resolving this requires either: (a) updating `code-reviewer.md` in this feature's scope to emit a severity label per finding from the established `CRITICAL / HIGH / MEDIUM / LOW / INFO` set, or (b) treating label display as a best-effort feature that lights up once the agent is updated separately. The user mentioned `nit` as a possible label; `nit` is not currently in the established taxonomy. Resolve at the start of Research before Plan: decide whether agent updates are in scope and whether `nit` (or a similar low-severity label) is added to the vocabulary.
