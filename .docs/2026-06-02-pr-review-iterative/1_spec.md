@@ -1,11 +1,11 @@
 # Spec: Iterative PR Review
 
 **Date:** 2026-06-02
-**Status:** Draft
+**Status:** Approved
 
 ## Summary
 
-Extend the existing `pr-review` skill so that `/pr-review <pr-number>` does the right thing when invoked a second (or third, or fourth) time on the same PR after the author has pushed fixes. Today the skill always runs a fresh review and treats every finding as new, which means the reviewer sees the same comments they already posted the first time around, has to manually re-triage them, and risks double-posting. The iterative behavior auto-detects whether this is the first review or a follow-up by querying the PR for comments authored by the authenticated `gh` user. If prior comments exist, the skill fetches them, fetches the latest diff, runs `code-reviewer` against the new diff, filters out near-duplicates of comments the user has already posted, surfaces any prior comment threads whose anchor code no longer exists in the new diff as "stale", and only puts genuinely new findings into the triage flow.
+Extend the existing `pr-review` skill so that `/pr-review <pr-number>` does the right thing when invoked a second (or third, or fourth) time on the same PR after the author has pushed fixes. Today the skill always runs a fresh review and treats every finding as new, which means the reviewer sees the same comments they already posted the first time around, has to manually re-triage them, and risks double-posting. The iterative behavior auto-detects whether this is the first review or a follow-up by querying the PR for comments authored by the authenticated `gh` user. If prior comments exist, the skill fetches them, fetches the latest diff, runs `code-reviewer` against the new diff, filters out near-duplicates of comments the user has already posted, surfaces any prior comment threads whose anchor code no longer exists in the new diff as "stale", and only puts genuinely new findings into the triage flow. As part of this feature, the `code-reviewer` agent is also updated to emit an explicit severity label per finding from the fixed `CRITICAL / HIGH / MEDIUM / LOW / INFO` vocabulary so the skill can show how the agent rated each finding during triage.
 
 ## Problem Statement
 
@@ -61,13 +61,18 @@ These pains show up every time someone uses `pr-review` on a non-trivial PR. The
 
 - When the detected mode is first-review and the reviewer does not override, the skill behaves exactly as the existing `pr-review` skill: Fetch → Delegate → Triage → Post. No deduplication, no stale-thread detection, no extra surfacing.
 
+**`code-reviewer` agent update: emit severity labels**
+
+- The `code-reviewer` agent at `.claude/agents/code-reviewer.md` is updated as part of this feature to emit an explicit severity label on each finding. The label is part of the agent's structured output so the `pr-review` skill can read and display it during triage.
+- The label vocabulary is fixed: `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`. No other values are valid. There is no separate `nit` label — what is colloquially called a "nit" is emitted as `LOW` or `INFO` depending on severity.
+- The agent emits exactly one label per finding from this vocabulary. The skill does not invent, normalize, re-rank, or translate labels — it surfaces them verbatim.
+
 **Triage display: severity labels (both modes)**
 
-- Every finding from `code-reviewer` carries a severity label assigned by the agent. The skill displays that label next to the finding in both the numbered overview and the one-by-one finding prompt.
-- The label vocabulary is whatever the agent emits. The skill does not invent, normalize, or re-rank labels; it surfaces them verbatim. The currently established label set in this codebase (used by `security-review`, which `senior-reviewer` consumes) is `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`. The `code-reviewer` agent must emit a label per finding from this set for the skill to display it.
+- Every finding from `code-reviewer` carries a severity label assigned by the agent from the fixed `CRITICAL / HIGH / MEDIUM / LOW / INFO` vocabulary. The skill displays that label next to the finding in both the numbered overview and the one-by-one finding prompt.
 - Numbered overview format with label: `1. [HIGH] src/foo.ts:42 — useAuthToken does not handle expired tokens.`
 - One-by-one finding prompt shows the label on the first line above Location / Problem / Fix.
-- If a finding has no label (e.g. a finding from an older agent run, or a finding the reviewer edited to remove the label), the skill displays it without a label rather than failing or inventing one.
+- If a finding arrives without a label (e.g. a finding the reviewer edited to remove the label, or a degenerate agent output), the skill displays it without a label rather than failing or inventing one.
 - Labels are display-only inside the skill. They are not added to the body of posted PR comments — posted bodies retain the existing `**<path>:<line>** — <text>` format with no severity prefix.
 
 **Follow-up mode: fetching prior comments**
@@ -113,7 +118,7 @@ These pains show up every time someone uses `pr-review` on a non-trivial PR. The
 ## Constraints
 
 - Must reuse the existing `pr-review` skill at `.claude/skills/pr-review/SKILL.md`. This feature edits that skill in place rather than creating a parallel skill.
-- Must reuse the existing `code-reviewer` agent without modification.
+- Must update the existing `code-reviewer` agent at `.claude/agents/code-reviewer.md` in place to emit a severity label per finding from the fixed `CRITICAL / HIGH / MEDIUM / LOW / INFO` vocabulary. No new agent is created.
 - Must use the GitHub CLI (`gh`) as the default tool. Invoke `Skill(github-tool-preference)` before any `gh` shell-out, as the existing skill does. `mcp__github__*` is fallback only.
 - Must preserve the existing skill's first-review behavior exactly when no prior comments are detected. The change is additive — new mode-detection branch on top of the existing flow.
 - Must preserve all existing hard refusals: no `gh pr review --approve`, no `gh pr review --request-changes`, no merge / close / edit, no inline comments, no AI attribution in posted bodies.
@@ -138,6 +143,7 @@ These pains show up every time someone uses `pr-review` on a non-trivial PR. The
 - [ ] All existing hard refusals continue to apply: no approve, no request-changes, no merge, no inline anchored comments, no AI attribution in posted bodies, no writes to `.docs/`.
 - [ ] If `gh api user` fails (auth missing, network), the skill prints the `gh` stderr and stops. It does not silently fall back to first-review mode.
 - [ ] If `gh pr view <N> --json comments` fails, the skill prints the `gh` stderr and stops. It does not assume zero prior comments.
+- [ ] The `code-reviewer` agent at `.claude/agents/code-reviewer.md` is updated to emit a severity label per finding from the fixed vocabulary `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`. No other label values are valid; there is no `nit` label.
 - [ ] In both first-review and follow-up modes, the numbered overview prints each finding with the severity label the `code-reviewer` agent assigned, in the form `<n>. [<LABEL>] <location> — <one-line summary>`.
 - [ ] In both first-review and follow-up modes, the one-by-one finding prompt displays the severity label on the line above Location / Problem / Fix.
 - [ ] Severity labels emitted by `code-reviewer` are passed through verbatim. The skill does not invent, re-rank, normalize, or strip labels from agent output. Labels are not appended to posted PR comment bodies — posting format remains `**<path>:<line>** — <text>` with no label prefix.
@@ -145,4 +151,7 @@ These pains show up every time someone uses `pr-review` on a non-trivial PR. The
 
 ## Open Questions
 
-- **`code-reviewer` agent does not currently emit named severity labels.** The agent at `.claude/agents/code-reviewer.md` returns findings in a `Location / Problem / Fix` shape with no explicit per-finding label. The established label vocabulary in this codebase lives on `security-review` (CRITICAL / HIGH / MEDIUM / LOW / INFO) and is surfaced through `senior-reviewer`. The triage-display requirement above assumes the agent emits a label per finding. Resolving this requires either: (a) updating `code-reviewer.md` in this feature's scope to emit a severity label per finding from the established `CRITICAL / HIGH / MEDIUM / LOW / INFO` set, or (b) treating label display as a best-effort feature that lights up once the agent is updated separately. The user mentioned `nit` as a possible label; `nit` is not currently in the established taxonomy. Resolve at the start of Research before Plan: decide whether agent updates are in scope and whether `nit` (or a similar low-severity label) is added to the vocabulary.
+All open questions from the discovery conversation have been resolved and folded into the requirements, constraints, and acceptance criteria above. For the record:
+
+- **Is the `code-reviewer` agent update in scope for this feature?** Resolved: yes. The agent at `.claude/agents/code-reviewer.md` is updated in place as part of this feature's implementation to emit an explicit severity label on each finding. See the new requirement block "`code-reviewer` agent update: emit severity labels" and the corresponding constraint and acceptance criterion.
+- **What is the label vocabulary, and does `nit` belong in it?** Resolved: the vocabulary is fixed at `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`. There is no separate `nit` label — what people colloquially call a "nit" is emitted as `LOW` or `INFO` depending on severity.
