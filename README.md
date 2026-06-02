@@ -232,15 +232,16 @@ Used by the pipeline internally. Also available for direct invocation outside a 
 | `/security-review`     | Security audit — auth, input validation, injection vectors, secrets |
 | `/ui-design-brain`     | UI design planning and component patterns                           |
 
-### PR review skill
+### Standalone skills
 
 Invoke directly — not part of the `/feature` pipeline.
 
 | Skill        | What it does                                                                                     |
 | ------------ | ------------------------------------------------------------------------------------------------ |
+| `/sync`      | Bring your local checkout up to date with `main` before starting feature work — clean-tree check (optional stash), fetch + fast-forward pull, change summary, and detection-driven refresh of dependencies, migrations, `.env` keys, and Docker. Never runs destructive git, never auto-applies migrations, never writes `.env`. |
 | `/pr-review` | AI-assisted review of a GitHub PR — fetches diff, delegates to `code-reviewer`, walks you through each finding (keep/drop/edit), and posts only the findings you approve after an explicit "post now" confirmation. Never submits an Approve or Request Changes review — those verdicts are human-only. |
 
-Usage: `/pr-review <pr-number>` (e.g. `/pr-review 1250`). Invoke without an argument to be prompted for a PR number.
+Usage: `/sync` (takes no arguments) and `/pr-review <pr-number>` (e.g. `/pr-review 1250`; invoke without an argument to be prompted for a PR number).
 
 ### The .docs/ folder
 
@@ -311,6 +312,7 @@ It explores the codebase from scratch, writes a `.ONBOARD.md` to the project roo
     ├── implement/         # /implement — TDD implementation methodology
     ├── validate/          # /validate — review coordination methodology
     ├── spec/              # /spec — spec document formatting (used by define agent)
+    ├── sync/              # /sync — pre-feature local refresh
     ├── analyze-code/      # /analyze-code — file/module survey
     ├── find-patterns/     # /find-patterns — convention detection
     ├── web-search/        # /web-search — versioned third-party docs lookup

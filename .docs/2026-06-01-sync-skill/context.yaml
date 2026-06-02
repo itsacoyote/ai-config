@@ -1,0 +1,49 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Sync Skill"
+  short_name: "sync-skill"
+  folder: ".docs/2026-06-01-sync-skill"
+  date: "2026-06-01"
+  branch: "feature/sync-skill"
+  base_branch: "main"
+
+workflow:
+  current_step: complete
+  completed_steps:
+    - define
+    - research
+    - plan
+    - implement
+    - validate
+    - document
+  checkpoint: "Completed all tasks (1 and 2 of 2). Both commits landed. Ready for Validate."
+  escalated: false
+  escalation_reason: ""
+  summary: |
+    Document step complete. No documentation surfaces required updating beyond what Implement
+    already applied: CLAUDE.md does not list individual standalone skills (the pattern is that
+    CLAUDE.md covers workflow mechanics only; the skill catalog lives in README.md), so it was
+    deliberately left unchanged. README.md was already correct — `### Standalone skills` heading,
+    `/sync` row, usage line, and `sync/` in the file-reference block were all present from the
+    Implement step. No new documentation files were created; `documentation_created` remains empty.
+
+    PR description written and applied to PR #21 covering: what the skill does and why it exists
+    (the pre-feature environment-refresh problem), key design decisions (enumerated `allowed-tools`
+    vs `Bash(*)`, interactive dirty-tree stash/stop prompt, JS runner detection for Node migration
+    tools, `Skill(github-tool-preference)` seam placement, `disable-model-invocation: true`), the
+    one fix from Validate (seam moved to after `git rev-parse` and immediately before `git fetch`),
+    the full non-goals list, invocation instructions, and a manual verification checklist derived
+    from the 19 acceptance criteria. PR promoted from draft to ready for review.
+
+artifacts: []
+
+recommended_skills:
+  - skill: verify-coherence
+    invoke_when: "After both tasks land, before the Validate step — confirm SKILL.md's structure, frontmatter, and prompt patterns mirror `pr-review/SKILL.md`, and that the README edits are internally consistent (heading rename matches the table caption, file-reference block matches the new directory, alphabetical placement is correct)."
+
+output_artifacts: []
+
+documentation_created: []
