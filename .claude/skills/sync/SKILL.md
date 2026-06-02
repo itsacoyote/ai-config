@@ -84,8 +84,6 @@ Check out the detected main branch:
 git checkout <main>
 ```
 
-Before the next `git` operation, invoke `Skill(github-tool-preference)` to confirm `git` is the right tool.
-
 Capture the pre-pull SHA:
 
 ```
@@ -93,6 +91,8 @@ git rev-parse <main>
 ```
 
 Store as `<pre-pull-sha>`.
+
+Before the next `git` operation, invoke `Skill(github-tool-preference)` to confirm `git` is the right tool.
 
 Then run:
 
