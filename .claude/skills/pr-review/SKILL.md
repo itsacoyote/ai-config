@@ -66,6 +66,26 @@ The agent returns a list of findings. Each finding has a Location (file + line o
 
 If the agent's response is the approval string (e.g. "Approved — continue implementation.") or otherwise reports no findings, tell the user "PR #$ARGUMENTS has no findings — nothing to triage." and stop. Do not post anything.
 
+## Dedup against prior comments
+
+This section runs only when the final resolved mode is follow-up. In first-review mode, skip this section entirely and pass the agent's findings unchanged to `## Triage findings`.
+
+### Normalization
+
+Before comparison, normalize both the new finding body and each prior comment body by: (a) lowercasing, (b) collapsing all runs of whitespace (including newlines) to a single space, (c) stripping the standard location prefix `**<path>:<line>** — ` (or its function-form variant `**<path>** (`<function>`) — `) from the start. Strip leading and trailing whitespace after step (c).
+
+### Match rule
+
+A new finding is a near-duplicate if its normalized body equals a prior comment's normalized body verbatim or near-verbatim. The match is on issue text only; two findings at the same `path:line` whose normalized bodies differ are both kept. Be conservative: when in doubt, keep the finding.
+
+### Output
+
+Drop near-duplicates silently from the triage list — they are not surfaced as kept items, not shown to the reviewer, not posted. Print exactly one summary line: `Filtered N near-duplicates of prior comments.` where N is the count actually filtered (use `0` when nothing was filtered).
+
+### Terminal exit when everything was a duplicate
+
+If every finding was filtered (and the surviving-findings list is empty), print exactly: `No new findings — all of code-reviewer's output matched comments you already posted. Stale thread review above is still relevant.` Then stop. Do not enter `## Triage findings`. Do not enter the Post step. Do not ask `Post 0 comments now?`.
+
 ## Triage findings
 
 When the code-reviewer returns findings, present them to the user and walk through each one before anything is posted to GitHub.
