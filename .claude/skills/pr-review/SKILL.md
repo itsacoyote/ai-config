@@ -116,6 +116,8 @@ This section is the last thing printed before `## Triage findings` begins.
 
 ## Triage findings
 
+If the Dedup step printed the "No new findings —" terminal message, this section is not entered.
+
 When the code-reviewer returns findings, present them to the user and walk through each one before anything is posted to GitHub.
 
 ### Overview
