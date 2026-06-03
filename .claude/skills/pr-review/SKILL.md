@@ -86,6 +86,34 @@ Drop near-duplicates silently from the triage list — they are not surfaced as 
 
 If every finding was filtered (and the surviving-findings list is empty), print exactly: `No new findings — all of code-reviewer's output matched comments you already posted. Stale thread review above is still relevant.` Then stop. Do not enter `## Triage findings`. Do not enter the Post step. Do not ask `Post 0 comments now?`.
 
+## Surface stale threads
+
+This section runs only when the final resolved mode is follow-up. It is read-only — the skill does not edit, reply to, or resolve GitHub threads here.
+
+### Parsing the location prefix
+
+Parse each prior comment's body for a known location prefix using one of two regex patterns:
+
+- Line form: `^\*\*([^*:]+):([0-9]+)\*\* —` — captures `path` and `line`.
+- Function form: `^\*\*([^*]+)\*\* \(` `` `([^`]+)` `` `\) —` — captures `path` and `function`.
+
+If the prior comment body matches neither pattern, the comment has no parseable anchor. Do not mark it stale; do not surface it in this section.
+
+### Staleness rule
+
+For each prior comment with a parseable location prefix:
+
+- **Line form:** mark stale if `path` is not in the changed-files list from `gh pr view --json files`, OR if `line` is not within any `@@ -<old-start>,<old-count> +<new-start>,<new-count> @@` hunk range for that file in the current `gh pr diff` output.
+- **Function form:** mark stale if `path` is not in the changed-files list. Function-name presence in the new diff is not required — the function form intentionally has the weaker check, because verifying function existence requires parsing the diff body rather than the hunk headers.
+
+### Output
+
+If the stale list is empty, emit nothing — do not print an empty heading.
+
+If the stale list is non-empty, print the heading: `Prior comments where the code is gone (consider resolving on GitHub):` and then a numbered list. Each entry: `<n>. <url> — <original location prefix> — <first line of body>`.
+
+This section is the last thing printed before `## Triage findings` begins.
+
 ## Triage findings
 
 When the code-reviewer returns findings, present them to the user and walk through each one before anything is posted to GitHub.
