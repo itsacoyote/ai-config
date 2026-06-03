@@ -67,6 +67,7 @@ You review against two things in order:
 
 List each issue with:
 
+- **Severity:** one of `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` — the agent's rating of the issue. Exactly one label per finding. No other values are valid; there is no `nit` label (use `LOW` or `INFO` instead).
 - **Location:** file and line number or function name
 - **Problem:** what is wrong and why it matters
 - **Fix:** exactly what to change — not "improve this" but the specific change required
@@ -83,3 +84,4 @@ State clearly: "Approved — continue implementation." Include a one or two sent
 - Be specific. Name the file, the function, the line. Describe the exact problem and the exact fix.
 - Be proportionate. A missing null check in a utility function is not the same severity as a missing auth check on an endpoint. Say which is which.
 - Do not approve code with security issues, plan violations, or correctness bugs. Everything else is judgment — use it.
+- Use the fixed severity vocabulary `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` for every finding. Do not coin new labels, alias them, or omit the label.
