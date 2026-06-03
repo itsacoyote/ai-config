@@ -1,0 +1,49 @@
+{
+    "comments": [
+        {
+            "id": "IC_kwDODKw3uc8AAAABEMYhBw",
+            "author": {
+                "login": "github-actions"
+            },
+            "authorAssociation": "NONE",
+            "body": "Thanks for your pull request! Unfortunately, it doesn't meet the requirements for review:\n\n\n- None of the referenced issues have the `help wanted` label\n\n**Please update your PR to address the above.** This PR will be automatically closed in **4 days** if these requirements are not met.\n\n<details>\n<summary>Full contribution requirements</summary>\n\n1. Include a detailed description of what this PR does\n2. Link to an issue with the `help wanted` label (use `Fixes #123` or `Closes #123`)\n</details>",
+            "createdAt": "2026-05-29T14:39:08Z",
+            "includesCreatedEdit": false,
+            "isMinimized": false,
+            "minimizedReason": "",
+            "reactionGroups": [],
+            "url": "https://github.com/cli/cli/pull/13547#issuecomment-4576387335",
+            "viewerDidAuthor": false
+        },
+        {
+            "id": "IC_kwDODKw3uc8AAAABEVvglw",
+            "author": {
+                "login": "karandancer07-coder"
+            },
+            "authorAssociation": "NONE",
+            "body": "> Thanks for your pull request! Unfortunately, it doesn't meet the requirements for review:\n> \n> \n> - None of the referenced issues have the `help wanted` label\n> \n> **Please update your PR to address the above.** This PR will be automatically closed in **4 days** if these requirements are not met.\n> \n> <details>\n> <summary>Full contribution requirements</summary>\n> \n> 1. Include a detailed description of what this PR does\n> 2. Link to an issue with the `help wanted` label (use `Fixes #123` or `Closes #123`)\n> </details>\n\n",
+            "createdAt": "2026-05-31T08:41:28Z",
+            "includesCreatedEdit": false,
+            "isMinimized": true,
+            "minimizedReason": "spam",
+            "reactionGroups": [],
+            "url": "https://github.com/cli/cli/pull/13547#issuecomment-4586201239",
+            "viewerDidAuthor": false
+        },
+        {
+            "id": "IC_kwDODKw3uc8AAAABEgma_g",
+            "author": {
+                "login": "abd0-omar"
+            },
+            "authorAssociation": "NONE",
+            "body": "I've added the new test, and it passes, so that confirms that EscapedPath() preserves the encoding on fallback path too",
+            "createdAt": "2026-06-02T00:25:57Z",
+            "includesCreatedEdit": false,
+            "isMinimized": false,
+            "minimizedReason": "",
+            "reactionGroups": [],
+            "url": "https://github.com/cli/cli/pull/13547#issuecomment-4597586686",
+            "viewerDidAuthor": false
+        }
+    ]
+}

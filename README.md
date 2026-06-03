@@ -213,7 +213,7 @@ Expert personas invoked during the pipeline. Can also be invoked directly for a 
 
 | Agent             | What it does                                                                |
 | ----------------- | --------------------------------------------------------------------------- |
-| `code-reviewer`   | Mid-implementation plan alignment and quality checks (invoked by Implement) |
+| `code-reviewer`   | Mid-implementation plan alignment and quality checks (invoked by Implement); emits one severity label per finding from the fixed vocabulary `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` |
 | `senior-reviewer` | Brutal final code review against spec, plan, and engineering standards      |
 | `qa-reviewer`     | Runs e2e suite, fixes failures in up to 3 attempts, coverage audit, and evidence capture after green |
 
@@ -239,7 +239,7 @@ Invoke directly — not part of the `/feature` pipeline.
 | Skill        | What it does                                                                                     |
 | ------------ | ------------------------------------------------------------------------------------------------ |
 | `/sync`      | Bring your local checkout up to date with `main` before starting feature work — clean-tree check (optional stash), fetch + fast-forward pull, change summary, and detection-driven refresh of dependencies, migrations, `.env` keys, and Docker. Never runs destructive git, never auto-applies migrations, never writes `.env`. |
-| `/pr-review` | AI-assisted review of a GitHub PR — fetches diff, delegates to `code-reviewer`, walks you through each finding (keep/drop/edit), and posts only the findings you approve after an explicit "post now" confirmation. Never submits an Approve or Request Changes review — those verdicts are human-only. |
+| `/pr-review` | AI-assisted review of a GitHub PR — auto-detects first review vs. follow-up review by checking your prior comments on the PR. On a follow-up, deduplicates new findings against what you already posted and surfaces any prior comment threads whose anchored code is no longer in the diff. In both modes: fetches the diff, delegates to `code-reviewer` (which now emits a severity label per finding from `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`), walks you through each finding with its severity (keep/drop/edit), and posts only what you approve after an explicit "post now" confirmation. Never submits an Approve or Request Changes review — those verdicts are human-only. |
 
 Usage: `/sync` (takes no arguments) and `/pr-review <pr-number>` (e.g. `/pr-review 1250`; invoke without an argument to be prompted for a PR number).
 

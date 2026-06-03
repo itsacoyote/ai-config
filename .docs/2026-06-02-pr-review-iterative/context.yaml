@@ -1,0 +1,40 @@
+# context.yaml — feature workflow context
+# Created by the /spec skill. Read and updated by each agent before handing off.
+# To add new fields, extend this template and update agent-context/SKILL.md.
+
+feature:
+  name: "Iterative PR Review Skill"
+  short_name: "pr-review-iterative"
+  folder: ".docs/2026-06-02-pr-review-iterative"
+  date: "2026-06-02"
+  branch: "feature/pr-review-iterative"
+  base_branch: "main"
+
+workflow:
+  current_step: complete  # Active step: define | research | plan | implement | validate | document | complete
+  completed_steps:
+    - define
+    - research
+    - plan
+    - implement
+    - validate
+    - document
+  checkpoint: ""
+  escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
+  escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
+  summary: |
+    Document updated README.md across two surfaces: the Standalone Skills table entry for `/pr-review` was rewritten to describe the new iterative behavior (auto-detect, dedup, stale surfacing, severity-label display), and the Reviewer agents table entry for `code-reviewer` was updated to note that it now emits one severity label per finding from the fixed vocabulary. No other documentation surfaces required changes: CLAUDE.md covers project structure, workflow conventions, and Claude-facing patterns — none of which changed; the two edited files (`.claude/skills/pr-review/SKILL.md` and `.claude/agents/code-reviewer.md`) are themselves prose contracts and their inline documentation is the feature documentation; no API endpoints exist; the project has no changelog; no new files were created.
+
+    Key findings during the audit: the README's `/pr-review` description was the only user-visible surface that did not yet reflect the iterative behavior added by this feature — it still described a single-shot review with no mention of follow-up mode, dedup, or stale detection. That gap was the main thing Document closed. The `code-reviewer` table entry was a secondary gap: the agent's emitted severity labels are surfaced to reviewers during triage, so the table row needed a sentence. CLAUDE.md was deliberately not updated — no new conventions, directories, tooling, or architectural patterns were introduced that future Claude sessions need to know about.
+
+    For the human reviewer: the two substantive changes are in `.claude/skills/pr-review/SKILL.md` (new `## Detect mode`, `## Dedup against prior comments`, and `## Surface stale threads` sections, plus severity-label display in triage) and `.claude/agents/code-reviewer.md` (severity-label requirement added to the issue-listing contract). The one design decision worth scrutiny is the terminal exit sequencing: when dedup filters every finding, the skill still runs `## Surface stale threads` before printing the "No new findings —" message and stopping. This means the all-duplicate path produces slightly more output than a naive reading of the plan implied, but it is correct per the spec's acceptance criterion and per the "Stale thread review above is still relevant" wording in the terminal message.
+
+artifacts:
+  - path: artifacts/gh-pr-view-comments-sample.json
+    description: Live sample of `gh pr view 13547 -R cli/cli --json comments` showing the exact field names and types in a comments array (id, author.login, body, createdAt, url, viewerDidAuthor, isMinimized, etc.). Reference for dedup, mode-detection, and stale-detection logic.
+    created_by: research
+recommended_skills:
+  - skill: verify-coherence
+    invoke_when: "After Task 7's integration pass, before handing off to Validate — the two edited files are coupled by the severity-label contract and the skill gains several new sections that must remain internally consistent (gating on final resolved mode, em-dash discipline, refusal-block coherence)."
+output_artifacts: []
+documentation_created: []

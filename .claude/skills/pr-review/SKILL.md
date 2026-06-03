@@ -31,6 +31,27 @@ Confirm the current directory is inside a GitHub repo, fetch PR metadata, and fe
 
 Carry forward to the Delegate step: PR title, PR body, changed-file list (the `files` array from step 2), and the unified diff text from step 3.
 
+## Detect mode
+
+Before delegating to the agent, decide whether this is a first-review session or a follow-up session by checking GitHub for prior comments authored by you. Invoke `Skill(github-tool-preference)` before the `gh api user` and `gh pr view --json comments` calls below.
+
+1. Resolve the authenticated user once per session: run `gh api user --jq .login`. If it exits non-zero, print the exact `gh` stderr and stop. Do not invoke the agent. Do not fall back silently to first-review mode.
+2. Re-use the `comments` data when available, or run `gh pr view $ARGUMENTS --json comments` if you do not already have it in this session. If the call exits non-zero, print the exact `gh` stderr and stop.
+3. Filter the `comments` array to entries where `author.login == <authenticated login>`. The identifier on each entry is the GraphQL node `id` (e.g. `IC_kwDODKw3uc8AAAABEMYhBw`); use it for any in-memory keying. Each entry also includes `body`, `createdAt`, and `url`. (Sanity check: `viewerDidAuthor` should agree with the login comparison; if it disagrees, trust the explicit login comparison and continue.)
+4. If the filtered list is non-empty, the **detected mode** is follow-up. Announce: `Detected follow-up review — you have N prior comments on PR #<N>.` where N is the filtered count.
+5. If the filtered list is empty, the **detected mode** is first-review. Announce: `Detected first review — no prior comments by you on PR #<N>.`
+6. Prompt the reviewer once: `Reply 'fresh' to force first-review mode, 'follow-up' to force follow-up mode, or anything else to continue with the detected mode.`
+
+### Resolving the final mode
+
+| Reply | Effect |
+|-------|--------|
+| `fresh` | Final mode is first-review. Discard the prior-comments list. |
+| `follow-up` | Final mode is follow-up. Keep the prior-comments list in memory. |
+| anything else | Final mode equals the detected mode. |
+
+Carry the prior-comments list (id, body, createdAt, url) forward to the dedup and stale-detection steps only when the final mode is follow-up. In first-review mode, the list is discarded and no follow-up logic runs.
+
 ## Delegate to code-reviewer
 
 Invoke the `code-reviewer` agent. Pass the PR title, PR body, changed-file list, and full diff as context.
@@ -45,7 +66,57 @@ The agent returns a list of findings. Each finding has a Location (file + line o
 
 If the agent's response is the approval string (e.g. "Approved — continue implementation.") or otherwise reports no findings, tell the user "PR #$ARGUMENTS has no findings — nothing to triage." and stop. Do not post anything.
 
+## Dedup against prior comments
+
+This section runs only when the final resolved mode is follow-up. In first-review mode, skip this section entirely and pass the agent's findings unchanged to `## Triage findings`.
+
+### Normalization
+
+Before comparison, normalize both the new finding body and each prior comment body by: (a) lowercasing, (b) collapsing all runs of whitespace (including newlines) to a single space, (c) stripping the standard location prefix `**<path>:<line>** — ` (or its function-form variant `**<path>** (`<function>`) — `) from the start. Strip leading and trailing whitespace after step (c).
+
+### Match rule
+
+A new finding is a near-duplicate if its normalized body equals a prior comment's normalized body verbatim or near-verbatim. The match is on issue text only; two findings at the same `path:line` whose normalized bodies differ are both kept. Be conservative: when in doubt, keep the finding.
+
+### Output
+
+Drop near-duplicates silently from the triage list — they are not surfaced as kept items, not shown to the reviewer, not posted. Print exactly one summary line: `Filtered N near-duplicates of prior comments.` where N is the count actually filtered (use `0` when nothing was filtered).
+
+### Terminal exit when everything was a duplicate
+
+If every finding was filtered (and the surviving-findings list is empty), continue to `## Surface stale threads` as normal — the stale section is still relevant even when there are no new findings. After the stale section completes, print exactly: `No new findings — all of code-reviewer's output matched comments you already posted. Stale thread review above is still relevant.` Then stop. Do not enter `## Triage findings`. Do not enter the Post step. Do not ask `Post 0 comments now?`.
+
+## Surface stale threads
+
+This section runs only when the final resolved mode is follow-up. It is read-only — the skill does not edit, reply to, or resolve GitHub threads here.
+
+### Parsing the location prefix
+
+Parse each prior comment's body for a known location prefix using one of two regex patterns:
+
+- Line form: `^\*\*([^*:]+):([0-9]+)\*\* —` — captures `path` and `line`.
+- Function form: `^\*\*([^*]+)\*\* \(` `` `([^`]+)` `` `\) —` — captures `path` and `function`.
+
+If the prior comment body matches neither pattern, the comment has no parseable anchor. Do not mark it stale; do not surface it in this section.
+
+### Staleness rule
+
+For each prior comment with a parseable location prefix:
+
+- **Line form:** mark stale if `path` is not in the changed-files list from `gh pr view --json files`, OR if `line` is not within any `@@ -<old-start>,<old-count> +<new-start>,<new-count> @@` hunk range for that file in the current `gh pr diff` output.
+- **Function form:** mark stale if `path` is not in the changed-files list. Function-name presence in the new diff is not required — the function form intentionally has the weaker check, because verifying function existence requires parsing the diff body rather than the hunk headers.
+
+### Output
+
+If the stale list is empty, emit nothing — do not print an empty heading.
+
+If the stale list is non-empty, print the heading: `Prior comments where the code is gone (consider resolving on GitHub):` and then a numbered list. Each entry: `<n>. <url> — <original location prefix> — <first line of body>`.
+
+This section is the last thing printed before `## Triage findings` begins.
+
 ## Triage findings
+
+If the Dedup step resulted in zero surviving findings, the "No new findings —" terminal message is printed after `## Surface stale threads` completes, and this section is not entered.
 
 When the code-reviewer returns findings, present them to the user and walk through each one before anything is posted to GitHub.
 
@@ -54,9 +125,12 @@ When the code-reviewer returns findings, present them to the user and walk throu
 Before per-finding triage, print a numbered list of all findings with a one-line summary each. Example:
 
 ```
-1. src/foo.ts:42 — useAuthToken does not handle expired tokens.
-2. src/bar.ts:17 — Missing null check on response.data.
+1. [HIGH] src/foo.ts:42 — useAuthToken does not handle expired tokens.
+2. [LOW] src/bar.ts:17 — Missing null check on response.data.
+3. src/baz.ts:91 — Helper duplicates logic in `formatBytes`.
 ```
+
+If the agent emitted a severity label for the finding, show it in square brackets between the number and the location, using the em-dash separator U+2014. If the agent did not emit a label, omit the `[LABEL]` token entirely — never invent a placeholder.
 
 ### Triage mode
 
@@ -64,7 +138,7 @@ Default to one-by-one. At the very first triage prompt, if the user replies `bat
 
 ### One-by-one mode
 
-For each finding, print the finding number, location, problem, and fix in full. Then ask the user for input.
+For each finding, print the finding number, location, problem, and fix in full. If the agent emitted a severity label, print `Severity: <LABEL>` on its own line immediately above the Location / Problem / Fix block. If no label was emitted, omit the Severity line; do not print `Severity: (none)` or any placeholder. Then ask the user for input.
 
 Accepted inputs:
 
@@ -127,7 +201,8 @@ These are hard constraints. The wording matters because there is no enforcement 
 - Do not post anything to GitHub before the explicit `yes` / `post` / `ship it` affirmation at the end of triage.
 - Do not persist the triage checklist to disk. The session lives only in this conversation.
 - Do not add `Co-Authored-By`, "Generated by", "🤖", or any AI attribution to posted comment bodies. The comment must read as the user would have written it.
-- Do not invent severity tags (CRITICAL/HIGH/MEDIUM/LOW). Pass the code-reviewer's findings through as-is.
+- Do not invent, re-rank, normalize, translate, or strip severity labels. The `code-reviewer` agent emits one label per finding from the fixed vocabulary `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`; surface those labels verbatim in the Triage overview and the one-by-one prompt, and otherwise pass the agent's findings through as-is.
+- Do not append severity labels to the body of posted PR comments. Posted bodies keep the existing `**<path>:<line>** — <text>` format with no `[LABEL]` prefix.
 - Do not run lint, type-check, e2e tests, or any local build against the PR branch. Review is based on the diff and changed files only.
 - Do not wire this skill into the `/feature` pipeline or invoke it from any pipeline agent. It is invoked directly by the user.
 
