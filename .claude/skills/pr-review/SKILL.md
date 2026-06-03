@@ -84,7 +84,7 @@ Drop near-duplicates silently from the triage list — they are not surfaced as 
 
 ### Terminal exit when everything was a duplicate
 
-If every finding was filtered (and the surviving-findings list is empty), print exactly: `No new findings — all of code-reviewer's output matched comments you already posted. Stale thread review above is still relevant.` Then stop. Do not enter `## Triage findings`. Do not enter the Post step. Do not ask `Post 0 comments now?`.
+If every finding was filtered (and the surviving-findings list is empty), continue to `## Surface stale threads` as normal — the stale section is still relevant even when there are no new findings. After the stale section completes, print exactly: `No new findings — all of code-reviewer's output matched comments you already posted. Stale thread review above is still relevant.` Then stop. Do not enter `## Triage findings`. Do not enter the Post step. Do not ask `Post 0 comments now?`.
 
 ## Surface stale threads
 
@@ -116,7 +116,7 @@ This section is the last thing printed before `## Triage findings` begins.
 
 ## Triage findings
 
-If the Dedup step printed the "No new findings —" terminal message, this section is not entered.
+If the Dedup step resulted in zero surviving findings, the "No new findings —" terminal message is printed after `## Surface stale threads` completes, and this section is not entered.
 
 When the code-reviewer returns findings, present them to the user and walk through each one before anything is posted to GitHub.
 
