@@ -54,9 +54,12 @@ When the code-reviewer returns findings, present them to the user and walk throu
 Before per-finding triage, print a numbered list of all findings with a one-line summary each. Example:
 
 ```
-1. src/foo.ts:42 — useAuthToken does not handle expired tokens.
-2. src/bar.ts:17 — Missing null check on response.data.
+1. [HIGH] src/foo.ts:42 — useAuthToken does not handle expired tokens.
+2. [LOW] src/bar.ts:17 — Missing null check on response.data.
+3. src/baz.ts:91 — Helper duplicates logic in `formatBytes`.
 ```
+
+If the agent emitted a severity label for the finding, show it in square brackets between the number and the location, using the em-dash separator U+2014. If the agent did not emit a label, omit the `[LABEL]` token entirely — never invent a placeholder.
 
 ### Triage mode
 
@@ -64,7 +67,7 @@ Default to one-by-one. At the very first triage prompt, if the user replies `bat
 
 ### One-by-one mode
 
-For each finding, print the finding number, location, problem, and fix in full. Then ask the user for input.
+For each finding, print the finding number, location, problem, and fix in full. If the agent emitted a severity label, print `Severity: <LABEL>` on its own line immediately above the Location / Problem / Fix block. If no label was emitted, omit the Severity line; do not print `Severity: (none)` or any placeholder. Then ask the user for input.
 
 Accepted inputs:
 
