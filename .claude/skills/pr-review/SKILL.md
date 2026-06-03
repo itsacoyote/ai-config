@@ -31,6 +31,27 @@ Confirm the current directory is inside a GitHub repo, fetch PR metadata, and fe
 
 Carry forward to the Delegate step: PR title, PR body, changed-file list (the `files` array from step 2), and the unified diff text from step 3.
 
+## Detect mode
+
+Before delegating to the agent, decide whether this is a first-review session or a follow-up session by checking GitHub for prior comments authored by you. Invoke `Skill(github-tool-preference)` before the `gh api user` and `gh pr view --json comments` calls below.
+
+1. Resolve the authenticated user once per session: run `gh api user --jq .login`. If it exits non-zero, print the exact `gh` stderr and stop. Do not invoke the agent. Do not fall back silently to first-review mode.
+2. Re-use the `comments` data when available, or run `gh pr view $ARGUMENTS --json comments` if you do not already have it in this session. If the call exits non-zero, print the exact `gh` stderr and stop.
+3. Filter the `comments` array to entries where `author.login == <authenticated login>`. The identifier on each entry is the GraphQL node `id` (e.g. `IC_kwDODKw3uc8AAAABEMYhBw`); use it for any in-memory keying. Each entry also includes `body`, `createdAt`, and `url`. (Sanity check: `viewerDidAuthor` should agree with the login comparison; if it disagrees, trust the explicit login comparison and continue.)
+4. If the filtered list is non-empty, the **detected mode** is follow-up. Announce: `Detected follow-up review — you have N prior comments on PR #<N>.` where N is the filtered count.
+5. If the filtered list is empty, the **detected mode** is first-review. Announce: `Detected first review — no prior comments by you on PR #<N>.`
+6. Prompt the reviewer once: `Reply 'fresh' to force first-review mode, 'follow-up' to force follow-up mode, or anything else to continue with the detected mode.`
+
+### Resolving the final mode
+
+| Reply | Effect |
+|-------|--------|
+| `fresh` | Final mode is first-review. Discard the prior-comments list. |
+| `follow-up` | Final mode is follow-up. Keep the prior-comments list in memory. |
+| anything else | Final mode equals the detected mode. |
+
+Carry the prior-comments list (id, body, createdAt, url) forward to the dedup and stale-detection steps only when the final mode is follow-up. In first-review mode, the list is discarded and no follow-up logic runs.
+
 ## Delegate to code-reviewer
 
 Invoke the `code-reviewer` agent. Pass the PR title, PR body, changed-file list, and full diff as context.
