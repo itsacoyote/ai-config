@@ -11,12 +11,13 @@ feature:
   base_branch: "main"
 
 workflow:
-  current_step: validate  # Active step: define | research | plan | implement | validate | document | complete
+  current_step: document  # Active step: define | research | plan | implement | validate | document | complete
   completed_steps:
     - define
     - research
     - plan
     - implement
+    - validate
   checkpoint: ""
   escalated: false      # Set to true by an agent when it cannot resolve an issue after 3 attempts
   escalation_reason: "" # Human-readable description of what caused the escalation and what was tried
