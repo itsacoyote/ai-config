@@ -72,6 +72,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `security-scan` | Vulnerability audit — injection, auth/access control, secrets, crypto, deps (JS/TS/Ruby) |
 | `security-and-hardening` | Build secure code in the first place (preventive counterpart to `security-scan`) |
 | `writing-tests` | What/how-much to test, at what level — the judgment behind good tests |
+| `project-checks` | Discover + run the project's own mechanical gates (typecheck, lint, format, spell, tests) before each commit and as a Validate pre-flight — auto-fix, then block on failure |
 | `debugging-and-error-recovery` | Systematic root-cause debugging when something breaks |
 
 ### Engineering craft

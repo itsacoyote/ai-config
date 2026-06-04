@@ -13,6 +13,10 @@ Run this **from the main session** — it spawns the `senior-review` and `qa-rev
 
 `autorun` calls this skill as its always-run end-of-run review pass, and reuses its loop shape (bounded fix iterations) for per-task reviews of risky tasks.
 
+## Pre-flight — mechanical checks first
+
+Before spawning any review agent, run [`project-checks`](../project-checks/SKILL.md) once over the change — typecheck, lint, format, spell, tests, discovered from the project. Fix (or auto-fix) anything red **before** Round 1. A failing mechanical check means a review round would be wasted on noise that the pipeline would reject anyway, so fail fast and cheap here. Only proceed to the senior review once the tree is green.
+
 ## When NOT to use
 
 Trivial changes (typo, copy, config) don't need the full gate — a quick `senior-review` in-session is enough. Reserve `validate` for real features and risky changes.

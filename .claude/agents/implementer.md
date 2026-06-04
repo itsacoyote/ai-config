@@ -6,6 +6,7 @@ skills:
   - incremental-implementation
   - writing-tests
   - find-patterns
+  - project-checks
 ---
 
 # Implementer Agent
@@ -45,10 +46,13 @@ notice adjacent work worth doing, note it in your return, don't do it.
   other skill the work turns out to need, via the Skill tool. Only the core
   (`incremental-implementation`, `writing-tests`, `find-patterns`) is preloaded; everything
   else loads when you invoke it, keeping your context lean.
-- **Verify** against the task's verification steps (tests/build/lint as applicable; for
-  docs/skills tasks, `writing-skills` conventions + link/frontmatter checks).
-- **Commit** your work (`Skill(git-commit)` first; conventional commit). You **may commit;
-  you must not push** — the orchestrator owns the terminal push.
+- **Verify** with `project-checks` (preloaded) — it discovers and runs the project's own
+  typecheck/lint/format/spell/test commands, auto-fixing where it can. For docs/skills tasks,
+  also apply `writing-skills` conventions + link/frontmatter checks. A check that still fails
+  after auto-fix means the task isn't clean: return **DONE_WITH_CONCERNS** or **BLOCKED** with
+  the failing command and output — never report a clean DONE over a red check.
+- **Commit** your work (`Skill(git-commit)` first; conventional commit) once the checks are
+  green. You **may commit; you must not push** — the orchestrator owns the terminal push.
 
 Permissions stay enforced: your tool calls surface approval prompts to the human in the main
 session. Never assume bypass.
