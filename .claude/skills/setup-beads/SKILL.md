@@ -48,63 +48,64 @@ Pick the one matching the user's environment (prefer an already-present package 
 
 Ask which mode the user wants. **Default to Local/isolated** — it's the right answer for personal use and shared repos.
 
-- **Local / isolated (default).** Issues live only on this machine. Nothing beads-related is committed; no remote; no push. Best for shared/public/private repos where beads is just *your* tracker.
+- **Local / isolated (default).** Issues live only on this machine. Nothing beads-related is committed; no remote; no push. Achieved with `bd init --stealth`, which configures `.git/info/exclude` (local, never committed). Best for shared/public/private repos where beads is just *your* tracker.
 - **Tracked (advanced).** Issues travel with the repo via a git-backed Dolt remote on the `refs/dolt/data` ref (separate from code branches). Only choose this if the user explicitly wants issues shared through the repo. Setup: after init, `bd dolt remote add origin <repo-url>` and optionally enable `dolt.auto-push`; a fresh clone re-hydrates with `bd bootstrap`. This skill does not push for the user.
 
 The rest of this skill assumes **Local/isolated** unless the user picked Tracked.
 
-## Initialize
+## Initialize (local/isolated)
 
-Run a **non-interactive** init so it never blocks on prompts (the skills drive `bd`, not the user):
+Initialize in **stealth + non-interactive** mode:
 
 ```bash
-bd init --quiet --skip-agents
+bd init --stealth --non-interactive
 ```
 
-- `--quiet` — non-interactive init intended for AI agents; skips the contributor-mode prompt.
-- `--skip-agents` — don't generate beads' own `AGENTS.md`. This config already carries beads guidance in [`.claude/references/beads.md`](../../references/beads.md); a second, bd-generated instructions file would duplicate and drift. (Drop this flag only if the user explicitly wants bd's `AGENTS.md`.)
-- Do **not** pass `--contributor` or `--team` — those are for OSS-fork and team-branch workflows, not personal use.
+- `--stealth` — the purpose-built personal-use mode: configures `.git/info/exclude` (local, never committed) so `.beads/` and `.claude/settings.local.json` stay invisible to the repo and collaborators. This — not a tracked `.gitignore` — is how "nothing committed" is achieved.
+- `--non-interactive` — skips all prompts (role defaults to `maintainer`; `--contributor`/`--team` are rejected here anyway). Auto-detected for non-TTY, but pass it explicitly.
+- The issue prefix defaults to the directory name (e.g. `ai-config` → `ai-config-<hash>`); pass `-p <prefix>` to override.
+- **Verify flags with `bd init --help` first — they evolve.** Notably there is **no** `--skip-agents`; the `AGENTS.md` profile is `--agents-profile` (default `minimal`, just a pointer to `bd prime`), and `-q/--quiet` only *suppresses output*, it does not skip prompts.
 
-Verify the flags first with `bd init --help`, then run it. Capture and show the output.
+(For **tracked mode**, omit `--stealth`, then add a remote — see "Tracked mode" below.)
 
-## Keep `.beads/` out of git (local/isolated mode)
+## Clean up bd's tracked `.gitignore` edit
 
-So nothing beads-related is committed, ensure the repo's **root `.gitignore`** ignores the whole directory:
+Even in stealth mode, `bd init` appends a beads block (`.dolt/`, `*.db`, `.beads-credential-key`) to the repo's **tracked** root `.gitignore`. Since `.git/info/exclude` already hides all of `.beads/`, that block is redundant and would commit beads-related lines — so remove it:
 
-```gitignore
-# beads (personal issue tracker — local only)
-.beads/
+```bash
+git diff .gitignore         # confirm the only change is bd's "# Beads / Dolt files" block
+git checkout -- .gitignore  # revert if that block is the sole change
 ```
 
-- If `.gitignore` doesn't exist, create it with that block.
-- If `.beads/` (or an equivalent) is already ignored, leave it and say so.
-- If `.beads/` was already accidentally tracked from a prior run, surface it and offer to untrack: `git rm -r --cached .beads/` (this removes it from git, not from disk). `bd doctor --fix` can also repair the gitignore state.
+If `.gitignore` had other unstaged edits, delete just the bd-added block by hand instead of reverting the whole file. Then confirm the local exclude is in place:
 
-Do not commit anything in this step — only edit `.gitignore`. Whether the developer commits that one-line `.gitignore` change is their call.
-
-## Session-start priming (optional but recommended)
-
-`bd prime` injects ~1–2k tokens of current beads context (ready work, workflow state) into a session at start and after compaction — a local read, no network. Wiring it as a `SessionStart` hook means every Claude Code session opens already aware of the beads state.
-
-To honor "nothing beads-related committed," put the hook in **`.claude/settings.local.json`** (project-scoped but git-ignored), **not** the committed `.claude/settings.json`. Delegate the edit to the `update-config` skill, adding a `SessionStart` hook that runs `bd prime`:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "bd prime" } ] }
-    ]
-  }
-}
+```bash
+grep -q '\.beads/' .git/info/exclude && echo "✓ .beads/ excluded locally"
 ```
 
-Ask before adding the hook — it changes session startup behavior. (`bd setup claude` is beads' own command for this, but it may target committed settings; prefer the `settings.local.json` route above for isolated use, and offer `bd setup claude` only if the user doesn't mind committed hooks.)
+After this, `git status` should show **nothing** beads-related.
+
+## Do NOT run `bd setup claude`
+
+beads ships a `bd setup claude` command, but **avoid it in this config.** It writes hooks to the **committed** `.claude/settings.json` and appends a beads section to the **committed** `CLAUDE.md` — and that injected section tells the agent to stop using `MEMORY.md` and the harness task tools (`TaskCreate`/TodoWrite) and to follow a mandatory git-push session protocol. All of that conflicts with how this workflow operates. Wire only what you need, by hand, below.
+
+## Let the skills drive bd without prompts
+
+Add `Bash(bd *)` to the `allow` list in **`.claude/settings.local.json`** (project-local, git-excluded under stealth) so the workflow skills can run `bd` smoothly. Use the `update-config` skill for the edit.
+
+## Session-start priming (optional — off by default)
+
+`bd prime` injects ~1–2k tokens of beads context at session start — useful, **but** its injected text is opinionated: it instructs the agent not to use `MEMORY.md` or `TaskCreate` and to run a session-close/push protocol, which fights this config's memory system and isolated (no-push) setup. So **don't wire it automatically.**
+
+The workflow skills already invoke beads on demand via [`.claude/references/beads.md`](../../references/beads.md) (`bd ready`, `bd prime`, etc.) when doing real workflow work — that's enough, without injecting contradictory guidance into every session.
+
+If a user explicitly wants auto-priming despite the caveat, add a `SessionStart` (and optionally `PreCompact`) hook running `bd prime --stealth` to **`.claude/settings.local.json`** (git-excluded) via the `update-config` skill — never to the committed `settings.json`.
 
 ## Verify and recap
 
 1. `bd version` — confirm the CLI works.
 2. `bd ready` — smoke-test the database (empty list is success: it means beads is initialized with no ready issues yet).
-3. Recap what was configured: install method, mode (local/isolated), `bd init` flags used, the `.gitignore` entry, and whether the `bd prime` hook was added and where.
+3. Recap what was configured: install method, mode (local/isolated), `bd init` flags used, that bd's `.gitignore` edit was reverted and `.beads/` is excluded via `.git/info/exclude`, the `Bash(bd *)` permission, and whether a `bd prime` hook was added (default: no).
 
 Then point the user at the next step: the workflow skills now run in **beads-enhanced** mode automatically — `define` creates a feature epic, `planning-and-task-breakdown` files tasks, and so on, per [`.claude/references/beads.md`](../../references/beads.md). Try `define` to start a feature, or `standup` to read current state.
 
@@ -112,7 +113,8 @@ Then point the user at the next step: the workflow skills now run in **beads-enh
 
 - **Never install software without confirming first.** Installing `bd` touches the user's machine.
 - **Never push beads data or add a remote in local/isolated mode.** No `bd dolt push`, no `bd dolt remote add`.
-- **Never commit.** It only edits `.gitignore` and (with consent) `settings.local.json`; the developer decides what to commit.
-- **Never write the session hook to committed settings** in isolated mode — `settings.local.json` only.
+- **Never leave beads-related changes in the tracked tree.** Revert bd's `.gitignore` edit; rely on `.git/info/exclude` (stealth). After setup, `git status` shows nothing beads-related.
+- **Never run `bd setup claude` in this config** — it pollutes committed `CLAUDE.md` + `settings.json` with conflicting rules.
+- **Never write hooks or permissions to committed settings** — `.claude/settings.local.json` only (git-excluded under stealth).
 - **Never pass `--contributor` or `--team`** — this is personal-use setup.
-- **Never trust a flag it hasn't verified** against `bd <command> --help` — the CLI evolves.
+- **Never trust a flag it hasn't verified** against `bd <command> --help` — the CLI evolves (e.g. `--skip-agents` does not exist; `-q` only suppresses output).

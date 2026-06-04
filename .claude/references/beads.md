@@ -64,7 +64,7 @@ bd ready                               # list unblocked issues ready to start
 bd create "Title" -p 1 -t epic         # create an issue (epic, feature, or task)
 bd create "Task title" -p 1 -t task --parent <epic-id>   # create a child task
 bd dep add <child-id> <parent-id>      # express a blocking/ordering dependency
-bd update <id> --status in_progress    # claim / start an issue
+bd update <id> --claim                 # claim/start an issue (sets assignee + in_progress, idempotent)
 bd close <id>                          # complete an issue (or: bd update <id> --status closed)
 bd show <id>                           # view an issue's details
 bd list --json                         # list issues (use --json for programmatic reads)
@@ -80,8 +80,8 @@ before relying on them.** If a flag here has changed, prefer what `--help` repor
 - **Research** → attach findings to the epic (comment or `research` child issue).
 - **Plan** → create one **child task** per plan task, with `bd dep add` for ordering;
   the file map and TDD test names go in each task's body.
-- **Implement** → `bd ready` to find the next task, `bd update <id> --status in_progress`
-  before starting it, `bd close <id>` once its commit lands.
+- **Implement** → `bd ready` to find the next task, `bd update <id> --claim` before
+  starting it, `bd close <id>` once its commit lands.
 - **Validate** → file an issue per unresolved review/QA finding; close them as fixes
   land. The validation summary goes on the epic.
 - **Document** → file issues for any documentation deliberately deferred; otherwise
