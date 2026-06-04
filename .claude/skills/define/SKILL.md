@@ -63,4 +63,4 @@ Do not write step-doc files — there is no `.docs/`.
 
 ## Approval checkpoint
 
-Before handing off to Research, present the **Summary** and **Acceptance Criteria** and ask the user to approve or give feedback. Revise and re-present until approved. Only after approval move on to the `research` skill (see `feature-workflow` for the full sequence).
+Before handing off to Research, present the **Summary** and **Acceptance Criteria** and ask the user to approve or give feedback. Revise and re-present until approved. Only after approval, move on — either continue by hand with the `research` skill, or hand the rest of the workflow to `autorun` to run Research → Document autonomously under supervision (see `feature-workflow`).

@@ -51,6 +51,8 @@ For large or risky work, run a review mid-implement rather than only at the end 
 
 When the change is complete, hand off to the `validate` skill for the full review gate (see `feature-workflow` for the sequence).
 
+Under `autorun`, this loop is driven for you — each task runs in a fresh `implementer` subagent with its own lean context, and the discipline on this page is exactly what that subagent follows.
+
 ## Slicing Strategies
 
 ### Vertical Slices (Preferred)

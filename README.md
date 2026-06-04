@@ -2,7 +2,7 @@
 
 A portable, copy-paste library of [Claude Code](https://docs.claude.com/en/docs/claude-code) **skills, agents, rules, and references**. It gives Claude a structured, manual feature-development workflow — **Define → Research → Plan → Implement → Validate → Document** — plus a deep bench of engineering-quality skills (testing, security, API design, frontend, git, docs).
 
-It is **manual by design**: you drive each step. There is no orchestrator running the pipeline autonomously — that's a deliberate choice to keep the process legible and controllable while it matures.
+It runs **manual by default** — you drive each step — with an optional **supervised orchestrator** (`autorun`) that runs the post-Define steps for you, implementing one task at a time in fresh subagents while keeping permissions on and stopping at a ready-for-review PR. There's deliberately no *unattended* runner yet — the human stays in the loop at two gates (Define and the PR) and approves actions as they happen.
 
 Drop `.claude/` into any project and the workflow and skills come with it.
 
@@ -53,6 +53,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `validate` `/cmd` | Sequence senior + QA review with bounded fix loops |
 | `document` `/cmd` | Pre-PR documentation audit + PR description |
 | `feature-workflow` | The map of the six steps and which skill/agent owns each |
+| `autorun` `/cmd` | Supervised-autonomous orchestrator: after Define, runs Research→Document one task at a time in fresh subagents, permissions on, stopping at a ready-for-review PR |
 
 ### Research support
 
@@ -109,6 +110,7 @@ Thin wrappers that run a review skill in an **isolated context** — the value i
 |-------|--|
 | `senior-review` | Runs the `senior-review` skill; returns findings, doesn't change code |
 | `qa-review` | Runs the `qa-review` skill; owns the e2e run and optional evidence capture |
+| `implementer` | Implements one planned task in isolation (spawned by `autorun`); commits and returns a status — doesn't review or push |
 
 ---
 

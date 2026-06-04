@@ -11,6 +11,8 @@ The last gate before a change ships. Run a senior code review, then a QA review;
 
 Run this **from the main session** — it spawns the `senior-review` and `qa-review` agents, and subagents can't spawn subagents. Spawning them in isolated contexts is the point: an independent reviewer that didn't write the code won't rubber-stamp it.
 
+`autorun` calls this skill as its always-run end-of-run review pass, and reuses its loop shape (bounded fix iterations) for per-task reviews of risky tasks.
+
 ## When NOT to use
 
 Trivial changes (typo, copy, config) don't need the full gate — a quick `senior-review` in-session is enough. Reserve `validate` for real features and risky changes.
