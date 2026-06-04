@@ -52,9 +52,16 @@ halt the run at any point and hand control back to the human.
 
 Detect mode per [`.claude/references/beads.md`](../../references/beads.md).
 
-**Beads-enhanced:**
+**Beads-enhanced.** On (re)invoke, **reclaim stranded work first**: `bd ready` lists only
+`open` tasks, so a task claimed (`in_progress`) but not yet closed — the common interruption
+point — would otherwise be skipped on resume. Pull it back in before taking new work.
 
 ```
+# resume: reclaim anything left in progress from a prior run
+for each in_progress task under the epic (claimed, not closed):
+  re-dispatch it (DISPATCH below); on a passing review, bd close <id>
+
+# then drain ready work
 while `bd ready` lists an implementable task (skip the epic / non-leaf issues):
   pick the highest-priority ready task
   bd update <id> --claim
@@ -66,6 +73,8 @@ while `bd ready` lists an implementable task (skip the epic / non-leaf issues):
     BLOCKED            → exception-stop: halt and surface to the human
   continue to the next ready task
 ```
+
+Find stranded tasks with `bd list --status in_progress` scoped to the epic.
 
 **Standalone:** work down the plan's task list the same way, tracking status in the session.
 
@@ -111,8 +120,9 @@ Each subagent runs on the model best suited to its role, overridable at launch:
 - **implementer** → a fast/capable model (the agent defaults to Sonnet).
 - **reviewers** (`senior-review` → Opus, `qa-review` → Sonnet) → their own frontmatter defaults.
 
-Override per spawn with the `Agent` tool's `model` parameter (resolution: per-call >
-agent frontmatter > session model). If the user names models at launch, use those.
+Override per spawn with the `Agent` tool's `model` parameter (resolution:
+`CLAUDE_CODE_SUBAGENT_MODEL` env > per-call > agent frontmatter > session model). If the
+user names models at launch, use those.
 
 ## Exception stops
 
@@ -160,9 +170,10 @@ on the epic; standalone — present a run summary in the session at the end.
 ## Dual-mode & resuming
 
 - **Beads-enhanced (recommended):** loop state lives in beads, so the run is **resumable** —
-  if you stop it, deny a permission, or hit an exception-stop, re-invoking autorun continues
-  from the remaining `bd ready` tasks. Closed tasks stay closed; a claimed-but-unfinished task
-  is picked back up.
+  if you stop it, deny a permission, or hit an exception-stop, re-invoking autorun first
+  reclaims any `in_progress` task (claimed but not closed) under the epic via the resume step
+  in "The implement loop," then continues with the remaining `bd ready` tasks. Closed tasks
+  stay closed.
 - **Standalone:** the task list lives in the session, so resumability is best-effort — a fresh
   session re-derives the plan from the spec. Use `setup-beads` for any feature you might pause
   and resume.
