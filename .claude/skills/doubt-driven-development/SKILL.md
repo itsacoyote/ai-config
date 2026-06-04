@@ -1,6 +1,6 @@
 ---
 name: doubt-driven-development
-description: Subjects every non-trivial decision to a fresh-context adversarial review before it stands. Use when correctness matters more than speed, when working in unfamiliar code, when stakes are high (production, security-sensitive logic, irreversible operations), or any time a confident output would be cheaper to verify now than to debug later.
+description: Use when correctness matters more than speed — before committing non-trivial code, making an architectural decision under uncertainty, working in unfamiliar code, or asserting a property the compiler can't verify (thread safety, idempotence, spec-match), or any time a confident output would be cheaper to verify now than to debug later. Materializes a fresh-context reviewer biased to disprove the decision before it stands.
 ---
 
 # Doubt-Driven Development
@@ -39,12 +39,12 @@ Apply the skill when:
 
 If you doubt every keystroke, you ship nothing. The skill applies only to non-trivial decisions as defined above.
 
-## Loading Constraints
+## Where this runs
 
-This skill is designed for the **main-session orchestrator**, where Step 3 (DOUBT, detailed below) can spawn a fresh-context reviewer.
+This skill orchestrates from the **main session**, because Step 3 (DOUBT, detailed below) spawns a fresh-context reviewer with the `Agent` tool — and only the main session can spawn subagents.
 
-- **Do NOT add this skill to a persona's `skills:` frontmatter.** A persona that follows Step 3 would spawn another persona — the orchestration anti-pattern explicitly forbidden by `references/orchestration-patterns.md` ("personas do not invoke other personas").
-- **If you find yourself applying this skill from inside a subagent context** (where Claude Code prevents nested subagent spawn): the preferred path is to surface to the user that doubt-driven cannot run nested and let the main session handle it. As a last resort only, a degraded self-questioning fallback exists — rewrite ARTIFACT + CONTRACT as a fresh self-prompt with a hard mental separator from your prior reasoning, and walk Steps 1–5. This is **not fresh-context review** (you carry your own context with you), so flag the result as degraded and prefer escalation whenever the user is reachable.
+- **Run it from the main session, not from inside a subagent.** Claude Code subagents can't spawn nested subagents, so a doubt cycle started inside one can't materialize its fresh-context reviewer.
+- **If you find yourself applying this skill from inside a subagent context:** the preferred path is to surface to the user that doubt-driven cannot run nested and let the main session handle it. As a last resort only, a degraded self-questioning fallback exists — rewrite ARTIFACT + CONTRACT as a fresh self-prompt with a hard mental separator from your prior reasoning, and walk Steps 1–5. This is **not fresh-context review** (you carry your own context with you), so flag the result as degraded and prefer escalation whenever the user is reachable.
 
 ## The Process
 
@@ -105,9 +105,9 @@ CONTRACT: <paste contract>
 
 **Pass ARTIFACT + CONTRACT only. Do NOT pass the CLAIM.** Handing the reviewer your conclusion biases it toward agreement. The reviewer must independently determine whether the artifact satisfies the contract.
 
-In Claude Code, the role-based reviewers in `agents/` start with isolated context by design and are usable here — see `agents/` for the roster and per-domain match.
+In Claude Code, spawn the reviewer with the `Agent` tool — a subagent starts with **isolated context by design**, which is exactly what a fresh-context reviewer needs. Reach for a general-purpose subagent (`general-purpose`, or `Explore` for a read-only codebase check) and hand it the adversarial prompt above. For domain-heavy artifacts you can route instead to a matching review agent — `senior-review` for engineering quality, `qa-review` for test coverage — as long as you pass the adversarial framing.
 
-**The adversarial prompt above takes precedence over the persona's default response shape.** Personas like `code-reviewer` are written to produce balanced verdicts with both strengths and weaknesses; doubt-driven needs issues-only output. Paste the adversarial prompt verbatim into the invocation so it overrides the persona's default. If a persona's response shape can't be overridden cleanly, fall back to a generic subagent with the adversarial prompt.
+**The adversarial prompt above takes precedence over a reviewer's default response shape.** A review agent like `senior-review` is written to produce a balanced findings report; doubt-driven needs issues-only output. Paste the adversarial prompt verbatim into the invocation so it overrides the agent's default shape. If that can't be steered cleanly, fall back to a generic `general-purpose` subagent with the adversarial prompt.
 
 #### Cross-model escalation
 
@@ -222,11 +222,10 @@ If 3 cycles is "obviously insufficient" because the artifact is large: the artif
 
 ## Interaction with Other Skills
 
-- **`code-review-and-quality` / `/review`**: complementary. `/review` is post-hoc PR verdict; doubt-driven is in-flight per-decision. Use both.
-- **`source-driven-development`**: SDD verifies _facts about frameworks_ against official docs. Doubt-driven verifies _your reasoning about the artifact_. SDD checks the API exists; doubt-driven checks you used it correctly under the contract.
-- **`test-driven-development`**: TDD's RED step is doubt made concrete — a failing test is a disproof attempt. When TDD applies, that failing test _is_ the doubt step for behavioral claims.
+- **`senior-review` / `qa-review` / `/review`**: complementary. `/review` (and the `senior-review`/`qa-review` agents at the Validate step) is a verdict on a finished artifact; doubt-driven is in-flight per-decision, while course-correction is still cheap. Use both.
+- **`web-search`**: verifies _facts about external libraries and APIs_ against official docs. Doubt-driven verifies _your reasoning about the artifact_. `web-search` checks the API exists; doubt-driven checks you used it correctly under the contract.
+- **`writing-tests`**: a failing test is doubt made concrete — a disproof attempt. When a behavioral claim can be expressed as a test, that failing test _is_ the doubt step for it.
 - **`debugging-and-error-recovery`**: when the reviewer surfaces a real failure mode, drop into the debugging skill to localize and fix.
-- **Repo orchestration rules** (`references/orchestration-patterns.md`): this skill orchestrates from the main session. A persona calling another persona is anti-pattern B — see Loading Constraints above.
 
 ## Verification
 
