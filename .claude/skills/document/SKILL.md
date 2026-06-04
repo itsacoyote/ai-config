@@ -1,0 +1,43 @@
+---
+name: document
+description: Use as the final step before a PR goes to human review — audit and update every documentation surface affected by the change, write the PR description, and ready the PR.
+disable-model-invocation: true
+allowed-tools: Read Edit Write Bash(git *) Bash(gh *) Bash(find *) Bash(grep *)
+---
+
+# Document
+
+The last step of the feature workflow, before human review. Make sure every change is fully reflected in the project's documentation. The bar: a junior engineer who has never seen this codebase could clone it, set it up, understand what changed and why, and run it — entirely from the docs. If they can't, something is missing.
+
+Do not cut corners. "This seems obvious" and "this is a small change" are not reasons to skip documentation. If something changed, or now exists that didn't before, it gets documented.
+
+## Start
+
+Read the full diff — this is the source of truth for what changed:
+
+```bash
+BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+git diff $(git merge-base HEAD ${BASE:-main}) HEAD
+```
+
+Then read the spec (if one exists) to understand intent.
+
+## Documentation audit
+
+Work every surface below. For each: read the current file, compare against the diff, then update. Don't guess.
+
+- **README** — setup/getting-started, run commands, test commands, environment variables (name, purpose, example), configuration, database/migrations, new scripts, prerequisites. Remove or fix anything the change made wrong.
+- **The project's `CLAUDE.md` / `AGENTS.md`** — new directories, new conventions or patterns this change establishes, new tools/scripts/commands, architectural shifts, new domain terms, changes to how tests run. Create it if missing. *(This is the **target project's** agent file, not this skills repo's.)*
+- **Feature documentation** — anything a user or developer interacts with: what it does and why, how to use it (examples), required setup, limitations, how it relates to other features. Put it where the project's docs live.
+- **API documentation** — for added/changed/removed endpoints: path + method, request params/headers/body (types, required/optional), response shapes and status codes, auth requirements, rate limits.
+- **Inline documentation** — for complex logic, non-obvious business rules, and workarounds (document what, why, and what breaks if removed) and for public interfaces whose contract isn't clear from types. Comment the *why*, never the *what*.
+- **Changelog** — if the project keeps one (or is public-facing): feature name + one-line description, breaking changes, migration steps.
+- **ADRs** — if this feature involved a significant architectural decision, record it (see `documentation-and-adrs`).
+
+## PR description
+
+Write the PR body following the `create-pr` skill (what/why, no AI attribution). Include: what changed (the key files and their responsibilities), how it was tested/validated, and links to anything relevant. Don't paste a raw file list. If a draft PR was opened earlier, edit it (`gh pr edit`); otherwise create it (`create-pr`).
+
+## Completion
+
+Commit the documentation changes (`Skill(git-commit)` first; stage explicit paths), push, and ready the PR (`gh pr ready` if it was a draft). Record any deliberately-deferred documentation as follow-ups per the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone, list them in your handoff; beads-enhanced, file issues and close out the feature epic.
