@@ -1,339 +1,197 @@
 # AI Config
 
-A Claude Code template that takes a feature from idea to production-ready PR. You define the feature. Claude does the rest.
+A portable, copy-paste library of [Claude Code](https://docs.claude.com/en/docs/claude-code) **skills, agents, rules, and references**. It gives Claude a structured, manual feature-development workflow — **Define → Research → Plan → Implement → Validate → Document** — plus a deep bench of engineering-quality skills (testing, security, API design, frontend, git, docs).
+
+It is **manual by design**: you drive each step. There is no orchestrator running the pipeline autonomously — that's a deliberate choice to keep the process legible and controllable while it matures.
+
+Drop `.claude/` into any project and the workflow and skills come with it.
 
 ---
 
-## How it works in one sentence
+## The workflow
 
-You have a conversation with Claude to define and approve a feature spec. Once you approve, Claude runs the full pipeline autonomously — researching the codebase, writing an implementation plan, building the feature with TDD, validating it through brutal code and QA review, and documenting everything — then sends you a notification when the PR is ready.
-
----
-
-## The pipeline
+Six steps, each a skill you invoke when you're ready to move on. The `feature-workflow` skill is the in-repo map of all of this.
 
 ```text
-You talk to Claude
-        |
-        v
-  [ DEFINE ]  <-- only step that requires back-and-forth with you
-  Spec written,
-  branch created,
-  you approve
-        |
-        v
-  [ RESEARCH ]  autonomous
-  Codebase studied,
-  reuse identified,
-  2_research.md written
-        |
-        v
-  [ PLAN ]  autonomous
-  File map locked,
-  TDD task list written,
-  3_plan.md written
-        |
-        v
-  [ IMPLEMENT ]  autonomous
-  Code written task by task,
-  tests pass before moving on,
-  code reviewed at checkpoints
-        |
-        v
-  [ VALIDATE ]  autonomous
-  Senior engineer tears it apart,
-  QA verifies real coverage,
-  4_validate.md written
-        |
-        v
-  [ DOCUMENT ]  autonomous
-  Docs updated, PR description written,
-  screenshots embedded,
-  PR marked ready
-        |
-        v
-  You get notified
+Define ──▶ Research ──▶ Plan ──▶ Implement ──▶ Validate ──▶ Document
+(spec +    (study the   (file    (build it    (senior +    (docs +
+ approval)  codebase)    map +    task by      QA review)   PR ready)
+                         tasks)   task)
+```
+
+| Step | Invoke | What it produces |
+|------|--------|------------------|
+| **Define** | `/define` | An approved spec and the feature branch |
+| **Research** | `/research` | Findings: reusable code, gaps, patterns, constraints |
+| **Plan** | `planning-and-task-breakdown` | A file map + dependency-ordered tasks with named tests |
+| **Implement** | `incremental-implementation` | The change, built task by task, tests passing, committed |
+| **Validate** | `/validate` | Both reviews passed (spawns the `senior-review` + `qa-review` agents), findings fixed |
+| **Document** | `/document` | Docs updated, PR description written, PR readied |
+
+Run the steps in order; advance only when the previous step's output is in hand. Skip the whole thing for trivial changes — it earns its keep on real features where a missed requirement or skipped review is expensive. Start with `feature-workflow` if you want the full map.
+
+### Tracking: works with or without beads
+
+State and tasks flow through **[beads](https://github.com/gastownhall/beads)** (the `bd` CLI) when it's set up, and **conversationally** when it isn't. Every workflow skill follows the dual-mode contract in [`.claude/references/beads.md`](.claude/references/beads.md): fully usable standalone, and better when beads exists (a feature becomes an epic, plan tasks become child issues, review findings become issues). There is no `.docs/` folder or `context.yaml` — beads (or the conversation) is the system of record.
+
+---
+
+## Skills
+
+Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load automatically when relevant (and can still be invoked with `/`).
+
+### Workflow steps
+
+| Skill | |
+|-------|--|
+| `define` `/cmd` | Collaborative spec dialogue — scope, goals, constraints, acceptance criteria; creates the branch; approval checkpoint |
+| `research` `/cmd` | Study the codebase for a feature — reuse, gaps, patterns, constraints |
+| `planning-and-task-breakdown` | File map + dependency-ordered tasks with explicit test names |
+| `incremental-implementation` | Build in thin vertical slices, test-and-commit per increment |
+| `validate` `/cmd` | Sequence senior + QA review with bounded fix loops |
+| `document` `/cmd` | Pre-PR documentation audit + PR description |
+| `feature-workflow` | The map of the six steps and which skill/agent owns each |
+
+### Research support
+
+| Skill | |
+|-------|--|
+| `analyze-code` | Survey a file/module — responsibility, interface, dependencies, reuse |
+| `find-patterns` | Identify conventions and architectural decisions to stay consistent with |
+| `web-search` | Verify external library/API behavior against versioned official docs |
+
+### Review & quality
+
+| Skill | |
+|-------|--|
+| `senior-review` | Brutal engineering review — completeness, correctness, coherence, YAGNI, security |
+| `qa-review` | Test coverage, test quality, spec-to-test mapping, e2e (graceful), evidence |
+| `security-scan` | Vulnerability audit — injection, auth/access control, secrets, crypto, deps (JS/TS/Ruby) |
+| `security-and-hardening` | Build secure code in the first place (preventive counterpart to `security-scan`) |
+| `writing-tests` | What/how-much to test, at what level — the judgment behind good tests |
+| `debugging-and-error-recovery` | Systematic root-cause debugging when something breaks |
+
+### Engineering craft
+
+| Skill | |
+|-------|--|
+| `api-and-interface-design` | Stable, hard-to-misuse APIs and module boundaries |
+| `frontend-ui-engineering` | Production-quality UIs; honors `DESIGN.md`/`PRODUCT.md` |
+| `impeccable` `/cmd` | Deep design-system workflow (shape, craft, critique, audit, polish) |
+| `documentation-and-adrs` | Record decisions and keep documentation current |
+| `deprecation-and-migration` | Remove and migrate old systems safely |
+| `ci-cd-and-automation` | Build/deploy pipelines and quality gates |
+| `browser-testing-with-devtools` | Verify UI against a real browser (needs the chrome-devtools MCP) |
+
+### Git, PRs & meta
+
+| Skill | |
+|-------|--|
+| `branch-names` | `<type>/<slug>` branch naming |
+| `git-commit` | Conventional commits, no AI attribution; surfaces the committed message |
+| `git-workflow-and-versioning` | Commit/branch/merge discipline, conflicts, debugging with git |
+| `create-pr` | PR titles and bodies |
+| `sync` `/cmd` | Bring the local checkout up to date with `main` before new work |
+| `writing-skills` | How to author and verify skills (use this when adding to this repo) |
+| `doubt-driven-development` | Fresh-context adversarial review of non-trivial decisions |
+
+---
+
+## Agents
+
+Thin wrappers that run a review skill in an **isolated context** — the value is independent review that didn't write the code (so it won't rubber-stamp it). Spawned by the `validate` skill from the main session, or invoked directly.
+
+| Agent | |
+|-------|--|
+| `senior-review` | Runs the `senior-review` skill; returns findings, doesn't change code |
+| `qa-review` | Runs the `qa-review` skill; owns the e2e run and optional evidence capture |
+
+---
+
+## Rules
+
+Always-on conventions in [`.claude/rules/`](.claude/rules) — auto-applied, no invocation needed.
+
+| Rule | |
+|------|--|
+| `github-tool-preference` | Prefer the `gh`/`git` CLI over the GitHub MCP |
+| `typescript-tips` | Practical TypeScript patterns (applies to `.ts` files) |
+
+---
+
+## References
+
+Shared knowledge in [`.claude/references/`](.claude/references) that skills point to (kept in one place so it doesn't drift across skills):
+
+| Reference | Used by |
+|-----------|---------|
+| `beads.md` | every workflow skill (the dual-mode tracking contract) |
+| `testing-patterns.md` | `writing-tests` |
+| `accessibility-checklist.md`, `performance-checklist.md` | `frontend-ui-engineering` |
+| `security-checklist.md` | `security-and-hardening` |
+
+---
+
+## Using this in another project
+
+1. **Copy `.claude/` into the target project's root** — skills, agents, rules, and references all live there and travel together. (When copying an individual skill, bring any `.claude/references/` file it points to as well.)
+2. **The project's own `CLAUDE.md` does not come from here** — this repo's `CLAUDE.md` documents *this* repo. To orient Claude to the workflow in the target project, paste the snippet below into that project's `CLAUDE.md` and adapt it.
+3. **Optionally copy `.mcp.json`** (see [MCP servers](#mcp-servers)).
+4. Open Claude Code in the project and start with `/define` (or read `feature-workflow` first).
+
+### Example: paste into your project's `CLAUDE.md`
+
+```markdown
+## Development workflow
+
+This project uses a manual feature workflow: **Define → Research → Plan →
+Implement → Validate → Document**. Run each step deliberately — there is no
+orchestrator. See the `feature-workflow` skill for the map.
+
+- Start a feature with `/define` (it writes the spec and creates the branch).
+- Then: `/research` → `planning-and-task-breakdown` → `incremental-implementation`
+  → `/validate` → `/document`.
+- `/validate` spawns the `senior-review` and `qa-review` agents for independent review.
+- Match rigor to the change — skip the workflow for trivial fixes.
+
+## Task tracking
+
+If [beads](https://github.com/gastownhall/beads) is set up (`.beads/` exists),
+the workflow records features/tasks/findings as beads issues. If not, it runs
+conversationally — both work. See `.claude/references/beads.md`.
+
+## Conventions
+
+- Conventional Commits for all commits and PR titles; no AI-attribution trailers
+  (the `git-commit` skill enforces this).
+- Prefer the `gh`/`git` CLI for git and GitHub operations.
 ```
 
 ---
 
-## How to start a feature
+## MCP servers
 
-1. Open Claude Code in your project
-2. Run the `/feature` skill with your idea:
+`.mcp.json` configures two optional servers:
 
-   ```text
-   /feature I want to build [your feature idea]
-   ```
+| Server | Purpose |
+|--------|---------|
+| `playwright` | Browser automation for `qa-review` evidence capture and e2e |
+| `github` | GitHub API for interactive use (needs `GITHUB_PERSONAL_ACCESS_TOKEN`) |
 
-3. Have a conversation with Claude. It will ask clarifying questions about scope, constraints, acceptance criteria, etc.
-4. When the spec looks right, tell Claude you approve it.
-5. Claude runs the rest of the pipeline automatically and notifies you when the PR is ready.
-
-> **You only need to be present for the Define step.** Everything after your approval is autonomous.
-
-To resume an in-progress workflow, just run `/feature` with no arguments — it will scan for in-progress `context.yaml` files and ask whether to resume or start fresh.
+Both are optional — skills degrade gracefully when a server isn't present (e.g. `qa-review` skips evidence capture). Git/GitHub operations prefer the `gh` CLI regardless (`github-tool-preference` rule).
 
 ---
 
-## What each step does
-
-### Define
-
-**Who drives it:** You and Claude together.
-
-Claude helps you think through a feature before anything gets built. It asks about the problem, goals, non-goals, user stories, constraints, and acceptance criteria. Once you're happy with the spec, you approve it. Claude then creates the feature branch, writes `1_spec.md`, commits it with `context.yaml`, pushes, and opens a draft PR before handing off to Research automatically.
-
-### Research
-
-**Who drives it:** Claude, autonomously.
-
-Claude reads the approved spec and studies the codebase — looking for existing code to reuse, patterns to follow, and gaps to fill. It uses sub-skills to analyze specific files, find conventions, and look up third-party docs if needed. Results go into `2_research.md`. After writing the research, Claude commits and pushes before handing off to Plan automatically.
-
-### Plan
-
-**Who drives it:** Claude, autonomously.
-
-Claude reads the spec and research, then writes a detailed implementation plan. It maps out every file that will be created, modified, or deleted — with responsibilities and interfaces — before writing a task list. Every task has explicit test cases (written before implementation), specific implementation steps, and a commit message. No vague instructions. Results go into `3_plan.md`. After writing the plan, Claude commits and pushes before handing off to Implement automatically.
-
-### Implement
-
-**Who drives it:** Claude, autonomously.
-
-Claude follows the plan task by task. For each task: write tests → confirm they fail → implement → confirm tests pass → run linter → check coverage → commit → update progress in `context.yaml`. A code reviewer agent checks the work every 300–500 lines and is always invoked for security-critical or complex code. After completing all tasks, Claude commits any remaining `context.yaml` changes and pushes before handing off to Validate automatically.
-
-### Validate
-
-**Who drives it:** Claude, autonomously.
-
-Two reviewers run in sequence:
-
-- **Senior Reviewer** — a brutal, no-softening review against the spec, plan, and engineering standards. Checks completeness, correctness, coherence, security, YAGNI, and code smells. Runs up to 3 fix iterations before escalating.
-- **QA Reviewer** — runs the full e2e suite as its first action, fixes any failures in up to 3 attempts (commit-and-rerun loop), checks real test coverage (no mock theater), maps e2e tests to every user story, and captures screenshots/recordings after the suite is green. Escalates rather than approving if the suite cannot be brought to green.
-
-Results go into `4_validate.md`. After writing the report, Claude commits and pushes before handing off to Document automatically.
-
-### Document
-
-**Who drives it:** Claude, autonomously.
-
-Claude reads the full diff and updates everything that changed: README, CLAUDE.md, feature docs, API docs, inline comments, changelog. It commits the documentation changes and pushes, then writes the PR description with visual evidence (screenshots embedded as images), marks the PR ready, and notifies you it's done.
-
----
-
-## If the pipeline gets disrupted
-
-Every agent reads `context.yaml` at the start of its gate. This file tracks where the workflow is, what's been completed, and where within the current step things left off.
-
-Every agent commits and pushes its output before returning. This means completed steps are always on the remote — if your session ends between steps, no work is lost. When you resume, Claude can pull the branch and continue from exactly where it left off.
-
-**To resume after a disruption:**
-
-Run `/feature` with no arguments. It will scan for in-progress `context.yaml` files, list them with their current step and checkpoint, and ask whether to resume one or start a new feature. Resuming jumps directly to the correct step without re-running completed steps.
-
-If you need to resume manually without the orchestrator:
-
-1. Open `context.yaml` in the feature's `.docs/` folder
-2. Check `workflow.current_step` — this is the step to resume at
-3. Read `workflow.summary` — this is the prose handoff narrative written by the most recently completed step. It tells you what was accomplished, the key decisions, and what the current step needs to know. Read this first for orientation.
-4. Check `workflow.checkpoint` — this tells you where within the current step things left off
-5. Invoke that agent directly, passing the feature folder path:
-
-```text
-Use the [step name] agent — feature folder is .docs/2026-05-11-my-feature
-```
-
-**Notes:**
-
-- Research, Plan, and Document are safe to re-run from scratch — they overwrite their output cleanly
-- Implement uses `workflow.checkpoint` to know which tasks are done; if checkpoint is empty, `git log` shows which task commits already landed
-- Validate uses the checkpoint to know if the senior review already passed
-
----
-
-## Escalation
-
-Two things will halt the pipeline and escalate to you:
-
-- **Stuck on a problem** — same test failing after 3 attempts, same review issue after 3 fix cycles.
-- **Push failure** — `git push` exits non-zero (non-fast-forward, auth failure, network error). The agent stops rather than letting more work pile up locally against a diverged remote.
-
-In both cases, Claude writes `workflow.escalated: true` and a `workflow.escalation_reason` to `context.yaml`, then returns. The orchestrator reads this after the agent returns and halts the pipeline, displaying the reason to you.
-
-To resume after an escalation, run `/feature` — it will detect the escalation, show you the reason, clear the flag, and re-invoke the step for another attempt. For push failures, resolve the remote state first (e.g. `git pull --rebase`) before resuming.
-
----
-
-## Key concepts
-
-### context.yaml
-
-Every feature has a `context.yaml` in its `.docs/` folder. It is created as the very first file when the spec is written, and every agent reads and updates it.
-
-```yaml
-feature:
-  name: "My Feature"
-  short_name: "my-feature"
-  folder: ".docs/2026-05-11-my-feature"
-  date: "2026-05-11"
-  branch: "feature/my-feature"
-  base_branch: "main"
-
-workflow:
-  current_step: implement
-  completed_steps: [define, research, plan]
-  checkpoint: "Completed tasks 1-4 of 9. Next: Task 5 - Add usePayment hook."
-  escalated: false # Set to true by an agent that cannot continue after 3 attempts
-  escalation_reason: "" # Human-readable description shown to you when the pipeline halts
-  summary: |
-    Plan produced 3_plan.md — a 9-task linear plan covering every file in scope.
-    Key decisions: task ordering is template-first, then agents in pipeline order.
-    Relevant context for Implement: invoke verify-coherence after all six agent edits.
-
-artifacts: [] # Research reference files (schemas, diagrams, etc.)
-output_artifacts: [] # QA screenshots and recordings
-documentation_created: [] # New docs created by the Document agent
-```
-
-### Pipeline skills
-
-Skills for the `Define → Research → Plan → Implement → Validate` sequence. Run automatically via `/feature`, or invoke any step directly in a conversation.
-
-| Step      | Skill        | What it does                                                                     |
-| --------- | ------------ | -------------------------------------------------------------------------------- |
-| Define    | `/define`    | Collaborative spec conversation — scope, goals, constraints, acceptance criteria |
-| Research  | `/research`  | Codebase analysis for a feature — reuse, gaps, patterns, constraints             |
-| Plan      | `/plan`      | File map and TDD task list for a feature                                         |
-| Implement | `/implement` | TDD implementation guidance — task loop, code review, coverage                   |
-| Validate  | `/validate`  | Senior code review then QA review coordination                                   |
-
-### Reviewer agents
-
-Expert personas invoked during the pipeline. Can also be invoked directly for a focused review session.
-
-| Agent             | What it does                                                                |
-| ----------------- | --------------------------------------------------------------------------- |
-| `code-reviewer`   | Mid-implementation plan alignment and quality checks (invoked by Implement); emits one severity label per finding from the fixed vocabulary `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO` |
-| `senior-reviewer` | Brutal final code review against spec, plan, and engineering standards      |
-| `qa-reviewer`     | Runs e2e suite, fixes failures in up to 3 attempts, coverage audit, and evidence capture after green |
-
-### Utility skills
-
-Used by the pipeline internally. Also available for direct invocation outside a full pipeline run.
-
-| Skill                  | What it does                                                        |
-| ---------------------- | ------------------------------------------------------------------- |
-| `/analyze-code`        | Survey a file or module — structure, dependencies, behavior         |
-| `/find-patterns`       | Identify conventions, naming patterns, and architectural decisions  |
-| `/web-search`          | Look up versioned third-party docs and external APIs                |
-| `/verify-completeness` | Check spec requirements are present in the implementation           |
-| `/verify-correctness`  | Check logic, error handling, edge cases, and test quality           |
-| `/verify-coherence`    | Check design consistency and pattern conformance across files       |
-| `/security-review`     | Security audit — auth, input validation, injection vectors, secrets |
-| `/ui-design-brain`     | UI design planning and component patterns                           |
-
-### Standalone skills
-
-Invoke directly — not part of the `/feature` pipeline.
-
-| Skill        | What it does                                                                                     |
-| ------------ | ------------------------------------------------------------------------------------------------ |
-| `/sync`      | Bring your local checkout up to date with `main` before starting feature work — clean-tree check (optional stash), fetch + fast-forward pull, change summary, and detection-driven refresh of dependencies, migrations, `.env` keys, and Docker. Never runs destructive git, never auto-applies migrations, never writes `.env`. |
-| `/pr-review` | AI-assisted review of a GitHub PR — auto-detects first review vs. follow-up review by checking your prior comments on the PR. On a follow-up, deduplicates new findings against what you already posted and surfaces any prior comment threads whose anchored code is no longer in the diff. In both modes: fetches the diff, delegates to `code-reviewer` (which now emits a severity label per finding from `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`), walks you through each finding with its severity (keep/drop/edit), and posts only what you approve after an explicit "post now" confirmation. Never submits an Approve or Request Changes review — those verdicts are human-only. |
-
-Usage: `/sync` (takes no arguments) and `/pr-review <pr-number>` (e.g. `/pr-review 1250`; invoke without an argument to be prompted for a PR number).
-
-### The .docs/ folder
-
-Each feature gets its own folder inside `.docs/`:
-
-```text
-.docs/
-└── YYYY-MM-DD-short-name/
-    ├── context.yaml          # Workflow state — read by every agent
-    ├── 1_spec.md             # Feature definition (Define)
-    ├── 2_research.md         # Codebase findings (Research)
-    ├── 3_plan.md             # Implementation plan (Plan)
-    ├── 4_validate.md         # Validation report (Validate)
-    ├── artifacts/            # Research reference files
-    └── output-artifacts/     # QA screenshots and recordings
-```
-
----
-
-## Using this in a new project
-
-This repo is a template. To use this workflow in a new project:
-
-1. **Copy `.claude/` into your project root.** That's it — all the agents and skills are in there.
-
-2. **Make sure CLAUDE.md exists in your project** and documents anything Claude needs to know about the project (conventions, structure, how to run tests, etc.). The Document agent will keep it updated as features are built.
-
-3. **Open Claude Code** in your project directory and start with the Define agent.
-
-> If you use GitHub repos for new projects, you can make this repo a GitHub template — every new repo created from it will include the `.claude/` folder automatically.
-
----
-
-## Other agents
-
-### Onboard
-
-Not part of the pipeline. Use this when you're new to a project or returning after a long absence.
-
-```text
-Use the onboard agent
-```
-
-It explores the codebase from scratch, writes a `.ONBOARD.md` to the project root with a plain-language explanation of what the project is and how it works, and updates `CLAUDE.md` so future Claude sessions have immediate context. After writing the files, stay in conversation — ask it anything about the codebase.
-
----
-
-## File reference
+## Repo layout
 
 ```text
 .claude/
-├── agents/
-│   ├── define.md          # Step 1: gate check, invokes define skill, writes 1_spec.md
-│   ├── research.md        # Step 2: gate check, invokes research skill, writes 2_research.md
-│   ├── plan.md            # Step 3: gate check, invokes plan skill, writes 3_plan.md
-│   ├── implement.md       # Step 4: gate check, invokes implement skill, manages checkpoint
-│   ├── validate.md        # Step 5: gate check, invokes validate skill, writes 4_validate.md
-│   ├── document.md        # Step 6: docs, PR description, notify
-│   ├── onboard.md         # Standalone: codebase exploration for new developers
-│   ├── code-reviewer.md   # Mid-implementation code review checkpoints
-│   ├── senior-reviewer.md # Brutal final code review (used by validate skill)
-│   └── qa-reviewer.md     # Final QA and evidence capture (used by validate skill)
-└── skills/
-    ├── feature/           # /feature — pipeline orchestrator entry point
-    ├── define/            # /define — collaborative spec conversation
-    ├── research/          # /research — codebase analysis methodology
-    ├── plan/              # /plan — implementation planning methodology
-    ├── implement/         # /implement — TDD implementation methodology
-    ├── validate/          # /validate — review coordination methodology
-    ├── spec/              # /spec — spec document formatting (used by define agent)
-    ├── sync/              # /sync — pre-feature local refresh
-    ├── analyze-code/      # /analyze-code — file/module survey
-    ├── find-patterns/     # /find-patterns — convention detection
-    ├── web-search/        # /web-search — versioned third-party docs lookup
-    ├── verify-completeness/ # checks spec requirements are present
-    ├── verify-correctness/  # checks logic and test quality
-    ├── verify-coherence/    # checks design and pattern consistency
-    ├── security-review/   # security audit
-    ├── ui-design-brain/   # UI design planning
-    ├── pr-review/         # /pr-review — interactive AI-assisted PR review
-    └── agent-context/     # documents context.yaml protocol and template
+├── skills/        # the skills above (one folder each, SKILL.md + optional files)
+├── agents/        # senior-review, qa-review
+├── rules/         # always-on conventions
+└── references/    # shared knowledge skills point to
+archive/           # the previous automated pipeline, kept for reference
+CLAUDE.md          # how to work IN this repo (does not travel to other projects)
 ```
 
----
-
-## MCP server configuration
-
-This template ships with a `.mcp.json` that configures two MCP servers:
-
-| Server       | Purpose                                                         |
-| ------------ | --------------------------------------------------------------- |
-| `playwright` | Browser automation for the QA Reviewer (screenshots, e2e tests) |
-| `github`     | GitHub API access for interactive use outside the pipeline      |
-
-The `github` server is available for interactive Claude Code sessions. Pipeline agents do not use it — they perform all git and GitHub operations via the `gh` CLI and `git` Bash commands. The server requires a `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable with `repo` scope.
+The `archive/` directory holds the previous fully-automated pipeline (the `/feature` orchestrator, `context.yaml`, step agents) — preserved for reference while the workflow is rebuilt manually.
