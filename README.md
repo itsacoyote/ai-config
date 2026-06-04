@@ -90,7 +90,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `branch-names` | `<type>/<slug>` branch naming |
 | `git-commit` | Conventional commits, no AI attribution; surfaces the committed message |
 | `git-workflow-and-versioning` | Commit/branch/merge discipline, conflicts, debugging with git |
-| `create-pr` | PR titles and bodies |
+| `create-pr` | PR titles and bodies — honors the host project's PR process and GitHub template first |
 | `sync` `/cmd` | Bring the local checkout up to date with `main` before new work |
 | `writing-skills` | How to author and verify skills (use this when adding to this repo) |
 | `doubt-driven-development` | Fresh-context adversarial review of non-trivial decisions |
