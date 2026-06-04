@@ -73,6 +73,29 @@ bd list --json                         # list issues (use --json for programmati
 The CLI is large and evolving — **verify exact flags with `bd <command> --help`
 before relying on them.** If a flag here has changed, prefer what `--help` reports.
 
+## Operational notes (driving bd from scripts and agents)
+
+Hard-won details when an agent (not a human) runs `bd`:
+
+- **Capturing a new issue's ID — don't scrape human output.** `bd create` prints a
+  decorated message; when `--parent` is set it also echoes the **parent** ID, so a naive
+  `grep -oE 'prefix-[a-z0-9]+' | head -1` grabs the **wrong** ID. Use one of:
+  ```bash
+  ID=$(bd create "Title" -t task --parent <epic> --silent)   # prints ONLY the new ID
+  ID=$(bd create "Title" -t task --json | jq -r '.id')        # or parse JSON
+  ```
+- **Child IDs are hierarchical.** `--parent ai-config-c78` yields children
+  `ai-config-c78.1`, `ai-config-c78.2`, … (dot suffixes), not flat IDs.
+- **Dependency direction:** `bd dep add <blocked-id> <blocker-id>` — the **first** depends
+  on (is blocked by) the second. Equivalent inverse: `bd dep <blocker> --blocks <blocked>`.
+  `bd dep cycles` checks for cycles; self/cyclic deps are rejected.
+- **`bd ready` lists the epic itself** (a container with no blockers) alongside real work.
+  When looping over implementable tasks, **skip the epic / non-leaf issues**.
+- **Materialize a whole plan atomically:** `bd create --graph <plan.json>` creates many
+  issues *and* their dependencies from one JSON file — cleaner than N creates + N `dep add`s.
+- **Long bodies:** pass `--body-file <f>` / `--stdin` (and `--acceptance`, `--design`) to
+  avoid shell-escaping multi-line markdown; attach notes later with `bd comment <id> --file`.
+
 ## How each step uses beads (when active)
 
 - **Define** → create the feature **epic** with the spec as its body; record the
