@@ -63,3 +63,5 @@ Use these skills as needed during research:
 Present findings **conversationally in this session**, using [template.md](template.md) as the structure for what to cover (a findings outline — not a file to write). Don't write step-doc files.
 
 Task tracking follows the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone (default), present the "Gaps / what needs to be created" as a plain checklist and let the user decide what to track; beads-enhanced, attach findings to the feature epic and turn each actionable gap into a child issue with dependencies.
+
+Next step: hand the findings to `planning-and-task-breakdown` (Plan). See `feature-workflow` for the full sequence.

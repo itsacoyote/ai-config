@@ -49,6 +49,8 @@ When a plan exists (from `planning-and-task-breakdown`), implement its tasks in 
 
 For large or risky work, run a review mid-implement rather than only at the end — invoke `senior-review` (engineering quality) or `security-scan` (security-sensitive code: auth, payments, input handling, crypto, queries) at natural checkpoints, fix what they surface, then continue. For small, low-risk changes, defer all review to the Validate step. This is judgment, not a mandate — match it to blast radius.
 
+When the change is complete, hand off to the `validate` skill for the full review gate (see `feature-workflow` for the sequence).
+
 ## Slicing Strategies
 
 ### Vertical Slices (Preferred)
