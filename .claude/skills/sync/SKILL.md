@@ -74,6 +74,8 @@ How do you want to proceed?
 | `h` / `handle` | Stop immediately. Do not run `git switch`, `git stash`, install, migration, or any further command. Leave the working tree exactly as it was. |
 | anything else | Re-prompt the current question without advancing. Do not default to either option. Never run a destructive recovery (no `git reset --hard`, no `git clean`, no `git checkout -- <path>`) regardless of input. |
 
+Use `$(date -u +%Y%m%dT%H%M%SZ)` for the `<timestamp>` value in the stash message to keep refs predictable and sortable.
+
 If `git stash` itself exits non-zero (e.g. partial-merge state, unmerged paths), print the `git` stderr verbatim and stop. Do not retry. Do not attempt any other recovery.
 
 ## Branch switch and pull
@@ -92,15 +94,11 @@ git rev-parse <main>
 
 Store as `<pre-pull-sha>`.
 
-Before the next `git` operation, invoke `Skill(github-tool-preference)` to confirm `git` is the right tool.
-
 Then run:
 
 ```
 git fetch origin
 ```
-
-Before the pull, invoke `Skill(github-tool-preference)` again to confirm `git` is the right tool.
 
 Then run:
 
@@ -140,7 +138,11 @@ Detect each package manager independently by lockfile presence. A polyglot repo 
 
 The detected JS manager also determines the **JS package runner** used to prefix Node-based migration tool commands in ## Environment refresh: migrations.
 
-Precedence when multiple JS lockfiles exist (highest wins):
+**Detection order (first match wins):**
+
+1. **`package.json` → `packageManager` field** — If `package.json` exists, read it and check for the `"packageManager"` field (e.g., `"packageManager": "pnpm@8.6.0"`). Extract the manager name from the value prefix. This is the most authoritative signal and overrides any lockfile. Developers sometimes have stale or mixed lockfiles on their machines; `packageManager` reflects intentional project configuration.
+
+2. **Lockfile presence** — If `package.json` has no `packageManager` field (or no `package.json` exists), fall back to lockfile detection. Precedence when multiple lockfiles exist (highest wins):
 
 | Lockfile | Manager | Install command | Runner prefix |
 |---|---|---|---|
@@ -149,7 +151,7 @@ Precedence when multiple JS lockfiles exist (highest wins):
 | `yarn.lock` | yarn | `yarn install --frozen-lockfile` | `yarn` |
 | `package-lock.json` | npm | `npm install` | `npx` |
 
-If no JS lockfile is detected, default the runner prefix to `npx` and note that no JS manager was found.
+If neither `package.json` nor any JS lockfile is detected, default the runner prefix to `npx` and note that no JS manager was found.
 
 ### Full lockfile detection table
 
@@ -160,16 +162,21 @@ If no JS lockfile is detected, default the runner prefix to `npx` and note that 
 | `pnpm-lock.yaml` | pnpm | `pnpm install --frozen-lockfile` |
 | `bun.lockb` / `bun.lock` | bun | `bun install` |
 | `Gemfile.lock` | bundler | `bundle install` |
-| `requirements.txt` | pip | surfaced only — see note below |
 | `uv.lock` | uv | `uv sync` |
 | `poetry.lock` | poetry | `poetry install` |
 | `Pipfile.lock` | pipenv | `pipenv install` |
-| `go.sum` | go | `go mod download` |
+| `requirements.txt` | pip | surfaced only — see note below |
+| `pyproject.toml` (no recognized lockfile) | — | surfaced only — see note below |
+| `go.mod` | go | `go mod download` |
 | `Cargo.lock` | cargo | `cargo fetch` |
 | `composer.lock` | composer | `composer install` |
 | `mix.lock` | mix | `mix deps.get` |
 
-**pip note:** `requirements.txt` is always surfaced as a recommendation only and never auto-run, because the right environment manager (venv, conda, system) is project-dependent. Show it in the final summary's **Dependencies refreshed** section as `pip: surfaced only`.
+**Python precedence:** When multiple Python lockfiles coexist, use the highest-priority one: uv → poetry → pipenv → pip. Only the winning ecosystem is installed; the others are noted as skipped.
+
+**pip note:** `requirements.txt` is always surfaced as a recommendation only and never auto-run, because the right environment manager (venv, conda, system) is project-dependent. Show it in the final summary's **Dependencies refreshed** section as `pip: surfaced only — run \`pip install -r requirements.txt\` in your active environment if needed`.
+
+**pyproject.toml note:** If `pyproject.toml` exists but no recognized Python lockfile is present (no `uv.lock`, `poetry.lock`, or `Pipfile.lock`), surface it as `pyproject.toml detected without a recognized lockfile — run the appropriate install manually`. Never attempt to install or detect the build backend.
 
 ### Per-ecosystem install confirmation prompt
 
@@ -238,7 +245,13 @@ If all keys are present, report: "All keys present."
 
 ## Environment refresh: Docker
 
-Check for any of these files in the repo root: `docker-compose.yml`, `docker-compose.yaml`, `compose.yml`, `compose.yaml`.
+Search for compose files up to two directory levels deep:
+
+```
+find . -maxdepth 2 \( -name "docker-compose.yml" -o -name "docker-compose.yaml" -o -name "compose.yml" -o -name "compose.yaml" \) 2>/dev/null
+```
+
+Some repos keep compose files under `docker/`, `infra/`, or `deploy/` rather than the root.
 
 If one is present, print the following warning in the final summary's **Docker** section:
 
@@ -308,8 +321,8 @@ After all checks complete, print the following structured summary. Section order
     sync steps found in CLAUDE.md, AGENTS.md, .cursorrules, or .windsurfrules."]
 
 8. Next step
-   Ready to start. Run `/feature` to begin a new feature, or
-   `git switch <previous-branch>` to return to your prior work.
+   Ready to start. Create a new branch or run `git switch <previous-branch>`
+   to return to your prior work.
 
 ═══════════════════════════════════════════════════════════════════
 ```
