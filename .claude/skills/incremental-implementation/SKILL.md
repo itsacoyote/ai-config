@@ -36,10 +36,18 @@ Build in thin vertical slices — implement one piece, test it, verify it, then 
 For each slice:
 
 1. **Implement** the smallest complete piece of functionality
-2. **Test** — run the test suite (or write a test if none exists)
+2. **Test** — run the test suite (or write a test if none exists; see `writing-tests` for what makes a good one)
 3. **Verify** — confirm the slice works as expected (tests pass, build succeeds, manual check)
 4. **Commit** -- save your progress with a descriptive message (see `git-workflow-and-versioning` for atomic commit guidance)
 5. **Move to the next slice** — carry forward, don't restart
+
+## Working from a plan
+
+When a plan exists (from `planning-and-task-breakdown`), implement its tasks in dependency order, one task per increment. Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): **standalone**, work down the plan's task list; **beads-enhanced**, pull the next task with `bd ready`, `bd update <id> --claim` before starting it, and close it (`bd update <id> --status closed`) once its commit lands. Maintain test coverage as you go — don't defer tests to the end (see `writing-tests`).
+
+### Review checkpoints (optional)
+
+For large or risky work, run a review mid-implement rather than only at the end — invoke `senior-review` (engineering quality) or `security-scan` (security-sensitive code: auth, payments, input handling, crypto, queries) at natural checkpoints, fix what they surface, then continue. For small, low-risk changes, defer all review to the Validate step. This is judgment, not a mandate — match it to blast radius.
 
 ## Slicing Strategies
 

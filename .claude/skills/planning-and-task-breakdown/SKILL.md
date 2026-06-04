@@ -80,7 +80,15 @@ Task 4: User can view task list (query + API + UI for list view)
 
 Each vertical slice delivers working, testable functionality.
 
-### Step 4: Write Tasks
+### Step 4: Build the File Map
+
+Before writing tasks, decide and document every file that will be created, modified, or deleted. This is where decomposition gets locked in — do it deliberately.
+
+For each file state, in one line each: its **single responsibility** and its **public interface** (what it exports/exposes), and which spec requirement or research finding it addresses. Use three groups — **New**, **Modified**, **Deleted** (deletions belong in the map, not discovered mid-implementation; for each, name what references it and must be updated).
+
+Every file must earn its place: if its responsibility could fold into another without breaking single-responsibility, merge them. Don't write tasks until the map is complete and internally consistent — the tasks reference it.
+
+### Step 5: Write Tasks
 
 Each task follows this structure:
 
@@ -93,6 +101,8 @@ Each task follows this structure:
 
 - [ ] [Specific, testable condition]
 - [ ] [Specific, testable condition]
+
+**Tests (write first):** name each test case explicitly as it will appear in the test file — assertive statements, not intentions. Write `it("throws AuthError when the token is expired")`, not "should handle errors" or "test auth". The implementer writes these before touching production code (see `writing-tests`).
 
 **Verification:**
 
@@ -110,7 +120,16 @@ Each task follows this structure:
 **Estimated scope:** [Small: 1-2 files | Medium: 3-5 files | Large: 5+ files]
 ```
 
-### Step 5: Order and Checkpoint
+### Recording the plan
+
+Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
+
+- **Standalone (default):** present the file map and ordered task list in the conversation — this is the plan of record for Implement.
+- **Beads-enhanced:** create one **child issue per task** under the feature epic (file map + named tests in each issue body), and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`.
+
+Do not write a `3_plan.md` or any step-doc file — there is no `.docs/`.
+
+### Step 6: Order and Checkpoint
 
 Arrange tasks so that:
 
