@@ -97,6 +97,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `sync` `/cmd` | Bring the local checkout up to date with `main` before new work |
 | `standup` `/cmd` | Read-only recap of recent work (done / in progress / next) for catching up after a break — beads-first, else git + PRs |
 | `setup-beads` `/cmd` | Install and initialize beads (`bd`) for a project — isolated local use, nothing committed by default |
+| `bd-cleanup` `/cmd` | Maintain the beads database — reclaim space (Dolt GC, compaction) and prune old closed issues, dry-run first |
 | `writing-skills` | How to author and verify skills (use this when adding to this repo) |
 | `doubt-driven-development` | Fresh-context adversarial review of non-trivial decisions |
 

@@ -101,6 +101,10 @@ Hard-won details when an agent (not a human) runs `bd`:
   issues *and* their dependencies from one JSON file — cleaner than N creates + N `dep add`s.
 - **Long bodies:** pass `--body-file <f>` / `--stdin` (and `--acceptance`, `--design`) to
   avoid shell-escaping multi-line markdown; attach notes later with `bd comment <id> --file`.
+- **When `.beads/` grows large**, use the `bd-cleanup` skill — it reclaims space
+  (`bd doctor --fix`, Dolt GC, compaction) and prunes old closed issues safely (dry-run first).
+  The usual cause is Dolt commit history, not issue count, so `bd admin compact --dolt`
+  (non-destructive) is typically the fix.
 
 ## How each step uses beads (when active)
 
