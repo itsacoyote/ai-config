@@ -1,6 +1,6 @@
 ---
 name: documentation-and-adrs
-description: Records decisions and documentation. Use when making architectural decisions, changing public APIs, shipping features, or when you need to record context that future engineers and agents will need to understand the codebase.
+description: Use when making architectural decisions, changing public APIs, shipping features, or when you need to record context that future engineers and agents will need to understand the codebase.
 ---
 
 # Documentation and ADRs
@@ -35,7 +35,7 @@ ADRs capture the reasoning behind significant technical decisions. They're the h
 
 ### ADR Template
 
-Store ADRs in `.docs/decisions/` with sequential numbering:
+Store ADRs in `docs/decisions/` with sequential numbering:
 
 ```markdown
 # ADR-001: Use PostgreSQL for primary database
@@ -97,6 +97,7 @@ PROPOSED → ACCEPTED → (SUPERSEDED or DEPRECATED)
 
 - **Don't delete old ADRs.** They capture historical context.
 - When a decision changes, write a new ADR that references and supersedes the old one.
+- When superseding a decision means removing or migrating the old implementation, see `deprecation-and-migration` for how to retire it safely.
 
 ## Inline Documentation
 
@@ -149,6 +150,8 @@ export function initializeTheme(theme: Theme): void {
 ```
 
 ## API Documentation
+
+This section covers *documenting* an API. For *designing* the interface itself (contracts, error semantics, versioning), see `api-and-interface-design`.
 
 For public APIs (REST, GraphQL, library interfaces):
 

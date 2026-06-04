@@ -1,6 +1,6 @@
 ---
 name: api-and-interface-design
-description: Guides stable API and interface design. Use when designing APIs, module boundaries, or any public interface. Use when creating REST or GraphQL endpoints, defining type contracts between modules, or establishing boundaries between frontend and backend.
+description: Use when designing APIs, module boundaries, or any public interface. Use when creating REST or GraphQL endpoints, defining type contracts between modules, or establishing boundaries between frontend and backend.
 ---
 
 # API and Interface Design
@@ -16,6 +16,22 @@ Design stable, well-documented interfaces that are hard to misuse. Good interfac
 - Creating component prop interfaces
 - Establishing database schema that informs API shape
 - Changing existing public interfaces
+
+## When NOT to Use
+
+Match the rigor to the blast radius. The "from the start" advice below assumes an
+interface with multiple or unknown consumers. **Scope down — don't gold-plate — when:**
+
+- The interface has a single known caller you control on both sides
+- You're writing a throwaway prototype, spike, or one-off script
+- The task is narrow and adding pagination/versioning/extension machinery would
+  exceed what the task asked for
+
+In these cases, apply the judgment-level principles (consistent errors, validate
+external input, clear naming) but skip the scaling machinery. **Implement what the
+task needs, not a speculative public platform.** When unsure whether an interface
+is "public enough" to warrant the full treatment, prefer the lighter approach and
+note the tradeoff rather than over-building.
 
 ## Core Principles
 
@@ -87,7 +103,7 @@ interface APIError {
 
 ### 3. Validate at Boundaries
 
-Trust internal code. Validate at system edges where external input enters:
+Trust internal code. Validate at system edges where external input enters. For the security depth behind boundary validation (injection, auth, untrusted input), see `security-and-hardening`.
 
 ```typescript
 // Validate at the API boundary
@@ -155,115 +171,17 @@ interface CreateTaskInput {
 | Boolean fields  | is/has/can prefix      | `isComplete`, `hasAttachments`      |
 | Enum values     | UPPER_SNAKE            | `"IN_PROGRESS"`, `"COMPLETED"`      |
 
-## REST API Patterns
+## Concrete Patterns
 
-### Resource Design
+For copy-ready REST and TypeScript interface patterns — resource design,
+pagination, filtering, PATCH, discriminated unions, input/output separation, and
+branded ID types — see [`patterns.md`](patterns.md). Pull from it only for the
+interface surface the current task actually covers.
 
-```
-GET    /api/tasks              → List tasks (with query params for filtering)
-POST   /api/tasks              → Create a task
-GET    /api/tasks/:id          → Get a single task
-PATCH  /api/tasks/:id          → Update a task (partial)
-DELETE /api/tasks/:id          → Delete a task
-
-GET    /api/tasks/:id/comments → List comments for a task (sub-resource)
-POST   /api/tasks/:id/comments → Add a comment to a task
-```
-
-### Pagination
-
-Paginate list endpoints:
-
-```typescript
-// Request
-GET /api/tasks?page=1&pageSize=20&sortBy=createdAt&sortOrder=desc
-
-// Response
-{
-  "data": [...],
-  "pagination": {
-    "page": 1,
-    "pageSize": 20,
-    "totalItems": 142,
-    "totalPages": 8
-  }
-}
-```
-
-### Filtering
-
-Use query parameters for filters:
-
-```
-GET /api/tasks?status=in_progress&assignee=user123&createdAfter=2025-01-01
-```
-
-### Partial Updates (PATCH)
-
-Accept partial objects — only update what's provided:
-
-```typescript
-// Only title changes, everything else preserved
-PATCH /api/tasks/123
-{ "title": "Updated title" }
-```
-
-## TypeScript Interface Patterns
-
-### Use Discriminated Unions for Variants
-
-```typescript
-// Good: Each variant is explicit
-type TaskStatus =
-  | { type: "pending" }
-  | { type: "in_progress"; assignee: string; startedAt: Date }
-  | { type: "completed"; completedAt: Date; completedBy: string }
-  | { type: "cancelled"; reason: string; cancelledAt: Date };
-
-// Consumer gets type narrowing
-function getStatusLabel(status: TaskStatus): string {
-  switch (status.type) {
-    case "pending":
-      return "Pending";
-    case "in_progress":
-      return `In progress (${status.assignee})`;
-    case "completed":
-      return `Done on ${status.completedAt}`;
-    case "cancelled":
-      return `Cancelled: ${status.reason}`;
-  }
-}
-```
-
-### Input/Output Separation
-
-```typescript
-// Input: what the caller provides
-interface CreateTaskInput {
-  title: string;
-  description?: string;
-}
-
-// Output: what the system returns (includes server-generated fields)
-interface Task {
-  id: string;
-  title: string;
-  description: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  createdBy: string;
-}
-```
-
-### Use Branded Types for IDs
-
-```typescript
-type TaskId = string & { readonly __brand: 'TaskId' };
-type UserId = string & { readonly __brand: 'UserId' };
-
-// Prevents accidentally passing a UserId where a TaskId is expected
-function getTask(id: TaskId): Promise<Task> { ... }
-```
+For general TypeScript type-modeling techniques (discriminated unions, `as const`,
+branded types, deriving types from values), follow the `typescript-tips` rule
+(`.claude/rules/typescript-tips.md`, loaded into context automatically) rather than
+restating them here.
 
 ## Common Rationalizations
 
@@ -289,12 +207,12 @@ function getTask(id: TaskId): Promise<Task> { ... }
 
 ## Verification
 
-After designing an API:
+After designing an API (for the interfaces in scope of the current task):
 
 - [ ] Every endpoint has typed input and output schemas
 - [ ] Error responses follow a single consistent format
 - [ ] Validation happens at system boundaries only
-- [ ] List endpoints support pagination
+- [ ] List endpoints that can grow unbounded support pagination
 - [ ] New fields are additive and optional (backward compatible)
 - [ ] Naming follows consistent conventions across all endpoints
 - [ ] API documentation or types are committed alongside the implementation

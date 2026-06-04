@@ -1,6 +1,6 @@
 ---
 name: security-and-hardening
-description: Hardens code against vulnerabilities. Use when handling user input, authentication, data storage, or external integrations. Use when building any feature that accepts untrusted data, manages user sessions, or interacts with third-party services.
+description: Use when handling user input, authentication, data storage, or external integrations — building any feature that accepts untrusted data, manages user sessions, or interacts with third-party services.
 ---
 
 # Security and Hardening
@@ -17,6 +17,10 @@ Security-first development practices for web applications. Treat every external 
 - Integrating with external APIs or services
 - Adding file uploads, webhooks, or callbacks
 - Handling payment or PII data
+
+**When NOT to use:** Purely presentational or internal changes with no untrusted input, secrets, auth, data storage, or external I/O. When in doubt, it applies — under-applying security costs far more than over-applying it.
+
+The code examples are Express/Node/TS; the principles (OWASP prevention, validation at boundaries, hashing, least privilege) are universal — translate them to your stack.
 
 ## The Three-Tier Boundary System
 
@@ -301,43 +305,14 @@ git diff --cached | grep -i "password\|secret\|api_key\|token"
 
 ## Security Review Checklist
 
-```markdown
-### Authentication
-
-- [ ] Passwords hashed with bcrypt/scrypt/argon2 (salt rounds ≥ 12)
-- [ ] Session tokens are httpOnly, secure, sameSite
-- [ ] Login has rate limiting
-- [ ] Password reset tokens expire
-
-### Authorization
-
-- [ ] Every endpoint checks user permissions
-- [ ] Users can only access their own resources
-- [ ] Admin actions require admin role verification
-
-### Input
-
-- [ ] All user input validated at the boundary
-- [ ] SQL queries are parameterized
-- [ ] HTML output is encoded/escaped
-
-### Data
-
-- [ ] No secrets in code or version control
-- [ ] Sensitive fields excluded from API responses
-- [ ] PII encrypted at rest (if applicable)
-
-### Infrastructure
-
-- [ ] Security headers configured (CSP, HSTS, etc.)
-- [ ] CORS restricted to known origins
-- [ ] Dependencies audited for vulnerabilities
-- [ ] Error messages don't expose internals
-```
+The full review checklist is canonical in `.claude/references/security-checklist.md` — it covers pre-commit checks, authentication, authorization, input validation, security headers, CORS, data protection, dependency security, error handling, and an OWASP Top 10 quick reference. Work through it for any security-relevant change.
 
 ## See Also
 
-For detailed security checklists and pre-commit verification steps, see `references/security-checklist.md`.
+- `.claude/references/security-checklist.md` — the full review checklist (canonical)
+- `api-and-interface-design` — where validation belongs at interface boundaries
+- `browser-testing-with-devtools` — verify security headers and responses against the running app
+- `security-scan` — audit existing or changed code for vulnerabilities (the detective counterpart to this preventive skill)
 
 ## Common Rationalizations
 

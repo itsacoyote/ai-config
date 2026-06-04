@@ -350,7 +350,7 @@ These are hard constraints. The wording matters because there is no enforcement 
 - Do not handle merge conflicts on `main`. If `git pull` fails, stop and print the error.
 - Do not support remotes other than `origin` or base branches other than the project's configured main branch.
 - Do not support non-git version control systems (Mercurial, SVN, jj).
-- Do not wire this skill into the `/feature` pipeline or invoke it from any pipeline agent. It is a developer-facing utility only.
+- Do not wire this skill into any automated pipeline or invoke it from a pipeline agent. It is a developer-facing utility only.
 - Do not persist state between runs. There is no "last sync" timestamp file. The pre-pull SHA is captured within the current run — not stored from a prior session.
 - Do not write to `.docs/`. The skill never creates, modifies, or deletes files in the feature folder.
 - Do not install missing binaries. If a required tool (Node, Python, Ruby, etc.) is not on `PATH`, skip its ecosystem with a "not installed" note.

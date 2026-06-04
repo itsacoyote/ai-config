@@ -19,6 +19,8 @@ Decompose work into small, verifiable tasks with explicit acceptance criteria. G
 
 **When NOT to use:** Single-file changes with obvious scope, or when the spec already contains well-defined tasks.
 
+Once the plan exists and you start building a task, hand off to `incremental-implementation` for the execution discipline (thin slices, test-and-commit per increment).
+
 ## The Planning Process
 
 ### Step 1: Enter Plan Mode

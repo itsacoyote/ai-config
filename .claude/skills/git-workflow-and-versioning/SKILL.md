@@ -1,6 +1,6 @@
 ---
 name: git-workflow-and-versioning
-description: Structures git workflow practices. Use when making any code change. Use when committing, branching, resolving conflicts, or when you need to organize work across multiple parallel streams.
+description: Use when committing, branching, merging, or resolving conflicts; when a change is growing large and should be split; when coordinating parallel agent work in worktrees; or when using git to find or revert a regression.
 ---
 
 # Git Workflow and Versioning
@@ -11,7 +11,14 @@ Git is your safety net. Treat commits as save points, branches as sandboxes, and
 
 ## When to Use
 
-Always. Every code change flows through git.
+Git discipline applies to every code change. Reach for this skill in particular when:
+
+- About to commit — deciding what to include and how to size it
+- Starting new work or branching
+- A change is growing large and should be split
+- Running multiple agents or branches in parallel (worktrees)
+- Hitting a merge conflict
+- Using git to locate or revert a regression
 
 ## Core Principles
 
@@ -78,22 +85,8 @@ consistent with existing validation patterns in auth.ts.
 update auth.ts
 ```
 
-**Format:**
-
-```
-<type>: <short description>
-
-<optional body explaining why, not what>
-```
-
-**Types:**
-
-- `feat` — New feature
-- `fix` — Bug fix
-- `refactor` — Code change that neither fixes a bug nor adds a feature
-- `test` — Adding or updating tests
-- `docs` — Documentation only
-- `chore` — Tooling, dependencies, config
+Follow the `git-commit` skill for message format, the conventional-commit type
+list, and the no-AI-attribution rule.
 
 ### 4. Keep Concerns Separate
 
@@ -112,7 +105,7 @@ git commit -m "refactor validation and add phone number field"
 
 ### 5. Size Your Changes
 
-Target ~100 lines per commit/PR. Changes over ~1000 lines should be split. See the splitting strategies in `code-review-and-quality` for how to break down large changes.
+Target ~100 lines per commit/PR. Changes over ~1000 lines should be split. See `incremental-implementation` for how to break down large changes.
 
 ```
 ~100 lines  → Easy to review, easy to revert
@@ -127,8 +120,8 @@ Target ~100 lines per commit/PR. Changes over ~1000 lines should be split. See t
 ```
 main (always deployable)
   │
-  ├── feature/task-creation    ← One feature per branch
-  ├── feature/user-settings    ← Parallel work
+  ├── feat/task-creation       ← One feature per branch
+  ├── feat/user-settings       ← Parallel work
   └── fix/duplicate-tasks      ← Bug fixes
 ```
 
@@ -139,12 +132,9 @@ main (always deployable)
 
 ### Branch Naming
 
-```
-feature/<short-description>   → feature/task-creation
-fix/<short-description>       → fix/duplicate-tasks
-chore/<short-description>     → chore/update-deps
-refactor/<short-description>  → refactor/auth-module
-```
+Use the conventional-commit type as the prefix (`feat/`, `fix/`, `chore/`,
+`refactor/`, …) followed by a short kebab-case slug. See the `branch-names` skill
+for the full type list, slug rules, and examples.
 
 ## Working with Worktrees
 
@@ -152,8 +142,8 @@ For parallel AI agent work, use git worktrees to run multiple branches simultane
 
 ```bash
 # Create a worktree for a feature branch
-git worktree add ../project-feature-a feature/task-creation
-git worktree add ../project-feature-b feature/user-settings
+git worktree add ../project-feature-a feat/task-creation
+git worktree add ../project-feature-b feat/user-settings
 
 # Each worktree is a separate directory with its own branch
 # Agents can work in parallel without interfering
@@ -172,6 +162,28 @@ Benefits:
 - No branch switching needed (each directory has its own branch)
 - If one experiment fails, delete the worktree — nothing is lost
 - Changes are isolated until explicitly merged
+
+## Resolving Merge Conflicts
+
+Short-lived branches are the best defense — the longer a branch diverges, the worse
+the conflicts. When you do hit one:
+
+```bash
+git status                       # lists the conflicted files
+# edit each file: resolve between <<<<<<< / ======= / >>>>>>> markers
+git add <resolved-file>
+git rebase --continue            # or: git merge --continue
+```
+
+- **Understand both sides before resolving.** Don't blindly accept "ours" or
+  "theirs" — read what each side intended and combine them correctly.
+- **Never commit conflict markers.** `<<<<<<<`, `=======`, `>>>>>>>` left in a file
+  break the build and leak into history. Grep for them before staging.
+- **Re-run tests after resolving.** A clean merge that compiles can still be
+  semantically wrong — both sides may have changed the same behavior.
+- **When intent is unclear, surface it — don't guess.** If you can't tell which
+  side is correct (or whether both are needed), stop and ask rather than picking one
+  and hoping. A wrong conflict resolution is a silent bug.
 
 ## The Save Point Pattern
 
@@ -213,7 +225,8 @@ This pattern catches wrong assumptions early and gives reviewers a clear map of 
 
 ## Pre-Commit Hygiene
 
-Before every commit:
+Before every commit (the test/lint/type-check commands below are illustrative for a
+JS/TS project — substitute your stack's equivalents):
 
 ```bash
 # 1. Check what you're about to commit
@@ -251,6 +264,8 @@ Automate this with git hooks:
 - **Have a `.gitignore`** that covers: `node_modules/`, `dist/`, `.env`, `.env.local`, `*.pem`
 
 ## Using Git for Debugging
+
+These are the git mechanics. For the overall debugging process (reproduce, localize, reduce, fix the root cause), see `debugging-and-error-recovery`.
 
 ```bash
 # Find which commit introduced a bug

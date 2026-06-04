@@ -1,6 +1,6 @@
 ---
 name: git-commit
-description: Use when writing a git commit message. Enforces clean, human-authored commit style with no AI attribution, no co-author trailers, and conventional commits format.
+description: Use when writing or amending a git commit message, or running git commit.
 ---
 
 # Git Commits
@@ -17,7 +17,20 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 [optional body]
 ```
 
-**Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `style`, `ci`
+**Types** — this is the canonical conventional-commit type list for the repo
+(`branch-names`, `create-pr`, and `git-workflow-and-versioning` defer here):
+
+| Type | Use for |
+|---|---|
+| `feat` | A new feature |
+| `fix` | A bug fix |
+| `refactor` | A code change that neither fixes a bug nor adds a feature |
+| `perf` | A change that improves performance |
+| `docs` | Documentation only |
+| `test` | Adding or updating tests |
+| `style` | Formatting/whitespace only, no behavior change |
+| `chore` | Tooling, dependencies, config, or other maintenance |
+| `ci` | CI/CD configuration changes |
 
 **Rules:**
 - Lowercase, no trailing period

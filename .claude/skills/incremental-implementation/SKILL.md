@@ -12,7 +12,7 @@ Build in thin vertical slices — implement one piece, test it, verify it, then 
 ## When to Use
 
 - Implementing any multi-file change
-- Building a new feature from a task breakdown
+- Building a new feature from a task breakdown (see `planning-and-task-breakdown` for producing that breakdown)
 - Refactoring existing code
 - Any time you're tempted to write more than ~100 lines before testing
 

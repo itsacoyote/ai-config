@@ -1,6 +1,6 @@
 ---
 name: browser-testing-with-devtools
-description: Tests in real browsers via Chrome DevTools MCP. Use when building or debugging anything that runs in a browser. Use when you need to inspect the DOM, capture console errors, analyze network requests, profile performance, or verify visual output with real runtime data. Requires the chrome-devtools MCP server to be configured.
+description: Use when building or debugging anything that runs in a browser — inspecting the DOM, capturing console errors, analyzing network requests, profiling performance, or verifying visual output with real runtime data. Requires the chrome-devtools-mcp server to be configured.
 ---
 
 # Browser Testing with DevTools
@@ -21,18 +21,29 @@ Use Chrome DevTools MCP to give your agent eyes into the browser. This bridges t
 
 **When NOT to use:** Backend-only changes, CLI tools, or code that doesn't run in a browser.
 
+For *building* the UI you're testing (components, layout, accessibility, design system), see `frontend-ui-engineering`.
+
 ## Setting Up Chrome DevTools MCP
 
 ### Installation
 
+The official package is `chrome-devtools-mcp` (Google's ChromeDevTools project).
+Requires Node.js LTS and a current-stable (or newer) Chrome.
+
+Add it with the Claude Code CLI:
+
 ```bash
-# Add Chrome DevTools MCP server to your Claude Code config
-# In your project's .mcp.json or Claude Code settings:
+claude mcp add chrome-devtools npx chrome-devtools-mcp@latest
+```
+
+Or configure it manually in `.mcp.json` (or Claude Code settings):
+
+```json
 {
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
-      "args": ["@anthropic/chrome-devtools-mcp@latest"]
+      "args": ["-y", "chrome-devtools-mcp@latest"]
     }
   }
 }
@@ -40,18 +51,20 @@ Use Chrome DevTools MCP to give your agent eyes into the browser. This bridges t
 
 ### Available Tools
 
-Chrome DevTools MCP provides these capabilities:
+Chrome DevTools MCP exposes these capabilities (actual tool names shown — names may
+change between versions; check the server's tool list if a call fails):
 
-| Tool                     | What It Does                                | When to Use                                                        |
-| ------------------------ | ------------------------------------------- | ------------------------------------------------------------------ |
-| **Screenshot**           | Captures the current page state             | Visual verification, before/after comparisons                      |
-| **DOM Inspection**       | Reads the live DOM tree                     | Verify component rendering, check structure                        |
-| **Console Logs**         | Retrieves console output (log, warn, error) | Diagnose errors, verify logging                                    |
-| **Network Monitor**      | Captures network requests and responses     | Verify API calls, check payloads                                   |
-| **Performance Trace**    | Records performance timing data             | Profile load time, identify bottlenecks                            |
-| **Element Styles**       | Reads computed styles for elements          | Debug CSS issues, verify styling                                   |
-| **Accessibility Tree**   | Reads the accessibility tree                | Verify screen reader experience                                    |
-| **JavaScript Execution** | Runs JavaScript in the page context         | Read-only state inspection and debugging (see Security Boundaries) |
+| Capability                   | Tool(s)                                                                  | When to Use                                                              |
+| ---------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| **Navigate & wait**          | `navigate_page`, `new_page`, `select_page`, `wait_for`                    | Load a page/route, wait for content to appear                           |
+| **Snapshot (DOM + a11y)**    | `take_snapshot`                                                          | Read page structure, accessible names, and element refs for interaction |
+| **Screenshot**               | `take_screenshot`                                                        | Visual verification, before/after comparisons                          |
+| **Interact**                 | `click`, `fill`, `fill_form`, `hover`, `press_key`, `type_text`           | Reproduce a bug, drive a user flow                                      |
+| **Console**                  | `list_console_messages`, `get_console_message`                           | Diagnose errors/warnings, verify logging                               |
+| **Network**                  | `list_network_requests`, `get_network_request`                           | Verify API calls, inspect payloads and status codes                    |
+| **Performance**              | `performance_start_trace`, `performance_stop_trace`, `performance_analyze_insight` | Profile load time, find bottlenecks (LCP/CLS/INP)             |
+| **Audit**                    | `lighthouse_audit`                                                       | Automated performance, accessibility, and best-practice audit          |
+| **Run JS (read-only)**       | `evaluate_script`                                                        | Inspect state, read computed styles (see Security Boundaries)          |
 
 ## Security Boundaries
 
@@ -250,8 +263,11 @@ A production-quality page should have **zero** console errors and warnings. If t
 
 ## Accessibility Verification with DevTools
 
+`take_snapshot` returns an accessibility-tree view of the page; `lighthouse_audit`
+runs an automated a11y check. Use them together:
+
 ```
-1. Read the accessibility tree
+1. Read the accessibility tree (take_snapshot)
    └── Confirm all interactive elements have accessible names
 
 2. Check heading hierarchy

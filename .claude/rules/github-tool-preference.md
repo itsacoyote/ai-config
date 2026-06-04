@@ -1,6 +1,5 @@
 ---
-name: github-tool-preference
-description: Defines the preferred tool order for all git and GitHub operations. Always use GitHub CLI (gh / git) first; fall back to the GitHub MCP server only when CLI cannot complete the task.
+description: Preferred tool order for git and GitHub operations — gh/git CLI first, GitHub MCP server only as fallback.
 ---
 
 # GitHub Tool Preference

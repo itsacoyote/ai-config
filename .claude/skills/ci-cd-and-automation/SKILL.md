@@ -1,6 +1,6 @@
 ---
 name: ci-cd-and-automation
-description: Automates CI/CD pipeline setup. Use when setting up or modifying build and deployment pipelines. Use when you need to automate quality gates, configure test runners in CI, or establish deployment strategies.
+description: Use when setting up or modifying build and deployment pipelines, automating quality gates, configuring test runners in CI, establishing deployment strategies, or debugging CI failures.
 ---
 
 # CI/CD and Automation
@@ -54,6 +54,10 @@ Pull Request Opened
 **No gate can be skipped.** If lint fails, fix lint — don't disable the rule. If a test fails, fix the code — don't skip the test.
 
 ## GitHub Actions Configuration
+
+The examples below assume a Node/TS project on GitHub Actions. The principles (gates,
+shift-left, caching, parallelism, rollback) carry over — substitute your stack's
+commands and your CI provider's syntax.
 
 ### Basic CI Pipeline
 
@@ -186,9 +190,23 @@ Agent fixes → pushes → CI runs again
 ```
 Lint failure → Agent runs `npm run lint --fix` and commits
 Type error  → Agent reads the error location and fixes the type
-Test failure → Agent follows debugging-and-error-recovery skill
+Test failure → Agent reproduces locally and finds the root cause (see `debugging-and-error-recovery`), fixes, and re-verifies
 Build error → Agent checks config and dependencies
 ```
+
+### Pulling Failures Yourself
+
+When you're the agent that pushed, don't wait for a human to paste the failure —
+fetch it with the GitHub CLI (see the `github-tool-preference` rule):
+
+```bash
+gh pr checks                       # see which checks failed
+gh run list --branch <branch>      # find the failed run
+gh run view <run-id> --log-failed  # read only the failing step's logs
+```
+
+Then reproduce locally, fix, verify, and push again — don't push speculative fixes
+hoping CI goes green.
 
 ## Deployment Strategies
 
@@ -362,7 +380,7 @@ jobs:
 
 | Rationalization                   | Reality                                                                                                            |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| "CI is too slow"                  | Optimize the pipeline (see CI Optimization below), don't skip it. A 5-minute pipeline prevents hours of debugging. |
+| "CI is too slow"                  | Optimize the pipeline (see the CI Optimization section), don't skip it. A 5-minute pipeline prevents hours of debugging. |
 | "This change is trivial, skip CI" | Trivial changes break builds. CI is fast for trivial changes anyway.                                               |
 | "The test is flaky, just re-run"  | Flaky tests mask real bugs and waste everyone's time. Fix the flakiness.                                           |
 | "We'll add CI later"              | Projects without CI accumulate broken states. Set it up on day one.                                                |
