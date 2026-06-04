@@ -1,7 +1,7 @@
 ---
 name: find-patterns
-description: Identify conventions, patterns, and architectural decisions in the codebase. Use during research to understand how to stay consistent with how things are already built.
-argument-hint: [area, pattern type, or feature domain]
+description: Use during research, or before implementing, to identify the conventions, patterns, and architectural decisions in the codebase, so new work stays consistent with how things are already built.
+argument-hint: "[area, pattern type, or feature domain]"
 allowed-tools: Read Bash(find *) Bash(grep *)
 ---
 

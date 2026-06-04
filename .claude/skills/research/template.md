@@ -1,6 +1,6 @@
 # Research: <Feature Name>
 
-**Spec:** [1_spec.md](1_spec.md)
+**Spec/brief:** <link or short description, if any>
 **Date:** YYYY-MM-DD
 
 ## Summary
@@ -35,7 +35,7 @@ List the directories, files, or modules that this feature will likely touch.
 
 ## Patterns and Conventions to Follow
 
-Document conventions observed in the codebase that the Planner and implementer should match.
+Document conventions observed in the codebase that the implementer should match.
 
 - Convention or pattern — where it's used, why it matters for this feature
 
@@ -43,9 +43,9 @@ Document conventions observed in the codebase that the Planner and implementer s
 
 Anything about system design, integration points, or constraints that shapes how this feature should be built.
 
-## Key Insights for the Planner
+## Key Insights
 
-Distilled observations the Planner needs when building the implementation plan. Include anything that would affect sequencing, complexity, or approach.
+Distilled observations that affect how this feature should be planned or built. Include anything that would affect sequencing, complexity, or approach.
 
 - Insight 1
 - Insight 2

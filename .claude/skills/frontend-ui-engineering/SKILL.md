@@ -1,6 +1,6 @@
 ---
 name: frontend-ui-engineering
-description: Builds production-quality UIs. Use when building or modifying user-facing interfaces. Use when creating components, implementing layouts, managing state, or when the output needs to look and feel production-quality rather than AI-generated.
+description: Use when building or modifying user-facing interfaces — creating components, implementing layouts, managing state, or when the output needs to look and feel production-quality rather than AI-generated.
 ---
 
 # Frontend UI Engineering
@@ -16,6 +16,10 @@ Build production-quality user interfaces that are accessible, performant, and vi
 - Implementing responsive layouts
 - Adding interactivity or state management
 - Fixing visual or UX issues
+
+**When NOT to use:** Backend-only changes, CLI tools, or any work with no user-facing surface.
+
+The examples use React + Tailwind + React Query (this project's stack). The principles — composition, accessibility, design-system adherence, meaningful states — carry to any component framework; translate the syntax to yours.
 
 ## Component Architecture
 
@@ -119,6 +123,15 @@ Global store (Zustand, Redux)    → Complex client state shared app-wide
 **Avoid prop drilling deeper than 3 levels.** If you're passing props through components that don't use them, introduce context or restructure the component tree.
 
 ## Design System Adherence
+
+### Honor the project's design context
+
+Before inventing any colors, type scale, or spacing, check for design-context files and treat them as the source of truth:
+
+- **`DESIGN.md`** — colors, typography, elevation, components/tokens
+- **`PRODUCT.md`** — users, brand, tone, and register (brand vs product)
+
+These are typically created and maintained by `/impeccable` (`document` / `teach`) and live at the project root (fallback: `.agents/context/`, `docs/`). When present, align tokens, type scale, spacing, and UX copy with what they specify rather than introducing new values. If no such files exist, fall back to the project's existing design system in code (token files, theme, component library).
 
 ### Avoid the AI Aesthetic
 
@@ -309,7 +322,10 @@ function useToggleTask() {
 
 ## See Also
 
-For detailed accessibility requirements and testing tools, see `references/accessibility-checklist.md`.
+- `.claude/references/accessibility-checklist.md` — detailed WCAG 2.1 AA requirements and testing tools
+- `.claude/references/performance-checklist.md` — frontend performance checks
+- `browser-testing-with-devtools` — verify the UI, accessibility tree, console, and responsiveness against the running page (don't ship UI you haven't seen in a browser)
+- `/impeccable` — deliberate, deeper design workflow (shape, craft, critique, audit, polish). Invoke explicitly when you want design direction and visual craft beyond these implementation conventions.
 
 ## Common Rationalizations
 

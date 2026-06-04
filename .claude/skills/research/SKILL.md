@@ -32,7 +32,7 @@ Work systematically. Read the spec carefully to understand what the feature does
 - New UI components, if nothing reusable fits
 - New data structures or migrations
 
-**Patterns and conventions** — document what the codebase already does so the Planner can stay consistent:
+**Patterns and conventions** — document what the codebase already does so new work stays consistent:
 
 - How similar features are structured
 - Naming conventions in relevant areas
@@ -48,7 +48,7 @@ Work systematically. Read the spec carefully to understand what the feature does
 
 ## Artifacts
 
-If you produce any reference files (diagrams, data samples, exported schemas, etc.) during research, note them clearly in your findings so the user or a downstream agent can save them if needed.
+If you produce any reference files (diagrams, data samples, exported schemas, etc.) during research, note them clearly in your findings so the user can save them if needed.
 
 ## Supporting skills
 
@@ -60,4 +60,8 @@ Use these skills as needed during research:
 
 ## Output
 
-Present research findings in the conversation using the structure in [template.md](template.md) as a guide. Do not write files unless the user asks.
+Present findings **conversationally in this session**, using [template.md](template.md) as the structure for what to cover (a findings outline — not a file to write). Don't write step-doc files.
+
+Task tracking follows the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone (default), present the "Gaps / what needs to be created" as a plain checklist and let the user decide what to track; beads-enhanced, attach findings to the feature epic and turn each actionable gap into a child issue with dependencies.
+
+Next step: hand the findings to `planning-and-task-breakdown` (Plan). See `feature-workflow` for the full sequence.

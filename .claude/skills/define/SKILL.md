@@ -1,62 +1,66 @@
 ---
 name: define
-description: Guide a collaborative spec conversation for a new feature. Works through scope, goals, constraints, and acceptance criteria to arrive at a clear, well-scoped design before anything gets built.
+description: Use at the start of a feature to turn an idea into a clear, well-scoped spec through collaborative dialogue — scope, goals, constraints, and acceptance criteria — before any research or code.
 disable-model-invocation: true
-allowed-tools: Read Bash(find *) Bash(git log *)
+allowed-tools: Read Bash(find *) Bash(git *)
 ---
 
 # Define
 
-Help arrive at a clear, well-scoped feature spec through collaborative dialogue. If spec context is already in the conversation, build on it. If not, start from scratch with the user.
+The first step of the feature workflow (Define → Research → Plan → Implement → Validate → Document). Arrive at a clear, well-scoped spec through collaborative dialogue, then record it. If spec context is already in the conversation, build on it; otherwise start from the idea with the user.
 
-## Anti-Pattern: "This Is Too Simple To Need A Design"
+## When NOT to use
 
-Every feature goes through this process. The conversation can be short for simple features, but you must go through it. A brief conversation is better than skipping and discovering missed requirements mid-implementation.
+A one-line, obvious change with no real ambiguity — just make it. Define earns its keep when scope, approach, or acceptance is unclear, or when the work is large enough that a wrong assumption is expensive. Even then, keep the conversation proportional: short for simple features, deeper for nuanced ones. Don't skip it to look fast; don't pad it to look thorough.
 
-## The Process
+## Start: branch and context
 
-**Explore context first:**
+1. **Create the feature branch** per the `branch-names` skill (`<type>/<short-slug>`), from an up-to-date default branch:
+   ```bash
+   git switch main && git pull && git switch -c <type>/<short-slug>
+   ```
+2. **Explore context first** — read relevant files, docs, and recent commits to understand the current state before asking questions.
+3. **Check scope** — if the idea spans multiple independent subsystems (e.g. "a platform with chat, billing, and analytics"), flag it and help decompose into separate features before continuing. A spec should fit a single implementation cycle.
 
-- Check files, docs, and recent commits to understand the current project state
-- Before asking detailed questions, assess scope: if the request describes multiple independent subsystems (e.g., "build a platform with chat, file storage, billing, and analytics"), flag this immediately and help decompose into sub-projects before continuing
-- If the project is too large for a single spec, help the user identify the independent pieces, how they relate, and what order to build them. Then work through the first sub-project
+## The conversation
 
-**Ask clarifying questions — one at a time:**
+**Ask clarifying questions — one at a time.** Prefer multiple choice over open-ended; one question per message. Focus on purpose, constraints, success criteria, and non-goals.
 
-- Prefer multiple choice when possible, open-ended when necessary
-- One question per message — if a topic needs more exploration, break it into multiple messages
-- Focus on: purpose, constraints, success criteria, non-goals
+**Explore approaches.** Propose 2–3 options with trade-offs; lead with your recommendation and say why.
 
-**Explore approaches:**
+**Present the design section by section.** Scale each section to its complexity. Cover architecture, components, data flow, error handling, and testing. Ask after each section whether it looks right. Be ready to go back and clarify.
 
-- Propose 2-3 different approaches with trade-offs
-- Lead with your recommended option and explain why
+**Design for isolation.** Break the system into units that each have one clear purpose, communicate through well-defined interfaces, and can be understood and tested independently. For each: what does it do, how do you use it, what does it depend on?
 
-**Present the design:**
+**In existing codebases**, follow established patterns; include targeted fixes only where existing problems block the work — no unrelated refactoring.
 
-- Once you understand what's being built, present the design
-- Scale each section to its complexity: a few sentences if straightforward, up to 200–300 words if nuanced
-- Ask after each section whether it looks right
-- Cover: architecture, components, data flow, error handling, testing
-- Be ready to go back and clarify
+**Principles:** YAGNI ruthlessly · explore alternatives before settling · validate incrementally · stay flexible.
 
-**Design for isolation and clarity:**
+## The spec
 
-- Break the system into smaller units that each have one clear purpose, communicate through well-defined interfaces, and can be understood and tested independently
-- For each unit, answer: what does it do, how do you use it, what does it depend on?
-- Can someone understand a unit without reading its internals? Can you change the internals without breaking consumers? If not, the boundaries need work
+Once the design is agreed, capture it as a spec with these sections. Each must clear its quality bar before the spec is considered done:
 
-**Working in existing codebases:**
+- **Summary** — one paragraph; a reader with no context understands what this is and why it exists.
+- **Problem statement** — concrete; who is affected and how (the actual pain, not "users want X").
+- **Goals** — specific outcomes ("users can do X"), not activities.
+- **Non-goals** — explicit; anything not listed here is assumed in scope.
+- **User stories** — primary path plus at least one edge case. "As a [role], I want [action] so that [outcome]."
+- **Requirements** — decided functional facts; no "should"/"maybe". Each is true or false after implementation.
+- **Constraints** — real blockers (technical, time, third-party), not preferences.
+- **Acceptance criteria** — testable; a reviewer can mark each done without asking what it meant.
+- **Open questions** — only unresolved blockers; fold answered ones into the relevant section.
 
-- Explore the current structure before proposing changes. Follow existing patterns.
-- Where existing code has problems that affect the work, include targeted improvements as part of the design
-- Don't propose unrelated refactoring
+Avoid TBDs/TODOs/placeholders and contradictions between sections.
 
-## Key Principles
+## Recording the spec
 
-- **One question at a time** — don't overwhelm with multiple questions
-- **Multiple choice preferred** — easier to answer than open-ended when possible
-- **YAGNI ruthlessly** — cut unnecessary features from all designs
-- **Explore alternatives** — always propose 2-3 approaches before settling
-- **Incremental validation** — present design section by section, get approval before moving on
-- **Be flexible** — go back and clarify when something doesn't make sense
+Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
+
+- **Standalone (default):** present the finished spec in the conversation. It is the working record for Research and Plan.
+- **Beads-enhanced:** create the feature **epic** with the spec as its body.
+
+Do not write step-doc files — there is no `.docs/`.
+
+## Approval checkpoint
+
+Before handing off to Research, present the **Summary** and **Acceptance Criteria** and ask the user to approve or give feedback. Revise and re-present until approved. Only after approval move on to the `research` skill (see `feature-workflow` for the full sequence).

@@ -1,65 +1,39 @@
 ---
 name: validate
-description: Coordinate a senior code review followed by a QA review. Runs both reviewers in sequence, manages fix iterations between rounds, and produces a validation summary. Use after implementation is complete.
+description: Use after implementation to run a change through senior code review and QA review before it ships — fixing findings and re-reviewing until both pass. The Validate step of the feature workflow.
 disable-model-invocation: true
 allowed-tools: Read Bash(*) Agent
 ---
 
 # Validate
 
-Run a senior code review followed by a QA review. Fix issues and repeat until both reviewers pass.
+The last gate before a change ships. Run a senior code review, then a QA review; fix findings between rounds and repeat until both pass. Do not soften findings, rush approvals, or skip steps because the implementation looks mostly fine.
 
-If feature context (spec, plan, diff) isn't already in the conversation, ask the user to share what was implemented before beginning.
+Run this **from the main session** — it spawns the `senior-review` and `qa-review` agents, and subagents can't spawn subagents. Spawning them in isolated contexts is the point: an independent reviewer that didn't write the code won't rubber-stamp it.
 
-This is the last gate before code ships. Do not soften findings, rush approvals, or skip steps because the implementation looks mostly fine.
+## When NOT to use
 
-## Validation Loop
+Trivial changes (typo, copy, config) don't need the full gate — a quick `senior-review` in-session is enough. Reserve `validate` for real features and risky changes.
 
-Run both reviewers in order. Do not advance to the next reviewer until the current one passes.
+## Round 1 — Senior code review
 
-### Round 1 — Senior Code Review
+1. Spawn the **`senior-review` agent** (Agent tool). Pass the spec and plan if they exist, plus the diff scope.
+2. If it returns findings: fix each exactly as specified, run the test suite to confirm nothing broke, commit the fixes (`Skill(git-commit)` first), and re-spawn the agent.
+3. Repeat until it approves — **max 3 fix iterations**. If the same issues persist after 3, stop and report which remain, what was tried, and your assessment of the root cause. Do not attempt a 4th.
 
-Invoke the Senior Reviewer agent. Pass the spec, plan, and full diff as context.
+Do not advance to QA until the senior review approves.
 
-If the Senior Reviewer returns issues:
+## Round 2 — QA review
 
-1. Fix each issue exactly as specified — do not interpret or improvise on the fix.
-2. Run the test suite after fixes to confirm nothing broke.
-3. Commit the fixes.
-4. Re-invoke the Senior Reviewer.
-5. Repeat until the Senior Reviewer approves, up to a maximum of 3 fix iterations.
-
-If the same issues persist after 3 attempts, stop. Return a clear summary of:
-- Which issues remain unresolved
-- What was attempted in each iteration and why it didn't work
-- Your assessment of the root cause
-
-Do not attempt further fixes.
-
-### Round 2 — QA Review
-
-QA's first action is to run the project's full e2e suite. On failure, QA enters its own 3-attempt fix-and-rerun loop, defined in `.claude/agents/qa-reviewer.md`. QA's internal e2e fix loop (cap 3) is independent of this skill's own Round 2 fix-iteration cap (also 3). Both apply; both are uniform across the pipeline.
-
-Once the Senior Reviewer has approved, invoke the QA Reviewer agent.
-
-If the QA Reviewer returns issues:
-
-1. Fix each issue exactly as specified.
-2. Run the full test suite and verify coverage stays above 80%.
-3. Commit the fixes.
-4. Re-invoke the QA Reviewer.
-5. Repeat until the QA Reviewer approves, up to a maximum of 3 fix iterations.
-
-If the same issues persist after 3 attempts, stop. Return a clear summary as above.
-
-**Green-suite gate:** If QA returns the **Approved** verdict but the final state was not "all e2e tests passed on HEAD," treat the verdict as a defect. Re-invoke QA with the gap called out (e2e not actually run, or not actually green). This re-invocation counts against the same 3-attempt Round 2 cap.
+1. Spawn the **`qa-review` agent**. It runs the e2e suite first (graceful when none exists), then audits coverage and test quality.
+2. If it returns **Gaps**: fix each, run the suite, verify coverage holds, commit, and re-spawn — **max 3 iterations**, same stop rule as Round 1.
+3. If it returns **Blocked** (e2e couldn't reach green in 3 attempts, or a required runtime is missing): stop and report; don't force an approval.
+4. **Green-suite gate:** if QA reports Approved but the final state wasn't "e2e green (or absent-and-noted)," treat it as a defect and re-spawn with the gap called out (counts against the Round 2 cap).
 
 ## Completion
 
-Once both reviewers have approved, produce a validation summary with:
+Produce a validation summary: senior verdict + fix-iteration count; QA verdict, coverage, fix-iteration count, and the e2e result; each finding that required a fix and what resolved it; any evidence captured.
 
-- Senior review verdict and number of fix iterations
-- QA review verdict, coverage achieved, and number of fix iterations
-- Number of e2e fix iterations performed by the QA Reviewer and the final e2e result (green / escalated)
-- For each finding that required fixing: what the finding was and what changed to resolve it
-- A list of evidence artifacts captured by the QA Reviewer
+Record per the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone, present the summary in-session; beads-enhanced, record it on the feature epic and close out resolved finding issues.
+
+Then push the branch (`git push`) to flush any fix commits made during the rounds. Hand off to the `document` skill for the final documentation pass and PR (see `feature-workflow`).

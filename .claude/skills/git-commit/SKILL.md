@@ -1,6 +1,6 @@
 ---
 name: git-commit
-description: Use when writing a git commit message. Enforces clean, human-authored commit style with no AI attribution, no co-author trailers, and conventional commits format.
+description: Use when writing or amending a git commit message, or running git commit.
 ---
 
 # Git Commits
@@ -17,7 +17,20 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 [optional body]
 ```
 
-**Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `style`, `ci`
+**Types** — this is the canonical conventional-commit type list for the repo
+(`branch-names`, `create-pr`, and `git-workflow-and-versioning` defer here):
+
+| Type | Use for |
+|---|---|
+| `feat` | A new feature |
+| `fix` | A bug fix |
+| `refactor` | A code change that neither fixes a bug nor adds a feature |
+| `perf` | A change that improves performance |
+| `docs` | Documentation only |
+| `test` | Adding or updating tests |
+| `style` | Formatting/whitespace only, no behavior change |
+| `chore` | Tooling, dependencies, config, or other maintenance |
+| `ci` | CI/CD configuration changes |
 
 **Rules:**
 - Lowercase, no trailing period
@@ -42,6 +55,16 @@ fix(auth): handle expired token on refresh
 docs: update setup instructions for new env vars
 chore: add .gitignore for macOS and editor artifacts
 ```
+
+## Show the message after committing
+
+After running `git commit`, surface the **exact committed message** back to the user — don't just say "committed" or "it follows the rules." Print the full subject and body verbatim so they can verify it without digging into git themselves:
+
+```bash
+git show -s --format=%B HEAD
+```
+
+Include that output (subject + any body) in your reply. If you amended or rewrote a message, show the updated one.
 
 ## Common Mistakes
 

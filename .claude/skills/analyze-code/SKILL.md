@@ -1,13 +1,13 @@
 ---
 name: analyze-code
-description: Survey a file, module, or area of the codebase to understand what it does and whether it's relevant to a feature under research. Use to quickly assess reusability and surface what the Planner needs to know.
+description: Use when surveying a file, module, or area of the codebase to understand what it does, how it works, and whether it can be reused for a feature you're researching or planning.
 argument-hint: "[file or directory path]"
 allowed-tools: Read Bash(find *) Bash(grep *)
 ---
 
 # Analyze Code
 
-Survey `$ARGUMENTS` to understand what's there and how it relates to the feature being researched. If no target is provided, ask what to analyze.
+Survey `$ARGUMENTS` to understand what's there and how it relates to the feature you're researching or planning. If no target is provided, ask what to analyze.
 
 ## What to assess
 
