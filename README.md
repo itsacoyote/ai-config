@@ -34,6 +34,8 @@ Run the steps in order; advance only when the previous step's output is in hand.
 
 State and tasks flow through **[beads](https://github.com/gastownhall/beads)** (the `bd` CLI) when it's set up, and **conversationally** when it isn't. Every workflow skill follows the dual-mode contract in [`.claude/references/beads.md`](.claude/references/beads.md): fully usable standalone, and better when beads exists (a feature becomes an epic, plan tasks become child issues, review findings become issues). There is no `.docs/` folder or `context.yaml` — beads (or the conversation) is the system of record.
 
+To turn beads on for a project, run the **`setup-beads`** skill — it installs `bd`, initializes an isolated local database, and keeps it out of git by default.
+
 ---
 
 ## Skills
@@ -93,6 +95,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `create-pr` | PR titles and bodies — honors the host project's PR process and GitHub template first |
 | `sync` `/cmd` | Bring the local checkout up to date with `main` before new work |
 | `standup` `/cmd` | Read-only recap of recent work (done / in progress / next) for catching up after a break — beads-first, else git + PRs |
+| `setup-beads` `/cmd` | Install and initialize beads (`bd`) for a project — isolated local use, nothing committed by default |
 | `writing-skills` | How to author and verify skills (use this when adding to this repo) |
 | `doubt-driven-development` | Fresh-context adversarial review of non-trivial decisions |
 
@@ -159,7 +162,8 @@ orchestrator. See the `feature-workflow` skill for the map.
 
 If [beads](https://github.com/gastownhall/beads) is set up (`.beads/` exists),
 the workflow records features/tasks/findings as beads issues. If not, it runs
-conversationally — both work. See `.claude/references/beads.md`.
+conversationally — both work. Run the `setup-beads` skill to enable it. See
+`.claude/references/beads.md`.
 
 ## Conventions
 

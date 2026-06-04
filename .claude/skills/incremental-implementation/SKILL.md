@@ -43,7 +43,7 @@ For each slice:
 
 ## Working from a plan
 
-When a plan exists (from `planning-and-task-breakdown`), implement its tasks in dependency order, one task per increment. Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): **standalone**, work down the plan's task list; **beads-enhanced**, pull the next task with `bd ready`, `bd update <id> --claim` before starting it, and close it (`bd update <id> --status closed`) once its commit lands. Maintain test coverage as you go — don't defer tests to the end (see `writing-tests`).
+When a plan exists (from `planning-and-task-breakdown`), implement its tasks in dependency order, one task per increment. Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): **standalone**, work down the plan's task list; **beads-enhanced**, pull the next task with `bd ready`, `bd update <id> --claim` before starting it, and `bd close <id>` once its commit lands. Maintain test coverage as you go — don't defer tests to the end (see `writing-tests`).
 
 ### Review checkpoints (optional)
 
