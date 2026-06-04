@@ -69,7 +69,7 @@ while `bd ready` lists an implementable task (skip the epic / non-leaf issues):
   on the implementer's returned status:
     DONE               → review per cadence; on pass, bd close <id>
     DONE_WITH_CONCERNS → triage: fix correctness before closing; file follow-up issues for the rest
-    NEEDS_CONTEXT      → supply what's missing, re-dispatch the same task (bounded)
+    NEEDS_CONTEXT      → supply what's missing, re-dispatch the same task (bounded: 3, then exception-stop)
     BLOCKED            → exception-stop: halt and surface to the human
   continue to the next ready task
 ```
