@@ -2,11 +2,23 @@
 
 Single source of truth for how the workflow skills (`define`, `research`,
 `planning-and-task-breakdown`, `incremental-implementation`, `senior-review`,
-`qa-review`, `validate`, `document`) use **beads** as the project's task tracker
-and system of record. Skills point here instead of restating the model — when the
-beads model changes, this file is the only edit.
+`qa-review`, `validate`, `document`, `standup`) use **beads** as the project's task
+tracker and system of record. Skills point here instead of restating the model —
+when the beads model changes, this file is the only edit.
 
-Beads: <https://github.com/gastownhall/beads>. CLI is `bd`. Data lives in `.beads/`.
+Beads: <https://github.com/gastownhall/beads>. CLI is `bd`. To install and
+initialize it in a project, use the **`setup-beads`** skill.
+
+## How beads stores data
+
+`bd` keeps issues in an **embedded [Dolt](https://www.dolthub.com/) database** under
+`.beads/embeddeddolt/`, running in-process — there is no daemon. `bd init` writes
+`.beads/config.yaml` plus a nested `.beads/.gitignore` that excludes the Dolt data
+dirs. Any `.beads/issues.jsonl` is an **export for interchange — not the source of
+truth.** `dolt.auto-commit` (on by default) makes a *local* Dolt commit after writes
+— internal versioning, not a git commit or network push; `dolt.auto-push` is off by
+default. In the recommended personal/local setup, `.beads/` is git-ignored entirely
+and nothing syncs anywhere.
 
 ## Dual-mode contract (read this first)
 
@@ -36,28 +48,30 @@ When beads is active, a feature maps onto the issue graph like this:
 |---|---|
 | A feature / spec | An **epic** issue (`bd-a3f8`) created at **Define** |
 | Research findings | Notes/comments on the epic (or a `research` child issue) |
-| Plan tasks | **Child issues** of the epic (`bd-a3f8.1`, …) created at **Plan**, with dependencies |
-| Implementation progress | Child issues claimed and closed at **Implement** |
+| Plan tasks | **Child issues** of the epic created at **Plan**, with dependencies |
+| Implementation progress | Child issues moved to `in_progress` then `closed` at **Implement** |
 | Review / QA findings | Issues (linked to the epic, or to the task they concern) created at **Validate** |
 | Documentation follow-ups | Issues if anything is deferred at **Document** |
 
 Status vocabulary: `open` → `in_progress` → `blocked` → `closed`. Priority is `-p 0`
-(highest) … `-p 3`.
+(highest) … `-p 3`. Type is `-t` (`task`, `feature`, `epic`, …).
 
 ## Command cheat sheet
 
 ```bash
-bd create "Title" -p 1                 # create an issue (epic or task)
-bd create "Task title" -p 1 --parent <epic-id>   # create a child task
-bd dep add <child-id> <parent-id>      # express a blocking/ordering dependency
+bd prime                               # inject current beads context (run at session start)
 bd ready                               # list unblocked issues ready to start
-bd update <id> --claim                 # claim an issue (sets in_progress)
-bd update <id> --status closed         # close an issue
+bd create "Title" -p 1 -t epic         # create an issue (epic, feature, or task)
+bd create "Task title" -p 1 -t task --parent <epic-id>   # create a child task
+bd dep add <child-id> <parent-id>      # express a blocking/ordering dependency
+bd update <id> --status in_progress    # claim / start an issue
+bd close <id>                          # complete an issue (or: bd update <id> --status closed)
 bd show <id>                           # view an issue's details
+bd list --json                         # list issues (use --json for programmatic reads)
 ```
 
-Verify exact flags with `bd --help` / `bd <subcommand> --help` before relying on
-them — the CLI evolves, and this reference may lag a version.
+The CLI is large and evolving — **verify exact flags with `bd <command> --help`
+before relying on them.** If a flag here has changed, prefer what `--help` reports.
 
 ## How each step uses beads (when active)
 
@@ -66,21 +80,24 @@ them — the CLI evolves, and this reference may lag a version.
 - **Research** → attach findings to the epic (comment or `research` child issue).
 - **Plan** → create one **child task** per plan task, with `bd dep add` for ordering;
   the file map and TDD test names go in each task's body.
-- **Implement** → `bd ready` to find the next task, `bd update <id> --claim`, do the
-  work, `bd update <id> --status closed` when its commit lands.
+- **Implement** → `bd ready` to find the next task, `bd update <id> --status in_progress`
+  before starting it, `bd close <id>` once its commit lands.
 - **Validate** → file an issue per unresolved review/QA finding; close them as fixes
   land. The validation summary goes on the epic.
 - **Document** → file issues for any documentation deliberately deferred; otherwise
   close out the epic when the PR is ready.
+- **Standup** → read-only: `bd ready` for what's next, plus closed/in-progress issues
+  for what's done and in flight. Never mutates.
 
 ## Guardrails
 
-- **Never run `bd` until `.beads/` exists.** Detect first (snippet above).
+- **Never run `bd` until `.beads/` exists.** Detect first (snippet above). If beads
+  isn't set up and the user wants it, point them at the `setup-beads` skill.
 - **Never auto-close or auto-transition** issues the user owns without surfacing it.
 - **Don't invent issue IDs.** Read them back from `bd` output (e.g. capture the ID
   printed by `bd create`).
 - If a `bd` command fails, report the stderr and fall back to standalone (present the
   result conversationally) — don't halt the workflow.
-- Beads is **not set up in this project yet** as of this writing, so in practice the
-  workflow runs standalone today. These hooks activate automatically once `.beads/`
-  exists.
+- In the recommended personal/local setup there is **no remote and no push** — don't
+  run `bd dolt push` / `bd dolt remote add` unless the project was deliberately set up
+  in tracked mode (see `setup-beads`).
