@@ -56,6 +56,16 @@ docs: update setup instructions for new env vars
 chore: add .gitignore for macOS and editor artifacts
 ```
 
+## Show the message after committing
+
+After running `git commit`, surface the **exact committed message** back to the user — don't just say "committed" or "it follows the rules." Print the full subject and body verbatim so they can verify it without digging into git themselves:
+
+```bash
+git show -s --format=%B HEAD
+```
+
+Include that output (subject + any body) in your reply. If you amended or rewrote a message, show the updated one.
+
 ## Common Mistakes
 
 | Mistake | Fix |
