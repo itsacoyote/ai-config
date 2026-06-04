@@ -7,6 +7,13 @@ description: Use when writing or amending a git commit message, or running git c
 
 Write commits as a human engineer would. Clean, direct, professional.
 
+## Before you commit
+
+Run the project's mechanical checks first — see [`project-checks`](../project-checks/SKILL.md).
+It discovers and runs the project's own typecheck/lint/format/spell/test commands so you don't
+commit something that turns the CI pipeline red on push. It skips gracefully when a project
+defines no checks. Fix (or auto-fix) what it surfaces before committing.
+
 ## Format
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):

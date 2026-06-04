@@ -37,7 +37,7 @@ For each slice:
 
 1. **Implement** the smallest complete piece of functionality
 2. **Test** — run the test suite (or write a test if none exists; see `writing-tests` for what makes a good one)
-3. **Verify** — confirm the slice works as expected (tests pass, build succeeds, manual check)
+3. **Verify** — confirm the slice works as expected (manual check), then run the project's mechanical gates with [`project-checks`](../project-checks/SKILL.md) (typecheck, lint, format, spell, tests — discovered from the project, auto-fixed where possible). Keep the tree green at every commit so nothing breaks CI later.
 4. **Commit** -- save your progress with a descriptive message (see `git-workflow-and-versioning` for atomic commit guidance)
 5. **Move to the next slice** — carry forward, don't restart
 
@@ -215,14 +215,11 @@ Be explicit about what's in scope and what's NOT in scope for each increment.
 After each increment, verify:
 
 - [ ] The change does one thing and does it completely
-- [ ] All existing tests still pass (`npm test`)
-- [ ] The build succeeds (`npm run build`)
-- [ ] Type checking passes (`npx tsc --noEmit`)
-- [ ] Linting passes (`npm run lint`)
+- [ ] The project's mechanical checks pass — run [`project-checks`](../project-checks/SKILL.md), which discovers and runs the project's own tests, build, typecheck, lint, format, and spell commands (don't assume `npm`; it works across toolchains)
 - [ ] The new functionality works as expected
 - [ ] The change is committed with a descriptive message
 
-**Note:** Run each verification command after a change that could affect it. After a successful run, don't repeat the same command unless the code has changed since — re-running on unchanged code adds no information.
+**Note:** `project-checks` only runs a check after a change that could affect it and skips a check whose inputs haven't changed since it last passed — re-running on unchanged code adds no information.
 
 ## Common Rationalizations
 
