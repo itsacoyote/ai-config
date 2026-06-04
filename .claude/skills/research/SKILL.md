@@ -48,7 +48,7 @@ Work systematically. Read the spec carefully to understand what the feature does
 
 ## Artifacts
 
-If you produce any reference files (diagrams, data samples, exported schemas, etc.) during research, note them clearly in your findings so the user or a downstream agent can save them if needed.
+If you produce any reference files (diagrams, data samples, exported schemas, etc.) during research, note them clearly in your findings so the user can save them if needed.
 
 ## Supporting skills
 
@@ -60,18 +60,6 @@ Use these skills as needed during research:
 
 ## Output
 
-Default: present findings **conversationally in this session**, using [template.md](template.md) as the structure for what to cover. Don't write files unless the user asks.
+Present findings **conversationally in this session**, using [template.md](template.md) as the structure for what to cover (a findings outline — not a file to write). Don't write step-doc files.
 
-### Task tracking
-
-<!-- BEADS: not enabled yet. When beads is set up in the project, turn this section on. -->
-
-The intended task tracker is **beads** (the `bd` CLI). It is **not set up in this project yet** — so for now, present the "Gaps / what needs to be created" as a plain checklist in your findings and let the user decide what to track. Do not run `bd` until `.beads/` exists in the repo.
-
-When beads is available, switch to issue output: turn each actionable gap into an issue, express ordering between them with dependencies, then hand off via `bd ready`.
-
-```bash
-bd create "<gap title>" -p <priority>   # one issue per actionable gap
-bd dep add <child-id> <parent-id>       # blocking/ordering between gaps
-bd ready                                # what's unblocked and ready to start
-```
+Task tracking follows the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone (default), present the "Gaps / what needs to be created" as a plain checklist and let the user decide what to track; beads-enhanced, attach findings to the feature epic and turn each actionable gap into a child issue with dependencies.
