@@ -88,6 +88,62 @@ After a task returns DONE, review it according to the cadence (hybrid by default
 "Review cadence"). Risky tasks are reviewed immediately; the rest are covered by the
 always-run `validate` pass at the end. Only `bd close` a task once its review passes.
 
+## Review cadence
+
+Hybrid by default, overridable at launch.
+
+- **Hybrid (default):** a task marked `review-per-task` (by `planning-and-task-breakdown`,
+  for sensitive or high-blast-radius work) is reviewed **immediately** after it returns DONE;
+  tasks marked `end-of-run` are not reviewed individually — the always-run `validate` pass
+  covers them. Escalate any task to per-task review on your own judgment too (e.g. the
+  implementer returned DONE_WITH_CONCERNS, or it touched more than its file-map slice).
+- **Launch override:** honor a cadence instruction passed at launch over the default — e.g.
+  *"review every task"*, *"only validate at the end"*, *"review tasks 3 and 7 individually"*.
+  The end-of-run `validate` runs regardless.
+- **How a per-task review runs:** reuse the `validate` loop shape on just that task's change —
+  spawn `senior-review` (and `qa-review` if it added testable behavior), apply fixes,
+  re-review, **bounded to 3 iterations**. Don't `bd close` the task until its review passes.
+
+## Models (per-role knob)
+
+Each subagent runs on the model best suited to its role, overridable at launch:
+
+- **implementer** → a fast/capable model (the agent defaults to Sonnet).
+- **reviewers** (`senior-review` → Opus, `qa-review` → Sonnet) → their own frontmatter defaults.
+
+Override per spawn with the `Agent` tool's `model` parameter (resolution: per-call >
+agent frontmatter > session model). If the user names models at launch, use those.
+
+## Exception stops
+
+An exception-stop is a **safety halt** that hands control back to the human mid-run — distinct
+from the two gates. Stop and surface — don't grind or guess — when:
+
+- a task's review still fails after the bounded fix cycles (3, per `validate`),
+- the implementer returns **BLOCKED**, or
+- an action hits a permission denial it can't proceed past.
+
+Report which task, what happened, what was tried, and your read of the cause (context gap /
+oversized task / flawed plan / environment). The human decides; autorun does not retry blindly.
+
+## Permissions
+
+autorun runs with **permissions enforced** — every consequential action (writes, commits,
+installs, push) surfaces an approval prompt the human answers. This is what makes it safe
+where `--dangerously-skip-permissions` is forbidden. **Never** set
+`permissionMode: bypassPermissions` (or `dontAsk`) on the subagents autorun spawns — they
+inherit the session's permissions by design.
+
+To keep a supervised run from death-by-prompt, pre-approve the safe, high-frequency operations
+in `.claude/settings.local.json` (via `update-config`) — for example:
+
+```
+Bash(bd *), Bash(git status*), Bash(git diff *), Bash(git log *), <test runner>, <linter>
+```
+
+Leave genuinely consequential actions (file writes, `git push`, installs) to prompt. The
+allowlist reduces friction; it does not remove supervision.
+
 ## Terminal: PR-ready, never merge
 
 The run ends when `document` has opened the PR and marked it **ready for review**. autorun
@@ -100,3 +156,13 @@ exception-stop instead of forcing anything.
 Record per the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
 beads-enhanced — progress is the issue states (claimed → closed) and the validation summary
 on the epic; standalone — present a run summary in the session at the end.
+
+## Dual-mode & resuming
+
+- **Beads-enhanced (recommended):** loop state lives in beads, so the run is **resumable** —
+  if you stop it, deny a permission, or hit an exception-stop, re-invoking autorun continues
+  from the remaining `bd ready` tasks. Closed tasks stay closed; a claimed-but-unfinished task
+  is picked back up.
+- **Standalone:** the task list lives in the session, so resumability is best-effort — a fresh
+  session re-derives the plan from the spec. Use `setup-beads` for any feature you might pause
+  and resume.
