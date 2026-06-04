@@ -91,6 +91,12 @@ Hard-won details when an agent (not a human) runs `bd`:
   `bd dep cycles` checks for cycles; self/cyclic deps are rejected.
 - **`bd ready` lists the epic itself** (a container with no blockers) alongside real work.
   When looping over implementable tasks, **skip the epic / non-leaf issues**.
+- **`bd ready` excludes `in_progress` (and `blocked`/`deferred`).** A task you've `--claim`ed
+  but not yet `bd close`d will **not** reappear in `bd ready`. So in a claim→work→close loop,
+  an interruption *between* claim and close strands the task: on resume it's invisible to
+  `bd ready`. **Reclaim it explicitly** — sweep `bd list --status in_progress` (scoped to the
+  epic) and re-dispatch those before draining `bd ready`. (This is the resumability contract
+  the `autorun` skill's resume preamble implements.)
 - **Materialize a whole plan atomically:** `bd create --graph <plan.json>` creates many
   issues *and* their dependencies from one JSON file — cleaner than N creates + N `dep add`s.
 - **Long bodies:** pass `--body-file <f>` / `--stdin` (and `--acceptance`, `--design`) to

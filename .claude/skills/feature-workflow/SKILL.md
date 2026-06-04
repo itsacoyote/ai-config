@@ -5,7 +5,7 @@ description: Use when starting or resuming a feature, or when you want the map o
 
 # Feature Workflow
 
-The manual development workflow: **Define → Research → Plan → Implement → Validate → Document.** This skill is the map — it tells you the sequence and which skill/agent owns each step. It is guidance, not automation: you (or the model) run each step deliberately and decide when to advance.
+The development workflow: **Define → Research → Plan → Implement → Validate → Document.** This skill is the map — it tells you the sequence and which skill/agent owns each step. Run each step deliberately by hand — or, after Define, hand the rest to `autorun` (see "Running it: by hand or with autorun" below).
 
 This is portable on purpose — it travels with the skills when copied into another project, where the project's own `CLAUDE.md` will not.
 
@@ -39,6 +39,8 @@ State flows through **beads** when it's set up, and conversationally when it isn
 
 Skip steps for trivial work — a one-line fix doesn't need the full pipeline. The workflow earns its keep on real features where a missed requirement or a skipped review is expensive. Match the rigor to the change.
 
-## Not automated (yet)
+## Running it: by hand or with autorun
 
-There is intentionally no orchestrator running these end to end. Run the steps yourself, in order. (The archived `/feature` skill automated this; it was removed in favor of the manual flow.)
+Run the steps yourself, one at a time — the manual flow above. Or, after Define, hand the rest to **`autorun`**: a supervised orchestrator that runs Research → Document in one pass, implementing each task in a fresh `implementer` subagent, with permissions enforced (you approve actions as they happen) and stopping at a ready-for-review PR. **Two human gates either way — Define and the PR review.**
+
+`autorun` is the in-session, permissions-on automation — *not* an unattended/headless runner; that remains future work. (The archived `/feature` skill automated this differently and is not active.)

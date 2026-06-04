@@ -118,14 +118,25 @@ Each task follows this structure:
 - `tests/path/to/test.ts`
 
 **Estimated scope:** [Small: 1-2 files | Medium: 3-5 files | Large: 5+ files]
+
+**Risk:** `review-per-task` | `end-of-run`
+
+**Skill hints:** [candidate craft skills for this task, or "none beyond core"]
 ```
+
+These last two fields feed `autorun` (the supervised-autonomous orchestrator):
+
+- **Risk** sets the review cadence — `review-per-task` for tasks touching sensitive or high-blast-radius areas (auth, payments, migrations, public API, crypto, concurrency, or anything the spec flags); `end-of-run` otherwise (the always-run `validate` pass covers them).
+- **Skill hints** seed the implementer's skill selection — the craft skills it's likely to need (e.g. `frontend-ui-engineering`, `api-and-interface-design`, `security-and-hardening`). A seed, not a mandate: the implementer invokes them on demand and may pull more. The always-on core (`incremental-implementation`, `writing-tests`, `find-patterns`) is assumed and not listed.
+
+Both are still useful without autorun — they document where review attention belongs and which skills a task implies.
 
 ### Recording the plan
 
 Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
 
 - **Standalone (default):** present the file map and ordered task list in the conversation — this is the plan of record for Implement.
-- **Beads-enhanced:** create one **child issue per task** under the feature epic (file map + named tests in each issue body), and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`.
+- **Beads-enhanced:** create one **child issue per task** under the feature epic — put the file-map slice, named tests, **risk marker, and skill hints** in each issue body — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically.
 
 Do not write a `3_plan.md` or any step-doc file — there is no `.docs/`.
 
@@ -146,7 +157,7 @@ Add explicit checkpoints:
 - [ ] All tests pass
 - [ ] Application builds without errors
 - [ ] Core user flow works end-to-end
-- [ ] Review with human before proceeding
+- [ ] Review checkpoint — **blocking** in manual mode; **observable-but-non-blocking** under `autorun` (recorded and surfaced, but the run continues)
 ```
 
 ## Task Sizing Guidelines
@@ -258,4 +269,4 @@ Before starting implementation, confirm:
 - [ ] Task dependencies are identified and ordered correctly
 - [ ] No task touches more than ~5 files
 - [ ] Checkpoints exist between major phases
-- [ ] The human has reviewed and approved the plan
+- [ ] The human has reviewed and approved the plan (manual mode; under `autorun` the plan is recorded and surfaced but not gated — Define and the PR are the only human gates)
