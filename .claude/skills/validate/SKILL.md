@@ -33,7 +33,7 @@ Do not advance to the design review until the senior review approves.
 
 Runs **only when the change touches frontend** — component, markup, or style files (`.tsx/.jsx/.vue/.svelte`, CSS/SCSS/Tailwind, HTML/templates). On a non-frontend change, the agent no-ops gracefully ("No frontend changes — nothing to review") and validate skips straight to Round 3; this round never blocks a backend-only or docs-only change.
 
-1. Spawn the **`design-review` agent** (Agent tool) in **runtime mode** — validate reviews your own pre-ship code, so running the app via the Chrome DevTools MCP is fine. (The agent falls back to static review gracefully when the app can't run or the Chrome MCP isn't configured.) Pass the spec and plan if they exist, plus the diff scope.
+1. Spawn the **`design-review` agent** (Agent tool) in **runtime mode** — validate reviews your own pre-ship code, so running the app via a browser MCP (the Chrome DevTools MCP, or Playwright as a fallback) is fine. (The agent falls back to static review gracefully when the app can't run or no browser MCP is configured.) Pass the spec and plan if they exist, plus the diff scope.
 2. If it returns findings: fix each exactly as specified, re-run [`project-checks`](../project-checks/SKILL.md) to confirm nothing broke, commit the fixes (`Skill(git-commit)` first), and re-spawn the agent.
 3. Repeat until it approves — **max 3 fix iterations**, same stop rule as Round 1: if the same issues persist after 3, stop and report which remain, what was tried, and your assessment of the root cause. Do not attempt a 4th.
 

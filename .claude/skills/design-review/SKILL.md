@@ -37,13 +37,13 @@ This skill supports **two modes**, and the **caller sets the default** — the s
 - **`validate`** dispatches **runtime** by default — it's reviewing your own pre-ship code.
 - **`pr-review`** dispatches **static** by default — never auto-run an untrusted PR's app; runtime is explicit opt-in only.
 
-**Runtime mode** drives the running app via the Chrome DevTools MCP (the `browser-testing-with-devtools` skill) to evaluate what markup alone can't tell you: real focus order, computed contrast, breakpoint behavior, the accessibility tree, and interaction. Running the app and the browser is **evaluation, not a code change** — it stays within read-only.
+**Runtime mode** drives the running app via a browser MCP — the **Chrome DevTools MCP** (the `browser-testing-with-devtools` skill) preferred, falling back to **Playwright** when the Chrome MCP isn't configured — to evaluate what markup alone can't tell you: real focus order, computed contrast, breakpoint behavior, the accessibility tree, and interaction. Running the app and the browser is **evaluation, not a code change** — it stays within read-only.
 
 > **Runtime needs capabilities beyond this skill's own `allowed-tools`** (which is scoped to read-only diff inspection). Starting the app and reaching the Chrome DevTools MCP come from the surface granted to the **`design-review` agent** — which is how `validate` dispatches it. Invoked **directly in-session** under the default tool set, this skill is **static-only**; run it through the agent for the runtime path.
 
 **Graceful static fallback** — fall back to reviewing the diff and source statically, with no hard failure, when **any** of these hold:
 - the app can't be run (no dev server, build fails, missing deps),
-- the Chrome DevTools MCP isn't configured,
+- no browser MCP is configured (neither the Chrome DevTools MCP nor Playwright),
 - static-only was requested by the caller.
 
 When you fall back, **say so** in the verdict ("reviewed statically; runtime checks not run because …") so the reader knows contrast/focus-order were not verified live. **Never block on the absence of runtime.**
@@ -127,7 +127,7 @@ This skill **reports findings; it never edits, commits, or pushes code.** Runnin
 - `api-and-interface-design` — props/interface design for area (c)
 - [`.claude/references/accessibility-checklist.md`](../../references/accessibility-checklist.md) — baseline WCAG 2.1 AA bar
 - [`.claude/references/performance-checklist.md`](../../references/performance-checklist.md) — frontend performance checks
-- `browser-testing-with-devtools` — drives the running app for runtime mode (requires the Chrome DevTools MCP)
+- `browser-testing-with-devtools` — drives the running app for runtime mode via the Chrome DevTools MCP (preferred); Playwright is used as a fallback when the Chrome MCP isn't configured
 - `qa-review` — the testing half (test coverage / e2e evidence); design-review is the frontend/UX/a11y lens, not a test-coverage check
 - `impeccable` — authors design direction and visual craft; design-review audits, it doesn't create
 

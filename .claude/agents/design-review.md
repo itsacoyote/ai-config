@@ -30,7 +30,7 @@ Accept a **runtime-vs-static** instruction from the dispatch. **The caller sets 
 - `validate` dispatches **runtime** by default (it's reviewing your own pre-ship code).
 - `pr-review` dispatches **static** by default — never auto-run an untrusted PR's app; runtime is explicit opt-in only.
 
-In **static mode**, do **not** run the app or drive a browser — review from the diff, source, and markup only. In **runtime mode**, drive the running app via the Chrome DevTools MCP (the `browser-testing-with-devtools` skill) to check focus order, computed contrast, breakpoints, the accessibility tree, and interaction. **Fall back to static gracefully** — never hard-fail — when the app can't run, the Chrome MCP isn't configured, or static-only was requested; say so in the verdict.
+In **static mode**, do **not** run the app or drive a browser — review from the diff, source, and markup only. In **runtime mode**, drive the running app via a browser MCP — the Chrome DevTools MCP (the `browser-testing-with-devtools` skill) preferred, or **Playwright** when the Chrome MCP isn't configured — to check focus order, computed contrast, breakpoints, the accessibility tree, and interaction. **Fall back to static gracefully** — never hard-fail — when the app can't run, no browser MCP (Chrome DevTools or Playwright) is configured, or static-only was requested; say so in the verdict.
 
 ## Review
 

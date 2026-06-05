@@ -163,8 +163,8 @@ The **read-only** passes, each in its own isolated subagent (Agent tool):
      state/data flow, UX, and accessibility (wraps `design-review` + `frontend-ui-engineering`).
      **Dispatch it in STATIC mode by default** — `pr-review` reviews someone else's PR, so it
      must **never auto-run an untrusted PR's app, dev server, build, or deps.** Static review
-     works from the diff, source, and markup only; **runtime (driving the app via the Chrome
-     DevTools MCP) is an explicit developer opt-in, never automatic.** Pass it the
+     works from the diff, source, and markup only; **runtime (driving the app via a browser MCP —
+     Chrome DevTools or Playwright) is an explicit developer opt-in, never automatic.** Pass it the
      runtime-vs-static instruction explicitly (static unless the developer opted in) — the
      agent does not decide its own mode.
 
@@ -324,8 +324,8 @@ These are the point of this skill. Read them as hard constraints, not guidance.
   fixes the issues it finds — it reviews and comments only.
 - **NEVER auto-run an untrusted PR's app.** The conditional design pass is **static by
   default** — it reviews from the diff, source, and markup, and does **not** run the PR's app,
-  dev server, build, or install its deps. Runtime evaluation (driving the app via the Chrome
-  DevTools MCP) is an **explicit developer opt-in only**, never automatic. Reviewing someone
+  dev server, build, or install its deps. Runtime evaluation (driving the app via a browser MCP —
+  Chrome DevTools or Playwright) is an **explicit developer opt-in only**, never automatic. Reviewing someone
   else's PR must never execute their untrusted code without the developer choosing to.
 - **NEVER resolve, close, or edit a comment thread.** Follow-up runs only *report* each prior
   thread's fate and may *add* a curated reply — they never mark a thread resolved or outdated.
