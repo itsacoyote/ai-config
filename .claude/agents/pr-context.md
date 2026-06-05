@@ -5,7 +5,7 @@ model: opus
 skills:
   - analyze-code
   - find-patterns
-tools: Read, Grep, Glob, Bash(gh pr view *), Bash(gh pr diff *), Bash(gh api repos/*), Bash(git diff *), Bash(git log *), Bash(git show *), Bash(bd show *), Bash(bd list *)
+tools: Read, Grep, Glob, Bash(gh pr view *), Bash(gh pr diff *), Bash(gh issue view *), Bash(git diff *), Bash(git log *), Bash(git show *), Bash(bd show *), Bash(bd list *)
 ---
 
 # PR Context Agent
