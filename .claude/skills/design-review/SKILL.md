@@ -39,6 +39,8 @@ This skill supports **two modes**, and the **caller sets the default** — the s
 
 **Runtime mode** drives the running app via the Chrome DevTools MCP (the `browser-testing-with-devtools` skill) to evaluate what markup alone can't tell you: real focus order, computed contrast, breakpoint behavior, the accessibility tree, and interaction. Running the app and the browser is **evaluation, not a code change** — it stays within read-only.
 
+> **Runtime needs capabilities beyond this skill's own `allowed-tools`** (which is scoped to read-only diff inspection). Starting the app and reaching the Chrome DevTools MCP come from the surface granted to the **`design-review` agent** — which is how `validate` dispatches it. Invoked **directly in-session** under the default tool set, this skill is **static-only**; run it through the agent for the runtime path.
+
 **Graceful static fallback** — fall back to reviewing the diff and source statically, with no hard failure, when **any** of these hold:
 - the app can't be run (no dev server, build fails, missing deps),
 - the Chrome DevTools MCP isn't configured,
