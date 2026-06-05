@@ -61,6 +61,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 |-------|--|
 | `analyze-code` | Survey a file/module — responsibility, interface, dependencies, reuse |
 | `find-patterns` | Identify conventions and architectural decisions to stay consistent with |
+| `onboard` | ADR-aware whole-codebase orientation for joining/returning to a project — stack, setup/run/test, architecture, conventions, decisions; in-session plus an opt-in `ONBOARDING.md` |
 | `web-search` | Verify external library/API behavior against versioned official docs |
 
 ### Review & quality
