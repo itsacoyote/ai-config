@@ -114,10 +114,17 @@ ME=$(gh api -X GET user --jq .login)        # your gh login — the identity tha
 gh api -X GET repos/{owner}/{repo}/pulls/<n>/reviews \
   --jq "[.[] | select(.user.login == \"$ME\")]"
 
-# your prior inline review-thread comments (carry id, path, position, in_reply_to_id, body)
-gh api -X GET repos/{owner}/{repo}/pulls/<n>/comments \
-  --jq "[.[] | select(.user.login == \"$ME\")]"
+# ALL inline review-thread comments (carry id, user, path, position, in_reply_to_id, body).
+# Fetch the full list — you need others' replies for the fate report, not just your own.
+ALL=$(gh api -X GET repos/{owner}/{repo}/pulls/<n>/comments)
+# your prior comments: the ones the suppression + still-stands checks key off
+echo "$ALL" | jq "[.[] | select(.user.login == \"$ME\")]"
 ```
+
+Derive both views from `ALL`: **your** prior comments (`select(.user.login == "$ME")`) drive
+suppression and the still-stands/outdated checks; **others'** replies
+(`in_reply_to_id` pointing at one of your comment ids, `user.login != "$ME"`) drive the
+**author-replied** fate. Don't re-fetch a filtered-to-you list — it discards the replies.
 
 - **No prior review objects → first run.** Proceed exactly as today: a full review, no
   suppression. The rest of this skill's first-run behavior is unchanged.
