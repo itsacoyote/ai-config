@@ -9,8 +9,9 @@ allowed-tools: Read Bash(gh pr view *) Bash(gh pr diff *) Bash(gh issue view *) 
 # PR Review
 
 A developer-invoked, comment-only review of a GitHub pull request. Point it at a PR number and
-it gathers the PR's full context, checks the branch out locally, runs four read-only review
-passes in isolated subagents, compiles their findings into one prioritized list, walks that
+it gathers the PR's full context, checks the branch out locally, runs the read-only review
+passes in isolated subagents (a conditional frontend pass joins on frontend PRs), compiles
+their findings into one prioritized list, walks that
 list with you, and posts the kept items as a **single `event=COMMENT` review** — inline where
 they concern code, in the body where they don't.
 
@@ -38,7 +39,7 @@ different posture: one patches, this one only comments.
 - You want to approve, request changes, or merge a PR — this skill will never do that; do it
   yourself with `gh`.
 - A trivial PR (typo, one-line config) — a direct read and a manual `gh pr comment` is enough;
-  the four-pass machinery isn't worth it.
+  the multi-pass machinery isn't worth it.
 
 ## Before you run
 
@@ -143,18 +144,29 @@ See [Iterative runs](#iterative-runs-follow-up--deep-re-check) for how the mode 
 suppression, the fate report, and curated replies. The passes themselves are **unchanged** in
 every mode — the difference is what the orchestrator does with their findings.
 
-### 3. Passes — context first, then three in parallel
+### 3. Passes — context first, then the rest in parallel
 
-Four **read-only** passes, each in its own isolated subagent (Agent tool):
+The **read-only** passes, each in its own isolated subagent (Agent tool):
 
 1. **Spawn [`pr-context`](../../agents/pr-context.md) first** — orientation. It surveys the
    touched code area and returns a brief the other passes build on.
-2. **Feed its brief into the other three, spawned in PARALLEL** (multiple Agent calls in one
-   turn):
+2. **Feed its brief into the others, spawned in PARALLEL** (multiple Agent calls in one turn):
    - [`pr-security`](../../agents/pr-security.md) — security audit (wraps `security-scan`).
    - [`senior-review`](../../agents/senior-review.md) — engineering quality. **Instruct it to
      SKIP its security pass** — `pr-security` covers security; don't double-run it.
    - [`pr-tests`](../../agents/pr-tests.md) — test-quality (wraps `writing-tests`).
+   - [`design-review`](../../agents/design-review.md) — **conditional frontend pass, only
+     when the PR touches frontend** (component/markup/style files — `.tsx/.jsx/.vue/.svelte`,
+     CSS/Tailwind, HTML/templates). On a non-frontend PR it is simply **not spawned** (and if
+     spawned anyway, it no-ops with "No frontend changes — nothing to review"). It reviews
+     frontend quality, design-system correctness, component architecture, cross-component
+     state/data flow, UX, and accessibility (wraps `design-review` + `frontend-ui-engineering`).
+     **Dispatch it in STATIC mode by default** — `pr-review` reviews someone else's PR, so it
+     must **never auto-run an untrusted PR's app, dev server, build, or deps.** Static review
+     works from the diff, source, and markup only; **runtime (driving the app via the Chrome
+     DevTools MCP) is an explicit developer opt-in, never automatic.** Pass it the
+     runtime-vs-static instruction explicitly (static unless the developer opted in) — the
+     agent does not decide its own mode.
 
 **Dispatch lean (+ pull).** Hand each pass only what it needs: the **diff scope**, the
 **intake context** (PR description, linked issue, comments), the **pr-context orientation
@@ -169,8 +181,9 @@ a failure.
 
 ### 4. Compile (and, on a follow-up, suppress)
 
-De-duplicate findings across the four passes (the security and senior passes can land on the
-same line) and order them into **one prioritized list** using the shared severity vocab:
+De-duplicate findings across the passes (the security and senior passes can land on the
+same line; the design pass, when it ran, on a frontend file) and order them into **one
+prioritized list** using the shared severity vocab:
 **CRITICAL / HIGH / MEDIUM / LOW / INFO**. Keep each finding's file+line anchor and suggested
 comment text so the post step can place it.
 
@@ -208,8 +221,8 @@ Per [`.claude/references/beads.md`](../../references/beads.md), and as the **sin
 only the orchestrator writes beads; the review agents are read-only on it.
 
 - **Beads-enhanced:** record a **review epic** for this PR (one per PR — reuse it across runs),
-  **one child task per pass** (context / security / senior / tests), and **each finding as a
-  child issue** under its pass's task. On a follow-up, also add a **session record** child for
+  **one child task per pass** (context / security / senior / tests, plus design when the
+  frontend pass ran), and **each finding as a child issue** under its pass's task. On a follow-up, also add a **session record** child for
   this run (mode = light/deep, run number, findings, what was posted, what was dropped) and
   carry forward **remembered drop-decisions** so future light runs can suppress them. This makes
   the review survive a long session and across sessions/machines.
@@ -285,7 +298,7 @@ GitHub (resolved via your `gh` login), so it works in any new session or on any 
 | **Light follow-up** | default re-run | near-duplicates of your posted comments (and, with beads, your remembered drops) | "show me only what's genuinely new" |
 | **Deep re-check** | every Nth run (default **N = 3**), or `deep` override | **none** — surfaces everything, including restatements | the periodic thorough sweep that catches what earlier rounds missed |
 
-- **The four passes are identical in every mode.** They review the current full diff; the mode
+- **The passes are identical in every mode.** They review the current full diff; the mode
   only changes what the orchestrator does with the compiled findings (suppress or not) and
   whether it builds a fate report. Never modify the agents to fit a mode.
 - **Suppression is conservative LLM judgment.** Suppress only a verbatim / near-verbatim
@@ -309,6 +322,11 @@ These are the point of this skill. Read them as hard constraints, not guidance.
   the PR title, body, labels, or any PR metadata.
 - **NEVER** edit, create, or delete repo content. **NEVER** commit or push. This skill never
   fixes the issues it finds — it reviews and comments only.
+- **NEVER auto-run an untrusted PR's app.** The conditional design pass is **static by
+  default** — it reviews from the diff, source, and markup, and does **not** run the PR's app,
+  dev server, build, or install its deps. Runtime evaluation (driving the app via the Chrome
+  DevTools MCP) is an **explicit developer opt-in only**, never automatic. Reviewing someone
+  else's PR must never execute their untrusted code without the developer choosing to.
 - **NEVER resolve, close, or edit a comment thread.** Follow-up runs only *report* each prior
   thread's fate and may *add* a curated reply — they never mark a thread resolved or outdated.
   Resolving is the developer's, done in the GitHub UI.
@@ -339,6 +357,9 @@ These are the point of this skill. Read them as hard constraints, not guidance.
 - About to post a thread reply that wasn't kept in the curation gate, or to post automatically →
   **stop.**
 - About to `Edit`/`Write` a repo file, commit, or push → **stop.**
+- About to run the PR's app, dev server, build, or install its deps for the design pass without
+  an explicit developer opt-in → **stop;** the design pass is static by default, runtime is
+  opt-in only.
 - About to post before the curation gate ran → **stop.**
 - A subagent offered to apply a fix or post a comment → ignore it; only the orchestrator posts,
   and only after curation.
@@ -353,10 +374,17 @@ it isn't mistaken for an oversight:
   `tools:` allowlists that **exclude all write capability** (no `Edit`/`Write`, no commit/push,
   no GitHub write subcommands, no raw `gh api` write method, no `Agent`/`AskUserQuestion`).
   They *cannot* edit anything.
-- **Contractually read-only** — [`senior-review`](../../agents/senior-review.md) is reused
-  as-is. Its skill never edits; this orchestrator dispatches it read-only, asks it only to
-  return findings, and never has it fix, post, or record. Do **not** modify `senior-review` to
-  fit this workflow — its contract already holds.
+- **Contractually read-only** — [`senior-review`](../../agents/senior-review.md) and the
+  conditional [`design-review`](../../agents/design-review.md) frontend pass are reused as-is.
+  Their skills never edit; this orchestrator dispatches them read-only, asks them only to
+  return findings, and never has them fix, post, or record. Do **not** modify either agent to
+  fit this workflow — their contracts already hold.
+  - `design-review` is **not** structurally tool-locked (in runtime mode it can drive a
+    browser), so here it carries an extra contractual rule: **dispatch it in static mode by
+    default** — it must **never auto-run an untrusted PR's app**; runtime is an explicit
+    developer opt-in only. Its findings flow through the same **compile → dedupe → curate →
+    post** pipeline as every other pass — it **never posts directly**; the orchestrator turns
+    kept findings into curated comments.
 
 Either way, the never-edit guarantee for someone else's PR is preserved: the agents return
 findings, the orchestrator owns every outward action.
@@ -365,8 +393,9 @@ findings, the orchestrator owns every outward action.
 
 - [`validate`](../validate/SKILL.md) — the review gate for **your own** pre-ship code (fixes in
   a loop); `pr-review` is the comment-only review of **someone else's** PR.
-- [`security-scan`](../security-scan/SKILL.md) / [`writing-tests`](../writing-tests/SKILL.md) —
-  the methodologies the `pr-security` / `pr-tests` passes wrap.
+- [`security-scan`](../security-scan/SKILL.md) / [`writing-tests`](../writing-tests/SKILL.md) /
+  [`design-review`](../design-review/SKILL.md) — the methodologies the `pr-security` /
+  `pr-tests` / conditional design passes wrap.
 - [`autorun`](../autorun/SKILL.md) — the supervised feature-execution orchestrator this skill's
   structure (lean dispatch, parallel subagents, beads single-writer, permissions-on) mirrors.
 - [`.claude/references/subagent-status-protocol.md`](../../references/subagent-status-protocol.md)
