@@ -1,6 +1,6 @@
 ---
 name: validate
-description: Use after implementation to run a change through senior code review and QA review before it ships — fixing findings and re-reviewing until both pass. The Validate step of the feature workflow.
+description: Use after implementation to run a change through senior code review, a conditional frontend design review, and QA review before it ships — fixing findings and re-reviewing until they pass. The Validate step of the feature workflow.
 disable-model-invocation: true
 allowed-tools: Read Bash(*) Agent
 ---
