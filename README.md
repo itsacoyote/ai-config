@@ -25,7 +25,7 @@ Define ──▶ Research ──▶ Plan ──▶ Implement ──▶ Validate 
 | **Research** | `/research` | Findings: reusable code, gaps, patterns, constraints |
 | **Plan** | `planning-and-task-breakdown` | A file map + dependency-ordered tasks with named tests |
 | **Implement** | `incremental-implementation` | The change, built task by task, tests passing, committed |
-| **Validate** | `/validate` | Both reviews passed (spawns the `senior-review` + `qa-review` agents), findings fixed |
+| **Validate** | `/validate` | Reviews passed (spawns the `senior-review` + `design-review` (conditional, frontend) + `qa-review` agents), findings fixed |
 | **Document** | `/document` | Docs updated, PR description written, PR readied |
 
 Run the steps in order; advance only when the previous step's output is in hand. Skip the whole thing for trivial changes — it earns its keep on real features where a missed requirement or skipped review is expensive. Start with `feature-workflow` if you want the full map.
@@ -70,6 +70,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 |-------|--|
 | `pr-review` `/cmd` | Comprehensive, multi-lens, comment-only review of *someone else's* PR (context + security + senior + tests); curate findings, then post as one COMMENT review — never approves, requests changes, merges, or edits. Re-runs (`/cmd <pr-number> [deep\|light]`) auto-detect as follow-ups: skip already-raised findings, report each prior thread's fate (outdated / replied / still-stands); every Nth run or `deep` forces a full deep re-check |
 | `senior-review` | Brutal engineering review — completeness, correctness, coherence, YAGNI, security |
+| `design-review` | Frontend/UX/a11y review — component reuse, design-system correctness, architecture, state/data flow, UX, accessibility; conditional (frontend diffs only), used in both `validate` and `pr-review` |
 | `qa-review` | Test coverage, test quality, spec-to-test mapping, e2e (graceful), evidence |
 | `security-scan` | Vulnerability audit — injection, auth/access control, secrets, crypto, deps (JS/TS/Ruby) |
 | `security-and-hardening` | Build secure code in the first place (preventive counterpart to `security-scan`) |
@@ -113,6 +114,7 @@ Thin wrappers that run a review skill in an **isolated context** — the value i
 | Agent | |
 |-------|--|
 | `senior-review` | Runs the `senior-review` skill; returns findings, doesn't change code |
+| `design-review` | Runs the `design-review` skill; the conditional frontend/UX/a11y pass for `validate` and `pr-review` — returns findings, never edits code |
 | `qa-review` | Runs the `qa-review` skill; owns the e2e run and optional evidence capture |
 | `implementer` | Implements one planned task in isolation (spawned by `autorun`); commits and returns a status — doesn't review or push |
 | `pr-context` | Read-only PR-review orientation pass (spawned by `pr-review`); surveys the touched code area and returns a brief the other passes build on — never edits |
