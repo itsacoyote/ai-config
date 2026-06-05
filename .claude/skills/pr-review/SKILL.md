@@ -195,7 +195,7 @@ fetched in step 2:
 
 - **outdated** — its `position` is `null` (GitHub couldn't re-anchor it: the code changed, so
   it was likely addressed or moved).
-- **author-replied** — a later comment in the thread is `in_reply_to` it from someone other
+- **author-replied** — a later comment's `in_reply_to_id` points at it, from someone other
   than you.
 - **still-stands** — the anchor is intact (`position` non-null) and no one replied.
 
