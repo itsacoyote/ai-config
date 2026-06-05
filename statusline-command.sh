@@ -6,7 +6,6 @@ input=$(cat)
 # --- Extract fields ---
 model=$(echo "$input" | jq -r '.model.display_name // "Unknown Model"')
 effort=$(echo "$input" | jq -r '.effort.level // ""')
-thinking=$(echo "$input" | jq -r '.thinking.enabled // false')
 project_dir=$(echo "$input" | jq -r '.workspace.project_dir // .workspace.current_dir // ""')
 project_name=$(basename "$project_dir")
 repo_host=$(echo "$input" | jq -r '.workspace.repo.host // empty')
@@ -95,15 +94,11 @@ colored_pct() {
   printf '%b' "${color}${pct_int}%${RESET} ${DIM}${label}${RESET}"
 }
 
-# --- Line 1: model [effort] [~thinking] | ctx% | 5h% ---
+# --- Line 1: model [effort] | ctx% | 5h% ---
 printf '%b' "${DIM}${model}${RESET}"
 
 if [ -n "$effort" ]; then
   printf '%b' " ${effort_color}${effort}${RESET}"
-fi
-
-if [ "$thinking" = "true" ]; then
-  printf '%b' " ${DIM}~thinking${RESET}"
 fi
 
 # context window (always shown)
