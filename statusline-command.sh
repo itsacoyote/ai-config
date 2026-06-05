@@ -40,6 +40,26 @@ hyperlink() {
   printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$url" "$text"
 }
 
+# --- Resolve the repo's PR page URL ---
+# Prefer the JSON repo fields; fall back to the git remote (the JSON fields are
+# often absent, in which case there'd be no link at all without this fallback).
+pr_url=""
+if [ -n "$repo_host" ] && [ -n "$repo_owner" ] && [ -n "$repo_name" ]; then
+  pr_url="https://${repo_host}/${repo_owner}/${repo_name}/pulls"
+elif [ -n "$project_dir" ]; then
+  remote=$(git -C "$project_dir" --no-optional-locks remote get-url origin 2>/dev/null)
+  if [ -n "$remote" ]; then
+    # Normalize SSH/HTTPS remotes to an https base, strip a trailing .git
+    base=$(printf '%s' "$remote" | sed -E \
+      -e 's#^git@([^:]+):#https://\1/#' \
+      -e 's#^ssh://git@([^/]+)/#https://\1/#' \
+      -e 's#\.git$##')
+    case "$base" in
+      https://*|http://*) pr_url="${base}/pulls" ;;
+    esac
+  fi
+fi
+
 # --- Effort color: low=green, medium=yellow, high=magenta, xhigh=red ---
 effort_color="$DIM"
 case "$effort" in
@@ -49,7 +69,33 @@ case "$effort" in
   xhigh|max) effort_color="$RED" ;;
 esac
 
-# --- Line 1: model [effort] | project (linked) | branch ---
+# --- Colored percentage (no bar) ---
+# colored_pct PCT LABEL  -> "NN% label" colored by threshold, or "--% label" when no data
+colored_pct() {
+  local pct_raw="$1"
+  local label="$2"
+
+  if [ -z "$pct_raw" ]; then
+    printf '%b' "${DIM}--% ${label}${RESET}"
+    return
+  fi
+
+  local pct_int
+  pct_int=$(printf '%.0f' "$pct_raw")
+
+  local color
+  if [ "$pct_int" -ge 90 ]; then
+    color="$RED"
+  elif [ "$pct_int" -ge 70 ]; then
+    color="$YELLOW"
+  else
+    color="$GREEN"
+  fi
+
+  printf '%b' "${color}${pct_int}%${RESET} ${DIM}${label}${RESET}"
+}
+
+# --- Line 1: model [effort] [~thinking] | ctx% | 5h% ---
 printf '%b' "${DIM}${model}${RESET}"
 
 if [ -n "$effort" ]; then
@@ -60,10 +106,21 @@ if [ "$thinking" = "true" ]; then
   printf '%b' " ${DIM}~thinking${RESET}"
 fi
 
-if [ -n "$project_name" ]; then
+# context window (always shown)
+printf '%b' " ${DIM}|${RESET} "
+colored_pct "$used_pct" "ctx"
+
+# 5-hour rate limit (when available)
+if [ -n "$five_hour_pct" ]; then
   printf '%b' " ${DIM}|${RESET} "
-  if [ -n "$repo_host" ] && [ -n "$repo_owner" ] && [ -n "$repo_name" ]; then
-    pr_url="https://${repo_host}/${repo_owner}/${repo_name}/pulls"
+  colored_pct "$five_hour_pct" "5h"
+fi
+
+printf '\n'
+
+# --- Line 2: project (linked to its PR page) | branch ---
+if [ -n "$project_name" ]; then
+  if [ -n "$pr_url" ]; then
     printf '%b' "${BOLD}${CYAN}"
     hyperlink "$project_name" "$pr_url"
     printf '%b' "${RESET}"
@@ -77,72 +134,3 @@ if [ -n "$branch" ]; then
 fi
 
 printf '\n'
-
-# --- Progress bar builder ---
-# build_bar PCT [label]  -> prints a 20-char filled bar with color
-build_bar() {
-  local pct_raw="$1"
-  local label="$2"
-  local bar_width=20
-
-  # No data yet — show a grey placeholder bar
-  if [ -z "$pct_raw" ]; then
-    local bar_empty=""
-    local i
-    for (( i=0; i<bar_width; i++ )); do bar_empty="${bar_empty}░"; done
-    printf '%b' "${DIM}${bar_empty}${RESET}"
-    if [ -n "$label" ]; then
-      printf '%b' " ${DIM}${label}${RESET}"
-    fi
-    return
-  fi
-
-  local pct_int
-  pct_int=$(printf '%.0f' "$pct_raw")
-
-  # Choose color
-  local color
-  if [ "$pct_int" -ge 90 ]; then
-    color="$RED"
-  elif [ "$pct_int" -ge 70 ]; then
-    color="$YELLOW"
-  else
-    color="$GREEN"
-  fi
-
-  # Filled and empty cells
-  local filled=$(( pct_int * bar_width / 100 ))
-  [ "$filled" -gt "$bar_width" ] && filled=$bar_width
-  local empty=$(( bar_width - filled ))
-
-  local bar_filled=""
-  local bar_empty=""
-  local i
-  for (( i=0; i<filled; i++ )); do bar_filled="${bar_filled}█"; done
-  for (( i=0; i<empty; i++ )); do bar_empty="${bar_empty}░"; done
-
-  printf '%b' "${color}${bar_filled}${DIM}${bar_empty}${RESET}"
-  printf '%b' " ${color}${pct_int}%${RESET}"
-  if [ -n "$label" ]; then
-    printf '%b' " ${DIM}${label}${RESET}"
-  fi
-}
-
-# --- Line 2: context bar (always shown) | rate limit ---
-ctx_part=$(build_bar "$used_pct" "ctx")
-line2="${ctx_part}"
-
-if [ -n "$five_hour_pct" ]; then
-  pct_int=$(printf '%.0f' "$five_hour_pct")
-  if [ "$pct_int" -ge 90 ]; then
-    rate_color="$RED"
-  elif [ "$pct_int" -ge 70 ]; then
-    rate_color="$YELLOW"
-  else
-    rate_color="$GREEN"
-  fi
-  rate_part=$(printf '%b' "${rate_color}${pct_int}%${RESET} ${DIM}5h${RESET}")
-  line2="${line2}$(printf '%b' "  ${DIM}|${RESET}  ")${rate_part}"
-fi
-
-printf '%b\n' "$line2"
