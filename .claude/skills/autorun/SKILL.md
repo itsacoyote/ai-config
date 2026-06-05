@@ -22,7 +22,7 @@ runs them after Define.
 - An **approved spec must be in context** (ideally a beads epic from `define`). If there
   isn't one, stop and point the user at `define` — autorun does not replace gate 1.
 - **Run from the main session.** autorun spawns the `implementer` agent and the
-  `senior-review`/`qa-review` agents, and subagents can't spawn subagents.
+  `senior-review`/`design-review`/`qa-review` agents, and subagents can't spawn subagents.
 - **Two human gates only:** Define (already done) and the **PR review** at the end.
   Everything between is autonomous reasoning + *supervised execution* (you approve permission
   prompts) + exception-stops. Keep permissions **on** — a recommended allowlist keeps the
@@ -110,15 +110,16 @@ Hybrid by default, overridable at launch.
   *"review every task"*, *"only validate at the end"*, *"review tasks 3 and 7 individually"*.
   The end-of-run `validate` runs regardless.
 - **How a per-task review runs:** reuse the `validate` loop shape on just that task's change —
-  spawn `senior-review` (and `qa-review` if it added testable behavior), apply fixes,
-  re-review, **bounded to 3 iterations**. Don't `bd close` the task until its review passes.
+  spawn `senior-review` (and `qa-review` if it added testable behavior, and `design-review` for
+  frontend-risky tasks that touch components/markup/styles), apply fixes, re-review, **bounded
+  to 3 iterations**. Don't `bd close` the task until its review passes.
 
 ## Models (per-role knob)
 
 Each subagent runs on the model best suited to its role, overridable at launch:
 
 - **implementer** → a fast/capable model (the agent defaults to Sonnet).
-- **reviewers** (`senior-review` → Opus, `qa-review` → Sonnet) → their own frontmatter defaults.
+- **reviewers** (`senior-review` → Opus, `design-review` → Opus, `qa-review` → Sonnet) → their own frontmatter defaults.
 
 Override per spawn with the `Agent` tool's `model` parameter (resolution:
 `CLAUDE_CODE_SUBAGENT_MODEL` env > per-call > agent frontmatter > session model). If the

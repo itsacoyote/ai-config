@@ -17,7 +17,7 @@ This is portable on purpose — it travels with the skills when copied into anot
 | 2 | **Research** | `research` skill (+ `analyze-code`, `find-patterns`, `web-search`) | Findings: reusable code, gaps, patterns, constraints |
 | 3 | **Plan** | `planning-and-task-breakdown` skill | File map + dependency-ordered tasks with named tests |
 | 4 | **Implement** | `incremental-implementation` skill (+ `writing-tests`) | The change, built task by task, tests passing, committed |
-| 5 | **Validate** | `validate` skill → spawns `senior-review` + `qa-review` agents | Both reviews passed; findings fixed |
+| 5 | **Validate** | `validate` skill → spawns `senior-review` + `design-review` (conditional, frontend) + `qa-review` agents | Reviews passed; findings fixed |
 | 6 | **Document** | `document` skill (+ `create-pr`, `documentation-and-adrs`) | Docs updated, PR description written, PR readied |
 
 ## How to run it
@@ -26,7 +26,7 @@ This is portable on purpose — it travels with the skills when copied into anot
 2. **Research** — `research` studies the codebase against the approved spec.
 3. **Plan** — `planning-and-task-breakdown` turns spec + research into a file map and ordered tasks.
 4. **Implement** — `incremental-implementation` builds the tasks in order, one increment at a time, with optional mid-implement review checkpoints for risky work.
-5. **Validate** — run `validate` from the main session; it spawns the two reviewer agents in isolated contexts and loops fixes until both pass.
+5. **Validate** — run `validate` from the main session; it spawns the reviewer agents (`senior-review`, `design-review` when the change touches frontend, and `qa-review`) in isolated contexts and loops fixes until they pass.
 6. **Document** — `document` audits every doc surface, writes the PR, and readies it.
 
 Each step has a clear entry/exit; advance only when the previous step's output is in hand.

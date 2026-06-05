@@ -2,7 +2,7 @@
 
 Single source of truth for how the workflow skills (`define`, `research`,
 `planning-and-task-breakdown`, `incremental-implementation`, `senior-review`,
-`qa-review`, `validate`, `document`, `standup`) use **beads** as the project's task
+`design-review`, `qa-review`, `validate`, `document`, `standup`) use **beads** as the project's task
 tracker and system of record. Skills point here instead of restating the model —
 when the beads model changes, this file is the only edit.
 
@@ -115,7 +115,8 @@ Hard-won details when an agent (not a human) runs `bd`:
   the file map and TDD test names go in each task's body.
 - **Implement** → `bd ready` to find the next task, `bd update <id> --claim` before
   starting it, `bd close <id>` once its commit lands.
-- **Validate** → file an issue per unresolved review/QA finding; close them as fixes
+- **Validate** → file an issue per unresolved finding from the reviewers
+  (`senior-review`, `design-review` on frontend changes, `qa-review`); close them as fixes
   land. The validation summary goes on the epic.
 - **Document** → file issues for any documentation deliberately deferred; otherwise
   close out the epic when the PR is ready.
