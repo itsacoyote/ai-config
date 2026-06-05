@@ -67,7 +67,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 
 | Skill | |
 |-------|--|
-| `pr-review` `/cmd` | Comprehensive, multi-lens, comment-only review of *someone else's* PR (context + security + senior + tests); curate findings, then post as one COMMENT review — never approves, requests changes, merges, or edits |
+| `pr-review` `/cmd` | Comprehensive, multi-lens, comment-only review of *someone else's* PR (context + security + senior + tests); curate findings, then post as one COMMENT review — never approves, requests changes, merges, or edits. Re-runs (`/cmd <pr-number> [deep\|light]`) auto-detect as follow-ups: skip already-raised findings, report each prior thread's fate (outdated / replied / still-stands); every Nth run or `deep` forces a full deep re-check |
 | `senior-review` | Brutal engineering review — completeness, correctness, coherence, YAGNI, security |
 | `qa-review` | Test coverage, test quality, spec-to-test mapping, e2e (graceful), evidence |
 | `security-scan` | Vulnerability audit — injection, auth/access control, secrets, crypto, deps (JS/TS/Ruby) |
