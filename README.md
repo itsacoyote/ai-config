@@ -67,6 +67,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 
 | Skill | |
 |-------|--|
+| `pr-review` `/cmd` | Comprehensive, multi-lens, comment-only review of *someone else's* PR (context + security + senior + tests); curate findings, then post as one COMMENT review — never approves, requests changes, merges, or edits |
 | `senior-review` | Brutal engineering review — completeness, correctness, coherence, YAGNI, security |
 | `qa-review` | Test coverage, test quality, spec-to-test mapping, e2e (graceful), evidence |
 | `security-scan` | Vulnerability audit — injection, auth/access control, secrets, crypto, deps (JS/TS/Ruby) |
@@ -106,13 +107,16 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 
 ## Agents
 
-Thin wrappers that run a review skill in an **isolated context** — the value is independent review that didn't write the code (so it won't rubber-stamp it). Spawned by the `validate` skill from the main session, or invoked directly.
+Thin wrappers that run a review skill in an **isolated context** — the value is independent review that didn't write the code (so it won't rubber-stamp it). Spawned by the `validate` or `pr-review` skill from the main session, or invoked directly.
 
 | Agent | |
 |-------|--|
 | `senior-review` | Runs the `senior-review` skill; returns findings, doesn't change code |
 | `qa-review` | Runs the `qa-review` skill; owns the e2e run and optional evidence capture |
 | `implementer` | Implements one planned task in isolation (spawned by `autorun`); commits and returns a status — doesn't review or push |
+| `pr-context` | Read-only PR-review orientation pass (spawned by `pr-review`); surveys the touched code area and returns a brief the other passes build on — never edits |
+| `pr-security` | Read-only PR-review security pass (spawned by `pr-review`); audits the diff for vulnerabilities and returns findings with suggested comment text — never patches or posts |
+| `pr-tests` | Read-only PR-review test-quality pass (spawned by `pr-review`); checks whether changed behavior is meaningfully covered and returns findings — never runs, edits, or commits tests |
 
 ---
 
@@ -196,7 +200,7 @@ Both are optional — skills degrade gracefully when a server isn't present (e.g
 ```text
 .claude/
 ├── skills/        # the skills above (one folder each, SKILL.md + optional files)
-├── agents/        # senior-review, qa-review
+├── agents/        # the review/implementer agents above (one .md each)
 ├── rules/         # always-on conventions
 └── references/    # shared knowledge skills point to
 archive/           # the previous automated pipeline, kept for reference
