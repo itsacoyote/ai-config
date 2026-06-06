@@ -17,6 +17,7 @@ This is portable on purpose — it travels with the skills when copied into anot
 | 2 | **Research** | `research` skill (+ `analyze-code`, `find-patterns`, `web-search`) | Findings: reusable code, gaps, patterns, constraints |
 | 3 | **Plan** | `planning-and-task-breakdown` skill | File map + dependency-ordered tasks with named tests |
 | 4 | **Implement** | `incremental-implementation` skill (+ `writing-tests`) | The change, built task by task, tests passing, committed |
+| — | *Gate: Plan → Implement* | `plan-review` skill → `plan-review` agent | Plan reviewed before any code; design findings fixed (see below) |
 | 5 | **Validate** | `validate` skill → spawns `senior-review` + `design-review` (conditional, frontend) + `qa-review` agents | Reviews passed; findings fixed |
 | 6 | **Document** | `document` skill (+ `create-pr`, `documentation-and-adrs`) | Docs updated, PR description written, PR readied |
 
@@ -25,6 +26,7 @@ This is portable on purpose — it travels with the skills when copied into anot
 1. **Define** — `define` walks the spec conversation, creates the branch, and ends at an approval checkpoint. Don't proceed until the spec is approved.
 2. **Research** — `research` studies the codebase against the approved spec.
 3. **Plan** — `planning-and-task-breakdown` turns spec + research into a file map and ordered tasks.
+   - **Gate (Plan → Implement):** before building, run `plan-review` — a staff-engineer design review of the spec + plan (approach, decomposition, interfaces, reuse, risk, spec-alignment, sequencing). It's the pre-build mirror of Validate's reviewers: it catches design flaws while they're a paragraph, not a diff. The skill spawns the `plan-review` agent in a fresh context; fix what it surfaces (a fundamentally wrong approach goes back to Define), then implement. In manual mode it's surfaced for you to act on; under `autorun` it runs automatically (revise-and-re-review, bounded to 3) and only interrupts you if the whole approach is wrong.
 4. **Implement** — `incremental-implementation` builds the tasks in order, one increment at a time, with optional mid-implement review checkpoints for risky work.
 5. **Validate** — run `validate` from the main session; it spawns the reviewer agents (`senior-review`, `design-review` when the change touches frontend, and `qa-review`) in isolated contexts and loops fixes until they pass.
 6. **Document** — `document` audits every doc surface, writes the PR, and readies it.

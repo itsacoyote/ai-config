@@ -69,6 +69,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | Skill | |
 |-------|--|
 | `pr-review` `/cmd` | Comprehensive, multi-lens, comment-only review of *someone else's* PR (context + security + senior + tests); curate findings, then post as one COMMENT review — never approves, requests changes, merges, or edits. Re-runs (`/cmd <pr-number> [deep\|light]`) auto-detect as follow-ups: skip already-raised findings, report each prior thread's fate (outdated / replied / still-stands); every Nth run or `deep` forces a full deep re-check |
+| `plan-review` | Staff-engineer design review of the spec + plan *before* implementation (Plan → Implement gate) — approach, decomposition, interfaces, reuse, risk, spec-alignment, sequencing; the pre-build mirror of `validate` |
 | `senior-review` | Brutal engineering review — completeness, correctness, coherence, YAGNI, security |
 | `design-review` | Frontend/UX/a11y review — component reuse, design-system correctness, architecture, state/data flow, UX, accessibility; conditional (frontend diffs only), used in both `validate` and `pr-review` |
 | `qa-review` | Test coverage, test quality, spec-to-test mapping, e2e (graceful), evidence |
@@ -113,6 +114,7 @@ Thin wrappers that run a review skill in an **isolated context** — the value i
 
 | Agent | |
 |-------|--|
+| `plan-review` | Runs the `plan-review` skill; staff-engineer design review of the spec + plan before implementation — returns a severity-gated verdict, never writes code or edits the plan |
 | `senior-review` | Runs the `senior-review` skill; returns findings, doesn't change code |
 | `design-review` | Runs the `design-review` skill; the conditional frontend/UX/a11y pass for `validate` and `pr-review` — returns findings, never edits code |
 | `qa-review` | Runs the `qa-review` skill; owns the e2e run and optional evidence capture |

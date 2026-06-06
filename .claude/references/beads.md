@@ -1,7 +1,7 @@
 # Beads Integration Reference
 
 Single source of truth for how the workflow skills (`define`, `research`,
-`planning-and-task-breakdown`, `incremental-implementation`, `senior-review`,
+`planning-and-task-breakdown`, `plan-review`, `incremental-implementation`, `senior-review`,
 `design-review`, `qa-review`, `validate`, `document`, `standup`) use **beads** as the project's task
 tracker and system of record. Skills point here instead of restating the model —
 when the beads model changes, this file is the only edit.
@@ -113,6 +113,11 @@ Hard-won details when an agent (not a human) runs `bd`:
 - **Research** → attach findings to the epic (comment or `research` child issue).
 - **Plan** → create one **child task** per plan task, with `bd dep add` for ordering;
   the file map and TDD test names go in each task's body.
+- **Plan → Implement gate (`plan-review`)** → read-only: reads the spec from the epic
+  (`bd show <epic>`) and the tasks / file map from its children; reports findings (it never
+  mutates issues). Actionable findings drive plan revisions (the orchestrator or human edits
+  the tasks / file map and re-reviews); a fundamentally wrong approach sends the work back to
+  Define.
 - **Implement** → `bd ready` to find the next task, `bd update <id> --claim` before
   starting it, `bd close <id>` once its commit lands.
 - **Validate** → file an issue per unresolved finding from the reviewers
