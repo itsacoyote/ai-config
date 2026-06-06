@@ -19,7 +19,7 @@ Decompose work into small, verifiable tasks with explicit acceptance criteria. G
 
 **When NOT to use:** Single-file changes with obvious scope, or when the spec already contains well-defined tasks.
 
-Once the plan exists and you start building a task, hand off to `incremental-implementation` for the execution discipline (thin slices, test-and-commit per increment).
+Before any code is written, the finished plan is reviewed at the Plan → Implement boundary by `plan-review` — a staff-engineer design critique of this plan's approach, decomposition, interfaces, reuse, risk, spec-alignment, and sequencing (the gate your file map and task list feed). Once it's clear, hand off to `incremental-implementation` for the execution discipline (thin slices, test-and-commit per increment).
 
 ## The Planning Process
 

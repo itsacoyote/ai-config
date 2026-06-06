@@ -21,8 +21,9 @@ runs them after Define.
 
 - An **approved spec must be in context** (ideally a beads epic from `define`). If there
   isn't one, stop and point the user at `define` — autorun does not replace gate 1.
-- **Run from the main session.** autorun spawns the `implementer` agent and the
-  `senior-review`/`design-review`/`qa-review` agents, and subagents can't spawn subagents.
+- **Run from the main session.** autorun spawns the `implementer` agent, the `plan-review`
+  agent, and the `senior-review`/`design-review`/`qa-review` agents, and subagents can't spawn
+  subagents.
 - **Two human gates only:** Define (already done) and the **PR review** at the end.
   Everything between is autonomous reasoning + *supervised execution* (you approve permission
   prompts) + exception-stops. Keep permissions **on** — a recommended allowlist keeps the
@@ -39,14 +40,38 @@ runs them after Define.
 1. **Research** — run `research` against the approved spec.
 2. **Plan** — run `planning-and-task-breakdown`: file map + dependency-ordered tasks, each
    with a **risk marker** and **skill hints**, recorded as beads child issues (beads mode) or
-   an in-session task list (standalone). The plan is **surfaced but not gated** — it is not a
-   third human gate.
-3. **Implement** — the loop below, one task at a time.
-4. **Validate** — run `validate` (the always-run end-of-run review pass).
-5. **Document** — run `document`: update docs, write the PR, `gh pr ready`. **Stop here.**
+   an in-session task list (standalone).
+3. **Plan review** — run the `plan-review` gate below (autonomous, not a human gate) before
+   any code is written.
+4. **Implement** — the loop below, one task at a time.
+5. **Validate** — run `validate` (the always-run end-of-run review pass).
+6. **Document** — run `document`: update docs, write the PR, `gh pr ready`. **Stop here.**
 
 Advance only when the previous step's output is in hand. An exception-stop (see below) can
 halt the run at any point and hand control back to the human.
+
+## The plan-review gate
+
+After Plan and **before** the implement loop, spawn the [`plan-review`](../../agents/plan-review.md)
+agent (Agent tool) on the spec + plan — a staff-engineer design review of the approach,
+decomposition, interfaces, reuse, risk, spec-alignment, and sequencing, before any code is
+written. It reads the spec from the epic and the tasks / file map from its children (beads
+mode) or the in-session plan (standalone). This is the pre-build mirror of `validate`:
+**autonomous, not a third human gate.**
+
+Triage the returned verdict:
+
+- **Approved (or only trivial findings)** → proceed to the implement loop.
+- **Actionable in-plan findings** (a missing task, a leaky interface, wrong sequencing) → **you
+  revise the plan** — adjust the beads tasks / file map (you own the beads lifecycle) — and
+  re-spawn `plan-review`. **Bounded to 3 iterations, same stop rule as Validate.**
+- **A "wrong approach → back to Define" escalation, or unresolved substantive findings after 3
+  iterations** → **exception-stop** (see below): halt and surface to the human. This is the
+  existing safety-halt, **not** a new routine human gate — revising the plan can't fix a flawed
+  premise, so the human decides.
+
+The orchestrator owns the plan revisions; `plan-review` only reviews and reports (read-only on
+code and on the plan).
 
 ## The implement loop
 
@@ -119,6 +144,7 @@ Hybrid by default, overridable at launch.
 Each subagent runs on the model best suited to its role, overridable at launch:
 
 - **implementer** → a fast/capable model (the agent defaults to Sonnet).
+- **plan-review** → Opus (its own frontmatter default) — the design gate wants the strong model.
 - **reviewers** (`senior-review` → Opus, `design-review` → Opus, `qa-review` → Sonnet) → their own frontmatter defaults.
 
 Override per spawn with the `Agent` tool's `model` parameter (resolution:
@@ -130,6 +156,8 @@ user names models at launch, use those.
 An exception-stop is a **safety halt** that hands control back to the human mid-run — distinct
 from the two gates. Stop and surface — don't grind or guess — when:
 
+- `plan-review` returns a **"wrong approach → back to Define"** escalation, or its findings are
+  still unresolved after the bounded revise-and-re-review cycles (3, same rule as `validate`),
 - a task's review still fails after the bounded fix cycles (3, per `validate`),
 - the implementer returns **BLOCKED**, or
 - an action hits a permission denial it can't proceed past.
