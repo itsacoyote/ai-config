@@ -91,6 +91,16 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `ci-cd-and-automation` | Build/deploy pipelines and quality gates |
 | `browser-testing-with-devtools` | Verify UI against a real browser (needs the chrome-devtools MCP) |
 
+### Technology specialists
+
+Stack-specific skills, deliberately scoped to **durable judgment** — decision guides, debugging/migration playbooks, slow-rotting fundamentals — rather than current-API syntax (which the model already knows and `web-search` keeps live). Fast-rotting framework skills (React/Next/Vue) were intentionally cut to avoid silent staleness. Each cross-links the general skills above (`writing-tests`, `security-and-hardening`, `api-and-interface-design`) rather than restating them.
+
+| Skill | |
+|-------|--|
+| `postgres-pro` | PostgreSQL — EXPLAIN tuning, index strategy, JSONB, replication, VACUUM, extensions (Postgres internals rot in years, not months) |
+| `playwright-expert` | Playwright E2E — a11y-first selector priority, Page Object Model, flaky-test debugging workflow |
+| `rails-expert` | Rails 7+ — Active Record N+1 prevention, Hotwire/Turbo, Sidekiq job design |
+
 ### Git, PRs & meta
 
 | Skill | |
