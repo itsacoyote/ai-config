@@ -13,7 +13,7 @@ This is portable on purpose — it travels with the skills when copied into anot
 
 | # | Step | Skill / agent | Output |
 |---|------|---------------|--------|
-| 1 | **Define** | `define` skill | An approved spec; the feature branch created |
+| 1 | **Define** | `define` skill (+ `documentation-and-adrs`) | An approved spec; ADRs for any significant decisions; the feature branch created |
 | 2 | **Research** | `research` skill (+ `analyze-code`, `find-patterns`, `web-search`) | Findings: reusable code, gaps, patterns, constraints |
 | 3 | **Plan** | `planning-and-task-breakdown` skill | File map + dependency-ordered tasks with named tests |
 | 4 | **Implement** | `incremental-implementation` skill (+ `writing-tests`) | The change, built task by task, tests passing, committed |
