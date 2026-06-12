@@ -1,0 +1,4 @@
+# Patterns (.gitignore syntax) for untracked-and-gitignored files Claude Code copies
+# into a new git worktree. .beads/ is git-excluded (local-only issue DB), so without
+# this a worktree would start with no beads data — copy it in so `bd` works there too.
+.beads/**
