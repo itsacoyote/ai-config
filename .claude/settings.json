@@ -1,7 +1,16 @@
 {
-  "statusLine": {
-    "type": "command",
-    "command": "bash statusline-command.sh"
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "bd prime --hook-json",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
+      }
+    ]
   },
   "permissions": {
     "allow": [
@@ -14,5 +23,9 @@
       "Bash(git merge *)",
       "Bash(gh pr *)"
     ]
+  },
+  "statusLine": {
+    "command": "bash statusline-command.sh",
+    "type": "command"
   }
 }

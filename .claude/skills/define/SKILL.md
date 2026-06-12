@@ -2,7 +2,7 @@
 name: define
 description: Use at the start of a feature to turn an idea into a clear, well-scoped spec through collaborative dialogue — scope, goals, constraints, and acceptance criteria — before any research or code.
 disable-model-invocation: true
-allowed-tools: Read Bash(find *) Bash(git *)
+allowed-tools: Read Write Edit Bash(find *) Bash(git *)
 ---
 
 # Define
@@ -26,7 +26,7 @@ A one-line, obvious change with no real ambiguity — just make it. Define earns
 
 **Ask clarifying questions — one at a time.** Prefer multiple choice over open-ended; one question per message. Focus on purpose, constraints, success criteria, and non-goals.
 
-**Explore approaches.** Propose 2–3 options with trade-offs; lead with your recommendation and say why.
+**Explore approaches.** Propose 2–3 options with trade-offs; lead with your recommendation and say why. When a settled decision is architecturally significant or expensive to reverse — a framework/library choice, a data model, an auth strategy, an API style — capture it as an **ADR** while the alternatives and trade-offs are still fresh, following the `documentation-and-adrs` skill. Don't defer this to the Document step, where the rejected-alternative reasoning is usually lost.
 
 **Present the design section by section.** Scale each section to its complexity. Cover architecture, components, data flow, error handling, and testing. Ask after each section whether it looks right. Be ready to go back and clarify.
 
@@ -60,6 +60,8 @@ Follow the dual-mode contract in [`.claude/references/beads.md`](../../reference
 - **Beads-enhanced:** create the feature **epic** with the spec as its body.
 
 Do not write step-doc files — there is no `.docs/`.
+
+**Record any ADRs.** Write each architecturally significant decision settled during the conversation to the project's ADR location (an existing `docs/decisions/`, `docs/adr/`, etc., or `docs/decisions/` if the project has none yet), using the template and lifecycle in `documentation-and-adrs`. Number them sequentially, set status `Accepted`, and link them from the spec so Research and Plan inherit the rationale. ADR files are the exception to "no step-doc files" — they are durable project records, not workflow scratch. If no decision rose to that bar, write nothing; don't manufacture an ADR for a trivial feature.
 
 ## Approval checkpoint
 
