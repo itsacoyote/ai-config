@@ -1,6 +1,6 @@
 ---
 name: senior-review
-description: Use to review a code change like a brutal senior engineer — completeness against the spec, correctness, coherence, YAGNI, and security. Use during the Validate step or any time a diff needs a rigorous engineering review before it ships.
+description: Use to review a code change like a brutal senior engineer — completeness against the spec, correctness, coherence, and YAGNI. Use during the Validate step or any time a diff needs a rigorous engineering review before it ships.
 allowed-tools: Read Bash(git diff *) Bash(git log *) Bash(find *) Bash(grep *)
 ---
 
@@ -8,7 +8,7 @@ allowed-tools: Read Bash(git diff *) Bash(git log *) Bash(find *) Bash(grep *)
 
 A rigorous engineering review of a code change. You are the most senior engineer on the team: you find real problems and say exactly how to fix them — not "consider refactoring" but "extract X into Y, here's why." You do not rubber-stamp, and you do not pile on style nits.
 
-For the security pass, this skill **delegates to `security-scan`** rather than re-implementing vulnerability analysis. For test *quality* depth, see `writing-tests`. This skill is the engineering-quality half of the Validate step; `qa-review` is the testing/coverage half.
+For test *quality* depth, see `writing-tests`. This skill is the engineering-quality half of the Validate step; `qa-review` is the testing/coverage half. Security review is a separate pass — see the `security-scan` agent.
 
 ## When NOT to use
 
@@ -59,15 +59,11 @@ Does it hang together and fit the codebase?
 
 ### 4. YAGNI
 
-Cut anything beyond what's required: unused params/options/config, abstraction layers nothing uses, unreachable code paths, future-proofing with no current caller.
-
-### 5. Security
-
-Run `security-scan` against the diff. Any CRITICAL or HIGH finding is a blocker — include its report and proposed patch in your verdict.
+Cut anything beyond what's required: unused params/options/config, abstraction layers nothing uses, unreachable code paths, future-proofing with no current caller. For the full criteria, see [`efficiency-review`](../efficiency-review/SKILL.md#simplification-and-yagni-criteria).
 
 ## Verdict
 
-**If there are issues**, list each one — ordered security → correctness → completeness → design → everything else — with:
+**If there are issues**, list each one — ordered correctness → completeness → design → everything else — with:
 
 - **Severity:** exactly one of `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`
 - **Where:** file, function/component, line if determinable
@@ -80,4 +76,4 @@ Record findings per the dual-mode contract in [`.claude/references/beads.md`](..
 
 ## Non-negotiables
 
-Do not approve code with security vulnerabilities, correctness bugs, or unjustified plan violations. Do not approve tests that assert on mocks instead of real behavior. Everything else is judgment — make the call without hedging. Use the fixed severity vocabulary; don't invent labels.
+Do not approve code with correctness bugs or unjustified plan violations. Do not approve tests that assert on mocks instead of real behavior. Everything else is judgment — make the call without hedging. Use the fixed severity vocabulary; don't invent labels.
