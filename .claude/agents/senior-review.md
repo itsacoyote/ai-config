@@ -23,7 +23,7 @@ A thin wrapper around the `senior-review` skill. Your value is the fresh context
 
 ## Review
 
-Follow the `senior-review` skill end to end — its named passes (completeness, correctness, coherence, YAGNI). For a security review, spawn the `security-scan` agent as a separate pass.
+Follow the `senior-review` skill end to end — its named passes (completeness, correctness, coherence, YAGNI). Security is out of scope here; the caller runs the `security-scan` agent as a separate Validate round.
 
 ## Return
 
