@@ -22,8 +22,9 @@ runs them after Define.
 - An **approved spec must be in context** (ideally a beads epic from `define`). If there
   isn't one, stop and point the user at `define` — autorun does not replace gate 1.
 - **Run from the main session.** autorun spawns the `implementer` agent, the `plan-review`
-  agent, and the `senior-review`/`design-review`/`qa-review` agents, and subagents can't spawn
-  subagents.
+  agent, and the `senior-review`/`design-review`/`qa-review` agents, plus `efficiency-review`
+  (per non-trivial task) and `security-scan` (per-task on `security-sensitive` tasks) —
+  subagents can't spawn subagents.
 - **Two human gates only:** Define (already done) and the **PR review** at the end.
   Everything between is autonomous reasoning + *supervised execution* (you approve permission
   prompts) + exception-stops. Keep permissions **on** — a recommended allowlist keeps the
@@ -124,20 +125,34 @@ always-run `validate` pass at the end. Only `bd close` a task once its review pa
 
 ## Review cadence
 
-Hybrid by default, overridable at launch.
+Hybrid by default, overridable at launch. Four reviewers, four triggers — each independent:
 
-- **Hybrid (default):** a task marked `review-per-task` (by `planning-and-task-breakdown`,
-  for sensitive or high-blast-radius work) is reviewed **immediately** after it returns DONE;
-  tasks marked `end-of-run` are not reviewed individually — the always-run `validate` pass
-  covers them. Escalate any task to per-task review on your own judgment too (e.g. the
-  implementer returned DONE_WITH_CONCERNS, or it touched more than its file-map slice).
+- **`efficiency-review` (default, every non-trivial task):** a cheap per-task pass for YAGNI,
+  simplification, and unnecessary complexity. Runs on every task that touches more than a
+  trivial config change; skipped only for XS/documentation-only tasks.
+- **`senior-review` (per-task on `review-per-task` tasks):** triggered by the task's `Risk`
+  marker — `review-per-task` for sensitive or high-blast-radius work (auth, payments,
+  migrations, public API, crypto, concurrency). Tasks marked `end-of-run` are not reviewed
+  individually — the always-run `validate` pass covers them.
+- **`security-scan` agent (per-task on `security-sensitive` tasks):** triggered by the
+  task's `security-sensitive` marker — **independent of and orthogonal to `Risk`**. A task
+  marked `security-sensitive` gets a `security-scan` run per-task regardless of whether its
+  Risk is `review-per-task` or `end-of-run`. A typical auth task carries both markers: both
+  `senior-review` and `security-scan` run as separate passes.
+- **`qa-review` (reserved for end-of-run `validate`):** not spawned per-task; the always-run
+  `validate` pass at the end covers test quality and behavioral completeness.
+
+Escalate any task to per-task senior-review on your own judgment too (e.g. the implementer
+returned DONE_WITH_CONCERNS, or it touched more than its file-map slice).
+
 - **Launch override:** honor a cadence instruction passed at launch over the default — e.g.
   *"review every task"*, *"only validate at the end"*, *"review tasks 3 and 7 individually"*.
   The end-of-run `validate` runs regardless.
 - **How a per-task review runs:** reuse the `validate` loop shape on just that task's change —
-  spawn `senior-review` (and `qa-review` if it added testable behavior, and `design-review` for
-  frontend-risky tasks that touch components/markup/styles), apply fixes, re-review, **bounded
-  to 3 iterations**. Don't `bd close` the task until its review passes.
+  spawn the applicable reviewers (`efficiency-review` always; `senior-review` for risky;
+  `security-scan` for security-sensitive; `design-review` for frontend-risky tasks that touch
+  components/markup/styles), apply fixes, re-review, **bounded to 3 iterations**. Don't
+  `bd close` the task until its review passes.
 
 ## Models (per-role knob)
 
@@ -145,7 +160,7 @@ Each subagent runs on the model best suited to its role, overridable at launch:
 
 - **implementer** → a fast/capable model (the agent defaults to Sonnet).
 - **plan-review** → Opus (its own frontmatter default) — the design gate wants the strong model.
-- **reviewers** (`senior-review` → Opus, `design-review` → Opus, `qa-review` → Sonnet) → their own frontmatter defaults.
+- **reviewers** (`senior-review` → Opus, `design-review` → Opus, `qa-review` → Sonnet, `efficiency-review` → Sonnet, `security-scan` → Opus) → their own frontmatter defaults.
 
 Override per spawn with the `Agent` tool's `model` parameter (resolution:
 `CLAUDE_CODE_SUBAGENT_MODEL` env > per-call > agent frontmatter > session model). If the

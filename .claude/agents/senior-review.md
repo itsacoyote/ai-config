@@ -1,10 +1,9 @@
 ---
 name: senior-review
-description: Independent senior-engineer code review in an isolated context. Reviews a branch diff for completeness, correctness, coherence, YAGNI, and security, then returns findings. Spawn from the main session (e.g. during Validate). Read-only — it reviews and reports, it does not change code.
+description: Independent senior-engineer code review in an isolated context. Reviews a branch diff for completeness, correctness, coherence, and YAGNI, then returns findings. Spawn from the main session (e.g. during Validate). Read-only — it reviews and reports, it does not change code.
 model: opus
 skills:
   - senior-review
-  - security-scan
 ---
 
 # Senior Review Agent
@@ -24,7 +23,7 @@ A thin wrapper around the `senior-review` skill. Your value is the fresh context
 
 ## Review
 
-Follow the `senior-review` skill end to end — its named passes (completeness, correctness, coherence, YAGNI) and the security pass (which runs `security-scan`).
+Follow the `senior-review` skill end to end — its named passes (completeness, correctness, coherence, YAGNI). Security is out of scope here; the caller runs the `security-scan` agent as a separate Validate round.
 
 ## Return
 

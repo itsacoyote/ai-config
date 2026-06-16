@@ -47,7 +47,18 @@ When a plan exists (from `planning-and-task-breakdown`), implement its tasks in 
 
 ### Review checkpoints (optional)
 
-For large or risky work, run a review mid-implement rather than only at the end — invoke `senior-review` (engineering quality) or `security-scan` (security-sensitive code: auth, payments, input handling, crypto, queries) at natural checkpoints, fix what they surface, then continue. For small, low-risk changes, defer all review to the Validate step. This is judgment, not a mandate — match it to blast radius.
+For any non-trivial task, invoke [`efficiency-review`](../efficiency-review/SKILL.md) as a
+cheap per-chunk pass — it catches YAGNI violations and unnecessary complexity early. For risky
+work (`Risk: review-per-task`), also invoke [`senior-review`](../senior-review/SKILL.md) at
+natural checkpoints for engineering quality. For security-sensitive code (auth, payments, input
+handling, crypto, queries), invoke [`security-scan`](../security-scan/SKILL.md) before
+committing that chunk. Fix what they surface, then continue. For small, low-risk changes with
+no security surface, defer all review to the Validate step. This is judgment, not a mandate —
+match it to blast radius.
+
+These are the **canonical skills** you invoke in-session. Under `autorun`, the corresponding
+agents (`efficiency-review`, `senior-review`, `security-scan`) are spawned for you per the
+cadence — the methodology is the same, the mechanism differs.
 
 When the change is complete, hand off to the `validate` skill for the full review gate (see `feature-workflow` for the sequence).
 

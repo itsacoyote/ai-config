@@ -25,7 +25,7 @@ Define ──▶ Research ──▶ Plan ──▶ Implement ──▶ Validate 
 | **Research** | `/research` | Findings: reusable code, gaps, patterns, constraints |
 | **Plan** | `planning-and-task-breakdown` | A file map + dependency-ordered tasks with named tests |
 | **Implement** | `incremental-implementation` | The change, built task by task, tests passing, committed |
-| **Validate** | `/validate` | Reviews passed (spawns the `senior-review` + `design-review` (conditional, frontend) + `qa-review` agents), findings fixed |
+| **Validate** | `/validate` | Reviews passed (spawns the `senior-review` + `security-scan` + `design-review` (conditional, frontend) + `qa-review` agents), findings fixed |
 | **Document** | `/document` | Docs updated, PR description written, PR readied |
 
 Run the steps in order; advance only when the previous step's output is in hand. Skip the whole thing for trivial changes — it earns its keep on real features where a missed requirement or skipped review is expensive. Start with `feature-workflow` if you want the full map.
@@ -50,7 +50,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `research` `/cmd` | Study the codebase for a feature — reuse, gaps, patterns, constraints |
 | `planning-and-task-breakdown` | File map + dependency-ordered tasks with explicit test names |
 | `incremental-implementation` | Build in thin vertical slices, test-and-commit per increment |
-| `validate` `/cmd` | Sequence senior + QA review with bounded fix loops |
+| `validate` `/cmd` | Sequence senior + security + QA review with bounded fix loops |
 | `document` `/cmd` | Pre-PR documentation audit + PR description |
 | `feature-workflow` | The map of the six steps and which skill/agent owns each |
 | `autorun` `/cmd` | Supervised-autonomous orchestrator: after Define, runs Research→Document one task at a time in fresh subagents, permissions on, stopping at a ready-for-review PR |
@@ -70,10 +70,11 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 |-------|--|
 | `pr-review` `/cmd` | Comprehensive, multi-lens, comment-only review of *someone else's* PR (context + security + senior + tests); curate findings, then post as one COMMENT review — never approves, requests changes, merges, or edits. Re-runs (`/cmd <pr-number> [deep\|light]`) auto-detect as follow-ups: skip already-raised findings, report each prior thread's fate (outdated / replied / still-stands); every Nth run or `deep` forces a full deep re-check |
 | `plan-review` | Staff-engineer design review of the spec + plan *before* implementation (Plan → Implement gate) — approach, decomposition, interfaces, reuse, risk, spec-alignment, sequencing; the pre-build mirror of `validate` |
-| `senior-review` | Brutal engineering review — completeness, correctness, coherence, YAGNI, security |
+| `senior-review` | Brutal engineering review — completeness, correctness, coherence, YAGNI (security is a separate `security-scan` pass) |
+| `efficiency-review` | Cheap read-only per-task review — YAGNI, simplification, clarity/naming only (not correctness/security/coverage); canonical home for the simplification criteria `senior-review` links to |
 | `design-review` | Frontend/UX/a11y review — component reuse, design-system correctness, architecture, state/data flow, UX, accessibility; conditional (frontend diffs only), used in both `validate` and `pr-review` |
 | `qa-review` | Test coverage, test quality, spec-to-test mapping, e2e (graceful), evidence |
-| `security-scan` | Vulnerability audit — injection, auth/access control, secrets, crypto, deps (JS/TS/Ruby) |
+| `security-scan` | Vulnerability audit — injection, auth/access control, secrets, crypto, deps (JS/TS/Ruby); run as its own `validate` round via the `security-scan` agent |
 | `security-and-hardening` | Build secure code in the first place (preventive counterpart to `security-scan`) |
 | `writing-tests` | What/how-much to test, at what level — the judgment behind good tests |
 | `project-checks` | Discover + run the project's own mechanical gates (typecheck, lint, format, spell, tests) before each commit and as a Validate pre-flight — auto-fix, then block on failure |
@@ -126,6 +127,8 @@ Thin wrappers that run a review skill in an **isolated context** — the value i
 |-------|--|
 | `plan-review` | Runs the `plan-review` skill; staff-engineer design review of the spec + plan before implementation — returns a severity-gated verdict, never writes code or edits the plan |
 | `senior-review` | Runs the `senior-review` skill; returns findings, doesn't change code |
+| `efficiency-review` | Runs the `efficiency-review` skill (Sonnet); cheap read-only per-task YAGNI/simplification pass — returns a verdict, never edits code |
+| `security-scan` | Runs the `security-scan` skill (Opus); read-only Validate-context security pass over the branch diff — returns findings with suggested patches, never edits or commits (sibling of `pr-security`, which is PR-diff-scoped) |
 | `design-review` | Runs the `design-review` skill; the conditional frontend/UX/a11y pass for `validate` and `pr-review` — returns findings, never edits code |
 | `qa-review` | Runs the `qa-review` skill; owns the e2e run and optional evidence capture |
 | `implementer` | Implements one planned task in isolation (spawned by `autorun`); commits and returns a status — doesn't review or push |
@@ -178,7 +181,7 @@ orchestrator. See the `feature-workflow` skill for the map.
 - Start a feature with `/define` (it writes the spec and creates the branch).
 - Then: `/research` → `planning-and-task-breakdown` → `incremental-implementation`
   → `/validate` → `/document`.
-- `/validate` spawns the `senior-review` and `qa-review` agents for independent review.
+- `/validate` spawns the `senior-review`, `security-scan`, and `qa-review` agents for independent review.
 - Match rigor to the change — skip the workflow for trivial fixes.
 
 ## Task tracking

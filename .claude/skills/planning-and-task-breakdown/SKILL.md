@@ -121,22 +121,25 @@ Each task follows this structure:
 
 **Risk:** `review-per-task` | `end-of-run`
 
+**Security-sensitive:** yes | (omit if not applicable)
+
 **Skill hints:** [candidate craft skills for this task, or "none beyond core"]
 ```
 
-These last two fields feed `autorun` (the supervised-autonomous orchestrator):
+These last three fields feed `autorun` (the supervised-autonomous orchestrator):
 
-- **Risk** sets the review cadence — `review-per-task` for tasks touching sensitive or high-blast-radius areas (auth, payments, migrations, public API, crypto, concurrency, or anything the spec flags); `end-of-run` otherwise (the always-run `validate` pass covers them).
+- **Risk** sets the senior-review cadence — `review-per-task` for tasks touching sensitive or high-blast-radius areas (auth, payments, migrations, public API, crypto, concurrency, or anything the spec flags); `end-of-run` otherwise (the always-run `validate` pass covers them).
+- **Security-sensitive** is an **independent tag, orthogonal to Risk** — mark it for tasks that touch auth, payments, crypto, input handling, or access control. It triggers the `security-scan` agent per-task **regardless of the task's Risk value**. A typical auth task carries both `Risk: review-per-task` *and* `Security-sensitive: yes` — `senior-review` runs for the blast-radius concern, `security-scan` runs for the security concern; they are separate passes. Omit the field (or leave it out entirely) for tasks with no security surface.
 - **Skill hints** seed the implementer's skill selection — the craft skills it's likely to need (e.g. `frontend-ui-engineering`, `api-and-interface-design`, `security-and-hardening`). A seed, not a mandate: the implementer invokes them on demand and may pull more. The always-on core (`incremental-implementation`, `writing-tests`, `find-patterns`) is assumed and not listed.
 
-Both are still useful without autorun — they document where review attention belongs and which skills a task implies.
+All three fields are still useful without autorun — they document where review attention belongs and which skills a task implies.
 
 ### Recording the plan
 
 Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
 
 - **Standalone (default):** present the file map and ordered task list in the conversation — this is the plan of record for Implement.
-- **Beads-enhanced:** create one **child issue per task** under the feature epic — put the file-map slice, named tests, **risk marker, and skill hints** in each issue body — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically.
+- **Beads-enhanced:** create one **child issue per task** under the feature epic — put the file-map slice, named tests, **risk marker, skill hints, and (where applicable) the `security-sensitive` label** in each issue body — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically.
 
 Do not write a `3_plan.md` or any step-doc file — there is no `.docs/`.
 
