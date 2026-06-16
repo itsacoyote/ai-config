@@ -1,9 +1,9 @@
 # Beads Integration Reference
 
 Single source of truth for how the workflow skills (`define`, `research`,
-`planning-and-task-breakdown`, `plan-review`, `incremental-implementation`, `senior-review`,
-`design-review`, `qa-review`, `validate`, `document`, `standup`) use **beads** as the project's task
-tracker and system of record. Skills point here instead of restating the model —
+`planning-and-task-breakdown`, `plan-review`, `incremental-implementation`, `efficiency-review`,
+`senior-review`, `security-scan`, `design-review`, `qa-review`, `validate`, `document`, `standup`)
+use **beads** as the project's task tracker and system of record. Skills point here instead of restating the model —
 when the beads model changes, this file is the only edit.
 
 Beads: <https://github.com/gastownhall/beads>. CLI is `bd`. To install and
@@ -119,10 +119,11 @@ Hard-won details when an agent (not a human) runs `bd`:
   the tasks / file map and re-reviews); a fundamentally wrong approach sends the work back to
   Define.
 - **Implement** → `bd ready` to find the next task, `bd update <id> --claim` before
-  starting it, `bd close <id>` once its commit lands.
+  starting it, `bd close <id>` once its commit lands. `efficiency-review` findings during
+  implementation are addressed in-flight; no separate beads issues are created for them.
 - **Validate** → file an issue per unresolved finding from the reviewers
-  (`senior-review`, `design-review` on frontend changes, `qa-review`); close them as fixes
-  land. The validation summary goes on the epic.
+  (`senior-review`, `security-scan`, `design-review` on frontend changes, `qa-review`);
+  close them as fixes land. The validation summary goes on the epic.
 - **Document** → file issues for any documentation deliberately deferred; otherwise
   close out the epic when the PR is ready.
 - **Standup** → read-only: `bd ready` for what's next, plus closed/in-progress issues
