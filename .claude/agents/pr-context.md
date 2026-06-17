@@ -1,6 +1,6 @@
 ---
 name: pr-context
-description: Use when orienting a PR review — the first read-only pass that surveys the touched code area and returns a brief the other review passes build on. Spawn from the pr-review orchestrator before the security/senior/test passes. Read-only by tool definition — it surveys and reports, it never edits code, the PR, or the repo.
+description: Use when orienting a PR review — the first pass that surveys the touched code area and returns a brief the other review passes build on.
 model: opus
 skills:
   - analyze-code

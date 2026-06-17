@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Implements a single planned task in an isolated context — writes the code and its named tests from the task's extracted spec, commits, and returns a status. Spawn from the main session (e.g. by autorun), one task at a time. It does not review its own work, push, or touch the beads lifecycle.
+description: Use when executing a single planned task in an isolated context — writes the code and its named tests from the task's extracted spec, commits, and returns a status.
 model: sonnet
 skills:
   - incremental-implementation

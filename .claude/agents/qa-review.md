@@ -24,4 +24,9 @@ The skill's e2e fix loop is the one case where this agent may edit and commit co
 
 ## Return
 
-Return the skill's verdict: **Approved** / **Gaps** / **Blocked**, with the specifics (gaps as type + what's missing + the required test; Blocked with the per-attempt e2e log). Record findings per the beads contract in `.claude/references/beads.md` only if the caller asks.
+Posture, severity vocab, beads, and status protocol baseline: see [`../references/review-agent-contract.md`](../references/review-agent-contract.md).
+
+Deviations for this agent:
+
+- **Verdict shape:** **Approved** / **Gaps** / **Blocked** (not the severity findings list). Include specifics: gaps as type + what's missing + the required test; Blocked with the per-attempt e2e log.
+- **May edit and commit e2e fixes** (`fix(...)` / `test(...)` commits) — the one narrow exception to the contract's no-commit rule. Do **not** push.

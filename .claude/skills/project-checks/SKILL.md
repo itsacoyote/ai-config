@@ -1,6 +1,6 @@
 ---
 name: project-checks
-description: Use after implementing a task, or as a pre-flight before the Validate review gate, to run the project's own mechanical quality gates — typecheck, lint, format, spellcheck, tests. Discovers the commands from the project (package.json scripts, Makefile/Justfile, or language-native tooling) instead of assuming a toolchain, runs auto-fixers first, and treats a still-failing check as a blocker.
+description: Use after implementing a task, or as a pre-flight before the Validate review gate, to run the project's own mechanical quality gates — typecheck, lint, format, spellcheck, tests.
 allowed-tools: Read Glob Grep Bash(test *) Bash(command -v *) Bash(ls *)
 ---
 

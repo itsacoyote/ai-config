@@ -1,6 +1,6 @@
 ---
 name: setup-beads
-description: Use when setting up beads (the `bd` issue tracker) in a project so the workflow skills can track tasks — installs `bd` if missing, runs an isolated local `bd init`, and keeps `.beads/` out of git. Required by all workflow skills; this is the bootstrap. Developer-invoked one-time setup; defaults to personal/local use with nothing committed.
+description: Use when setting up beads (the `bd` issue tracker) in a project for the first time so workflow skills can track tasks.
 disable-model-invocation: true
 allowed-tools: Read Write Edit Bash(bd *) Bash(git *) Bash(command -v *) Bash(test *) Bash(ls *) Bash(uname *) Bash(brew *) Bash(npm *)
 ---

@@ -1,6 +1,6 @@
 ---
 name: efficiency-review
-description: Use when you want a fast, read-only review of ONE task's recently-changed code for YAGNI, simplification, and clarity/naming — scoped to the task diff, not the full branch. Spawn from the main session after an implementer agent finishes a single task. Does not cover correctness, security, or test coverage.
+description: Use when reviewing ONE task's recently-changed code for YAGNI, simplification, and clarity/naming — scoped to the task diff, not the full branch (unlike senior-review).
 model: sonnet
 skills:
   - efficiency-review
@@ -27,6 +27,6 @@ Stay strictly within the passed scope — do not wander into unrelated files.
 
 ## Return
 
-Return the skill's verdict: either "Efficiency review approved" (with a one–two sentence summary of what was reviewed and why it holds up), or the ordered findings list (severity / where / what / fix) using the fixed vocabulary `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`.
+Return the skill's verdict: either "Efficiency review approved" (with a one–two sentence summary of what was reviewed and why it holds up), or the ordered findings list (severity / where / what / fix).
 
-Do **not** fix the code, commit, or push — you review and report; the caller applies fixes and re-invokes you. Record findings per the beads contract in `.claude/references/beads.md` only if the caller asks; by default just return them.
+Posture, severity vocab, beads, and status protocol: see [`../references/review-agent-contract.md`](../references/review-agent-contract.md).

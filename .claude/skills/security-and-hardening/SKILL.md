@@ -57,60 +57,9 @@ The code examples are Express/Node/TS; the principles (OWASP prevention, validat
 
 ## OWASP Top 10 Prevention
 
-### 1. Injection (SQL, NoSQL, OS Command)
+Prevention map covering all 10 categories (2021 order). The `security-scan` skill is the detective counterpart — see its `references/vuln-categories.md` for detection patterns.
 
-```typescript
-// BAD: SQL injection via string concatenation
-const query = `SELECT * FROM users WHERE id = '${userId}'`;
-
-// GOOD: Parameterized query
-const user = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
-
-// GOOD: ORM with parameterized input
-const user = await prisma.user.findUnique({ where: { id: userId } });
-```
-
-### 2. Broken Authentication
-
-```typescript
-// Password hashing
-import { hash, compare } from "bcrypt";
-
-const SALT_ROUNDS = 12;
-const hashedPassword = await hash(plaintext, SALT_ROUNDS);
-const isValid = await compare(plaintext, hashedPassword);
-
-// Session management
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET, // From environment, not code
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true, // Not accessible via JavaScript
-      secure: true, // HTTPS only
-      sameSite: "lax", // CSRF protection
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    },
-  }),
-);
-```
-
-### 3. Cross-Site Scripting (XSS)
-
-```typescript
-// BAD: Rendering user input as HTML
-element.innerHTML = userInput;
-
-// GOOD: Use framework auto-escaping (React does this by default)
-return <div>{userInput}</div>;
-
-// If you MUST render HTML, sanitize first
-import DOMPurify from 'dompurify';
-const clean = DOMPurify.sanitize(userInput);
-```
-
-### 4. Broken Access Control
+### A01. Broken Access Control
 
 ```typescript
 // Always check authorization, not just authentication
@@ -133,7 +82,56 @@ app.patch("/api/tasks/:id", authenticate, async (req, res) => {
 });
 ```
 
-### 5. Security Misconfiguration
+Auth checks on every endpoint, ownership verification on every resource, admin role checked explicitly.
+
+### A02. Cryptographic Failures
+
+```typescript
+// Never return sensitive fields in API responses
+function sanitizeUser(user: UserRecord): PublicUser {
+  const { passwordHash, resetToken, ...publicFields } = user;
+  return publicFields;
+}
+
+// Use environment variables for secrets
+const API_KEY = process.env.STRIPE_API_KEY;
+if (!API_KEY) throw new Error("STRIPE_API_KEY not configured");
+```
+
+Use HTTPS everywhere, strong hashing (bcrypt/scrypt/argon2) for passwords, never store secrets in code.
+
+### A03. Injection (SQL, NoSQL, OS Command, XSS)
+
+```typescript
+// BAD: SQL injection via string concatenation
+const query = `SELECT * FROM users WHERE id = '${userId}'`;
+
+// GOOD: Parameterized query
+const user = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
+
+// GOOD: ORM with parameterized input
+const user = await prisma.user.findUnique({ where: { id: userId } });
+```
+
+```typescript
+// BAD: Rendering user input as HTML (XSS)
+element.innerHTML = userInput;
+
+// GOOD: Use framework auto-escaping (React does this by default)
+return <div>{userInput}</div>;
+
+// If you MUST render HTML, sanitize first
+import DOMPurify from 'dompurify';
+const clean = DOMPurify.sanitize(userInput);
+```
+
+Parameterize all queries; validate and allowlist input; use framework auto-escaping for output.
+
+### A04. Insecure Design
+
+Apply threat modeling before implementing sensitive features — identify trust boundaries, data flows, and adversary goals. Use spec-driven development with explicit security requirements. For auth flows, payment handling, or admin features, sketch the attack surface before writing code.
+
+### A05. Security Misconfiguration
 
 ```typescript
 // Security headers (use helmet for Express)
@@ -162,19 +160,59 @@ app.use(
 );
 ```
 
-### 6. Sensitive Data Exposure
+Set security headers, restrict CORS to known origins, use minimal permissions, audit dependencies.
+
+### A06. Vulnerable Components
+
+```bash
+# Audit dependencies
+npm audit --audit-level=high
+
+# Fix automatically where possible
+npm audit fix
+```
+
+Run `npm audit` (or equivalent) before every release. Keep dependencies updated. Remove unused packages. See the Triaging npm audit Results section below for triage guidance.
+
+### A07. Identification and Authentication Failures
 
 ```typescript
-// Never return sensitive fields in API responses
-function sanitizeUser(user: UserRecord): PublicUser {
-  const { passwordHash, resetToken, ...publicFields } = user;
-  return publicFields;
-}
+// Password hashing
+import { hash, compare } from "bcrypt";
 
-// Use environment variables for secrets
-const API_KEY = process.env.STRIPE_API_KEY;
-if (!API_KEY) throw new Error("STRIPE_API_KEY not configured");
+const SALT_ROUNDS = 12;
+const hashedPassword = await hash(plaintext, SALT_ROUNDS);
+const isValid = await compare(plaintext, hashedPassword);
+
+// Session management
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET, // From environment, not code
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true, // Not accessible via JavaScript
+      secure: true, // HTTPS only
+      sameSite: "lax", // CSRF protection
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
+  }),
+);
 ```
+
+Strong passwords, rate limiting on auth endpoints (≤10 attempts/15 min), session expiration, single-use time-limited reset tokens.
+
+### A08. Software and Data Integrity Failures
+
+Verify the integrity of software updates, CI/CD pipelines, and third-party dependencies. Use signed artifacts and checksums where available. Avoid deserializing untrusted data without schema validation. Audit CI pipelines to ensure build steps cannot be tampered with by injected code.
+
+### A09. Security Logging and Monitoring Failures
+
+Log security-relevant events (authentication, authorization failures, suspicious input patterns). Do not log secrets, passwords, or tokens. Ensure logs are tamper-resistant and monitored. Missing logging means incidents go undetected — it is itself a vulnerability.
+
+### A10. Server-Side Request Forgery (SSRF)
+
+Validate and allowlist URLs before making server-side requests. Restrict outbound requests to known trusted destinations. Block access to internal IP ranges (169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and cloud metadata endpoints from user-controlled URLs.
 
 ## Input Validation Patterns
 
@@ -303,16 +341,16 @@ app.use(
 git diff --cached | grep -i "password\|secret\|api_key\|token"
 ```
 
-## Security Review Checklist
+## Security Review Quick Reference
 
-The full review checklist is canonical in `.claude/references/security-checklist.md` — it covers pre-commit checks, authentication, authorization, input validation, security headers, CORS, data protection, dependency security, error handling, and an OWASP Top 10 quick reference. Work through it for any security-relevant change.
+For a fast pre-commit pass, use `.claude/references/security-checklist.md` — it has copy-paste security headers, CORS configuration, pre-commit grep checks, and dependency audit commands. That file is a quick-ref that links back here for the authoritative prevention guidance.
 
 ## See Also
 
-- `.claude/references/security-checklist.md` — the full review checklist (canonical)
+- `.claude/references/security-checklist.md` — actionable quick-ref: pre-commit checks, copy-paste headers/CORS/error snippets
 - `api-and-interface-design` — where validation belongs at interface boundaries
 - `browser-testing-with-devtools` — verify security headers and responses against the running app
-- `security-scan` — audit existing or changed code for vulnerabilities (the detective counterpart to this preventive skill)
+- `security-scan` — audit existing or changed code for vulnerabilities (the detective counterpart to this preventive skill; its `references/vuln-categories.md` has detection patterns for every OWASP category)
 
 ## Common Rationalizations
 

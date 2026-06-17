@@ -1,6 +1,6 @@
 ---
 name: doubt-driven-development
-description: Use when correctness matters more than speed — before committing non-trivial code, making an architectural decision under uncertainty, working in unfamiliar code, or asserting a property the compiler can't verify (thread safety, idempotence, spec-match), or any time a confident output would be cheaper to verify now than to debug later. Materializes a fresh-context reviewer biased to disprove the decision before it stands.
+description: Use when correctness matters more than speed — before committing non-trivial code, making an architectural decision under uncertainty, or asserting a property the compiler can't verify (thread safety, idempotence, spec-match).
 ---
 
 # Doubt-Driven Development
