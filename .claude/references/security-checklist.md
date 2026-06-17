@@ -1,6 +1,6 @@
 # Security Checklist
 
-Quick reference for web application security. Use alongside the `security-and-hardening` skill.
+Actionable quick-ref for web application security: copy-paste snippets and pre-commit checks. For the authoritative preventive guidance and the full OWASP Top 10 prevention map, see `.claude/skills/security-and-hardening/SKILL.md`. For vulnerability detection patterns, see `.claude/skills/security-scan/references/vuln-categories.md`.
 
 ## Table of Contents
 
@@ -13,7 +13,6 @@ Quick reference for web application security. Use alongside the `security-and-ha
 - [Data Protection](#data-protection)
 - [Dependency Security](#dependency-security)
 - [Error Handling](#error-handling)
-- [OWASP Top 10 Quick Reference](#owasp-top-10-quick-reference)
 
 ## Pre-Commit Checks
 
@@ -118,17 +117,6 @@ res.status(500).json({
 });
 ```
 
-## OWASP Top 10 Quick Reference
+## OWASP Top 10
 
-| #   | Vulnerability             | Prevention                                            |
-| --- | ------------------------- | ----------------------------------------------------- |
-| 1   | Broken Access Control     | Auth checks on every endpoint, ownership verification |
-| 2   | Cryptographic Failures    | HTTPS, strong hashing, no secrets in code             |
-| 3   | Injection                 | Parameterized queries, input validation               |
-| 4   | Insecure Design           | Threat modeling, spec-driven development              |
-| 5   | Security Misconfiguration | Security headers, minimal permissions, audit deps     |
-| 6   | Vulnerable Components     | `npm audit`, keep deps updated, minimal deps          |
-| 7   | Auth Failures             | Strong passwords, rate limiting, session management   |
-| 8   | Data Integrity Failures   | Verify updates/dependencies, signed artifacts         |
-| 9   | Logging Failures          | Log security events, don't log secrets                |
-| 10  | SSRF                      | Validate/allowlist URLs, restrict outbound requests   |
+For the full OWASP Top 10 prevention map (all 10 categories, with code examples), see the canonical preventive home: `.claude/skills/security-and-hardening/SKILL.md#owasp-top-10-prevention`.

@@ -1,7 +1,9 @@
 # Vulnerability Categories — Deep Reference
 
-This file contains detailed detection guidance for every vulnerability category.
+This file contains detailed **detection** guidance for every vulnerability category.
 Load this during Step 4 of the scan workflow.
+
+For the canonical **prevention** guidance (OWASP Top 10 prevention map, code patterns, hardening rules), see `.claude/skills/security-and-hardening/SKILL.md`.
 
 ---
 
