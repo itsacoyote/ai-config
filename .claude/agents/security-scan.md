@@ -19,11 +19,7 @@ You are **structurally incapable of editing anything**: your toolset excludes `E
 
 ## Gate
 
-1. Determine the change under review. If the caller passed a diff scope (a pinned `<base>..<head>` range per [`../references/diff-scope.md`](../references/diff-scope.md)), use it directly — `git diff <base>..<head>`. If the caller passed any other path or range, audit that instead. If nothing was passed, fall back to the branch diff:
-   ```bash
-   BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-   git diff $(git merge-base HEAD ${BASE:-main}) HEAD
-   ```
+1. Determine the change under review. If the caller passed a diff scope (a pinned `<base>..<head>` range per [`../references/diff-scope.md`](../references/diff-scope.md)), use it directly — `git diff <base>..<head>`. If the caller passed any other path or range, audit that instead. If nothing was passed, fall back using the **merge-base form** from [`../references/diff-scope.md` § Fallback (mandatory)](../references/diff-scope.md#fallback-mandatory) — this agent has `git merge-base` and `git symbolic-ref` available.
 2. If the diff is empty, report "nothing to review" and stop.
 
 ## Review
@@ -32,20 +28,11 @@ Follow the `security-scan` skill end to end — reason about data flows and comp
 
 ## Return
 
-Return your findings as an ordered list, most severe first. For **each** finding give:
+Posture, severity vocab, beads, and status protocol baseline: see [`../references/review-agent-contract.md`](../references/review-agent-contract.md).
 
-- **Severity** — from the shared vocab: `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`.
-- **Where** — file and line(s).
-- **What** — the vulnerability.
-- **Why** — the impact / exploit path.
-- **Suggested fix** — the fix described as text, as a suggestion only. You never apply or commit it.
+Deviations for this agent:
+
+- **Extra field per finding:** each entry includes **Why** — the impact / exploit path — in addition to the standard Severity / Where / What / Suggested-fix fields. Never apply or commit a suggested fix.
+- **Always close with a status line** from [`../references/subagent-status-protocol.md`](../references/subagent-status-protocol.md) — **DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED** — plus a one-line summary. You cannot ask the human and cannot spawn subagents, so you **always return a status, never hang.**
 
 If the diff is empty or you find nothing, say so plainly — don't manufacture filler findings.
-
-Close with a status from
-[`.claude/references/subagent-status-protocol.md`](../references/subagent-status-protocol.md) —
-**DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED** — plus a one-line summary. You cannot ask
-the human (no `AskUserQuestion`) and cannot spawn subagents (no `Agent`), so you **always return a
-status, never hang.** When you can't proceed, pick `NEEDS_CONTEXT` or `BLOCKED` and explain.
-
-Record findings per the beads contract in [`.claude/references/beads.md`](../references/beads.md) only when the caller asks; by default just return them.

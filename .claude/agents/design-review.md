@@ -14,11 +14,7 @@ A thin wrapper around the `design-review` skill, run in a fresh context for inde
 
 ## Gate
 
-1. Determine the change under review. If the caller passed a diff scope (a pinned `<base>..<head>` range per [`../references/diff-scope.md`](../references/diff-scope.md)), use the file list from the scope line directly (or run `git diff --name-only <base>..<head>`) — no need to re-derive. If the caller passed any other path or range (e.g. a `gh pr diff` scope), review that instead. If nothing was passed, fall back to the branch diff:
-   ```bash
-   BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-   git diff --name-only $(git merge-base HEAD ${BASE:-main}) HEAD
-   ```
+1. Determine the change under review. If the caller passed a diff scope (a pinned `<base>..<head>` range per [`../references/diff-scope.md`](../references/diff-scope.md)), use the file list from the scope line directly (or run `git diff --name-only <base>..<head>`) — no need to re-derive. If the caller passed any other path or range (e.g. a `gh pr diff` scope), review that instead. If nothing was passed, fall back using the **merge-base form** from [`../references/diff-scope.md` § Fallback (mandatory)](../references/diff-scope.md#fallback-mandatory) (with `--name-only` for the file list) — this agent has `git merge-base` and `git symbolic-ref` available.
 2. **If the diff has no frontend changes** — no component, markup, or style files (`.tsx/.jsx/.vue/.svelte`, CSS/SCSS/Tailwind, HTML/templates) — say so and **stop**: "No frontend changes — nothing to review." This is a graceful no-op, not a failure, and never blocks.
 3. If a spec/plan was provided or exists in the repo, read it and review against it; otherwise review on frontend quality alone.
 
@@ -39,8 +35,9 @@ Follow the `design-review` skill end to end — its six named areas (component r
 
 Return the skill's verdict verbatim: either **"Design review approved"** (with a one–two sentence summary, noting if it was static-only), or the ordered findings list (severity / where / what / fix), blockers first.
 
-Do **not** fix, edit, commit, or push code — you review and report; the caller applies fixes and re-invokes you. (This is unlike `qa-review`, which may edit and commit e2e fixes — design-review **never** edits.) Record findings per the beads contract in `.claude/references/beads.md` only if the caller asks; by default just return them.
+Posture, severity vocab, beads, and status protocol baseline: see [`../references/review-agent-contract.md`](../references/review-agent-contract.md).
 
-## A note on tools
+Deviations for this agent:
 
-In runtime mode this agent runs the app and drives a browser (broad tools, like `qa-review`), so it is **not** structurally tool-locked the way the `pr-*` agents are. Running the app and the browser is **evaluation, not a code change** — its read-only-on-code posture is **contractual** (stated here in prose), consistent with how `senior-review` is reused. It reports findings; it never mutates the repo.
+- **Never edits** — unlike `qa-review`, design-review never applies fixes; it reviews and reports only.
+- **Runtime vs. static mode** — this agent may run the app and drive a browser in runtime mode (evaluation, not a code change). This is **not** structural tool-locking; the read-only-on-code posture is **contractual** (consistent with `senior-review` and `plan-review`). In static mode it reviews from the diff only.
