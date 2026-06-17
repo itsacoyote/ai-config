@@ -152,6 +152,14 @@ returned DONE_WITH_CONCERNS, or it touched more than its file-map slice).
   components/markup/styles), apply fixes, re-review, **bounded to 3 iterations**. Don't
   `bd close` the task until its review passes.
 
+  Each reviewer is dispatched with the **task's pinned commit range** as the diff scope
+  (per [`.claude/references/diff-scope.md`](../../references/diff-scope.md)): `base` = the
+  commit before the implementer's first commit for this task, `head` = `git rev-parse HEAD`
+  at spawn time. **Recompute the scope on each re-spawn** — fix commits move HEAD, so a
+  scope pinned at the first spawn would miss them. The end-of-run `validate` pass computes
+  its own branch scope (merge-base of HEAD and default branch); don't pass a per-task range
+  there.
+
 ## Models (per-role knob)
 
 Each subagent runs on the model best suited to its role, overridable at launch:
