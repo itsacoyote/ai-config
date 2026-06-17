@@ -20,8 +20,8 @@ above). When you run `/pr-review <n>` again on a PR that has moved on, it auto-d
 **follow-up** from your own prior comments — suppressing findings you already raised, reporting
 the fate of each prior thread, and surfacing only genuinely-new issues. Every Nth run (or on
 `deep`) it does a thorough **deep re-check** instead. State lives on GitHub, so this works from
-any machine or session; beads, when present, adds richer memory. See
-[Iterative runs](#iterative-runs-follow-up--deep-re-check).
+any machine or session; beads persists the review epic, per-run session record, and remembered
+drop-decisions across sessions. See [Iterative runs](#iterative-runs-follow-up--deep-re-check).
 
 It is **structurally incapable of approving, rejecting, requesting changes, merging, closing,
 editing, or resolving threads** on the PR, the repo, or any code. Its only outward actions are
@@ -61,8 +61,9 @@ different posture: one patches, this one only comments.
 
 ## The run
 
-Detect beads mode first per [`.claude/references/beads.md`](../../references/beads.md) — it
-governs the Record step and how status is tracked.
+**Preflight (required).** Before doing any workflow work, verify beads is set up:
+`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 ### 1. Intake
 
@@ -193,8 +194,9 @@ On a **light follow-up**, then apply suppression — see
 - Drop findings that **conservatively near-duplicate** a comment you already posted (verbatim
   or near-verbatim restatement of the same issue at the same place). This is deliberately
   cautious: **two *distinct* issues at the same location both survive.**
-- **Beads-enhanced:** also drop findings matching ones you previously **dropped** in curation
-  (remembered drop-decisions), so the developer isn't re-asked about something they declined.
+- Also drop findings matching ones you previously **dropped** in curation (remembered
+  drop-decisions, persisted in the beads session record), so the developer isn't re-asked
+  about something they declined.
 - Keep the suppressed items aside for the run record; don't silently lose them.
 
 On a **deep re-check** (or a first/full run), apply **no suppression** — every finding flows to
@@ -215,20 +217,17 @@ fetched in step 2:
 Surface this as a short table before the curation gate. It's a **read-only** report — never a
 trigger to resolve, close, or edit a thread.
 
-### 5. Record (beads, dual-mode)
+### 5. Record
 
 Per [`.claude/references/beads.md`](../../references/beads.md), and as the **single writer** —
 only the orchestrator writes beads; the review agents are read-only on it.
 
-- **Beads-enhanced:** record a **review epic** for this PR (one per PR — reuse it across runs),
-  **one child task per pass** (context / security / senior / tests, plus design when the
-  frontend pass ran), and **each finding as a child issue** under its pass's task. On a follow-up, also add a **session record** child for
-  this run (mode = light/deep, run number, findings, what was posted, what was dropped) and
-  carry forward **remembered drop-decisions** so future light runs can suppress them. This makes
-  the review survive a long session and across sessions/machines.
-- **Standalone:** run the same flow conversationally — track the compiled list in-session, and
-  follow-up suppression works off your **posted** comments from GitHub (no remembered drops
-  without beads). No errors when `.beads/` is absent.
+Record a **review epic** for this PR (one per PR — reuse it across runs), **one child task per
+pass** (context / security / senior / tests, plus design when the frontend pass ran), and **each
+finding as a child issue** under its pass's task. On a follow-up, also add a **session record**
+child for this run (mode = light/deep, run number, findings, what was posted, what was dropped)
+and carry forward **remembered drop-decisions** so future light runs can suppress them. This
+makes the review survive a long session and across sessions/machines.
 
 ### 6. Curation gate (human — required)
 
@@ -307,11 +306,11 @@ GitHub (resolved via your `gh` login), so it works in any new session or on any 
 - **Deep mode relaxes suppression, never guardrails.** A deep re-check still posts a single
   `event=COMMENT` review, never resolves a thread, and never touches PR state — the
   [Guardrails](#guardrails) hold identically in every mode.
-- **Dual-mode memory.** GitHub-only is fully functional: follow-up suppression works off your
-  posted comments, and run number / fate come straight from the API. Beads-enhanced adds a
-  per-PR review epic, a per-run session record (mode, findings, posted, dropped), and remembered
-  drop-decisions so light runs also suppress what you previously declined. Detect beads mode
-  first ([`.claude/references/beads.md`](../../references/beads.md)); never error without it.
+- **Memory across runs.** Follow-up suppression keys off your posted comments from GitHub (mode
+  and run number come straight from the API). Beads extends this with a per-PR review epic, a
+  per-run session record (mode, findings, posted, dropped), and remembered drop-decisions so
+  light runs also suppress what you previously declined. See
+  [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
 ## Guardrails
 
