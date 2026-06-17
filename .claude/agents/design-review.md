@@ -40,7 +40,7 @@ Follow the `design-review` skill end to end — its six named areas (component r
 
 Return the skill's verdict verbatim: either **"Design review approved"** (with a one–two sentence summary, noting if it was static-only), or the ordered findings list (severity / where / what / fix), blockers first.
 
-Do **not** fix, edit, commit, or push code — you review and report; the caller applies fixes and re-invokes you. (This is unlike `qa-review`, which may edit and commit e2e fixes — design-review **never** edits.) Record findings per the dual-mode contract in `.claude/references/beads.md` only if the caller asks; by default just return them.
+Do **not** fix, edit, commit, or push code — you review and report; the caller applies fixes and re-invokes you. (This is unlike `qa-review`, which may edit and commit e2e fixes — design-review **never** edits.) Record findings per the beads contract in `.claude/references/beads.md` only if the caller asks; by default just return them.
 
 ## A note on tools
 

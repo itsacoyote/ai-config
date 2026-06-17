@@ -29,4 +29,4 @@ Stay strictly within the passed scope — do not wander into unrelated files.
 
 Return the skill's verdict: either "Efficiency review approved" (with a one–two sentence summary of what was reviewed and why it holds up), or the ordered findings list (severity / where / what / fix) using the fixed vocabulary `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` / `INFO`.
 
-Do **not** fix the code, commit, or push — you review and report; the caller applies fixes and re-invokes you. Record findings per the dual-mode contract in `.claude/references/beads.md` only if the caller asks; by default just return them.
+Do **not** fix the code, commit, or push — you review and report; the caller applies fixes and re-invokes you. Record findings per the beads contract in `.claude/references/beads.md` only if the caller asks; by default just return them.

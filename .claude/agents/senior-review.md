@@ -29,4 +29,4 @@ Follow the `senior-review` skill end to end — its named passes (completeness, 
 
 Return the skill's verdict verbatim: either "Senior review approved" (with a one–two sentence summary), or the ordered findings list (severity / where / what / fix).
 
-Do **not** fix the code, commit, or push — you review and report; the caller applies fixes and re-invokes you. Record findings per the dual-mode contract in `.claude/references/beads.md` only if the caller asks; by default just return them.
+Do **not** fix the code, commit, or push — you review and report; the caller applies fixes and re-invokes you. Record findings per the beads contract in `.claude/references/beads.md` only if the caller asks; by default just return them.

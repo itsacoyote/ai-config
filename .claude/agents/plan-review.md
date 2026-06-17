@@ -13,10 +13,7 @@ A thin wrapper around the `plan-review` skill, run in a fresh context for indepe
 
 ## Inputs — the spec + plan
 
-Review the **spec** and the **plan** (architecture decisions, file map, task breakdown, dependency graph, risks). Source them per the dual-mode contract in [`.claude/references/beads.md`](../references/beads.md):
-
-- **Beads-enhanced** — read the spec from the epic (`bd show <epic>`) and the tasks / file map from its children (`bd show <id>`, `bd list`). The caller passes the epic id in the dispatch.
-- **Standalone** — the caller passes the spec + plan in the dispatch; review those.
+Review the **spec** and the **plan** (architecture decisions, file map, task breakdown, dependency graph, risks). Read the spec from the epic (`bd show <epic>`) and the tasks / file map from its children (`bd show <id>`, `bd list`). The caller passes the epic id in the dispatch.
 
 Then **read the codebase read-only** to validate the plan against reality — referenced files exist where the file map says (or are correctly marked New), existing reusable code the plan should build on instead of rebuilding, and convention conflicts. A plan reviewed only against itself misses the flaws that live in the codebase.
 
@@ -39,4 +36,4 @@ Return the skill's verdict verbatim: either **"Plan review approved"** (with a o
 - **Wrong approach → back to Define.** When the *approach itself* is wrong — the plan faithfully implements a flawed premise that revising the plan can't fix — call it out explicitly as a **re-Define escalation**, not just another HIGH. This signals the orchestrator to route it to an **exception-stop** (the human decides) rather than into the in-plan revise-and-re-review loop.
 - **In-plan fix.** The approach is sound but the plan has gaps (a missing task, a leaky interface, wrong sequencing). The default path — revised within the plan and re-reviewed.
 
-Do **not** write code, edit the plan, commit, or push — you review and report; the caller (the `autorun` orchestrator or the human) revises the plan and re-invokes you. The orchestrator owns the plan revisions and the beads lifecycle; you don't. This read-only-on-code posture is **contractual**, consistent with `senior-review` and `design-review`. Record findings per the dual-mode contract in [`.claude/references/beads.md`](../references/beads.md) only if the caller asks; by default just return them.
+Do **not** write code, edit the plan, commit, or push — you review and report; the caller (the `autorun` orchestrator or the human) revises the plan and re-invokes you. The orchestrator owns the plan revisions and the beads lifecycle; you don't. This read-only-on-code posture is **contractual**, consistent with `senior-review` and `design-review`. Record findings per the beads contract in [`.claude/references/beads.md`](../references/beads.md) only if the caller asks; by default just return them.
