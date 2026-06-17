@@ -60,8 +60,12 @@ Use these skills as needed during research:
 
 ## Output
 
+**Preflight (required).** Before doing any workflow work, verify beads is set up:
+`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
+
 Present findings **conversationally in this session**, using [template.md](template.md) as the structure for what to cover (a findings outline — not a file to write). Don't write step-doc files.
 
-Task tracking follows the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone (default), present the "Gaps / what needs to be created" as a plain checklist and let the user decide what to track; beads-enhanced, attach findings to the feature epic and turn each actionable gap into a child issue with dependencies.
+Attach findings to the feature epic and turn each actionable gap into a child issue with dependencies — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
 Next step: hand the findings to `planning-and-task-breakdown` (Plan). See `feature-workflow` for the full sequence.

@@ -136,10 +136,11 @@ All three fields are still useful without autorun — they document where review
 
 ### Recording the plan
 
-Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
+**Preflight (required).** Before doing any workflow work, verify beads is set up:
+`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
-- **Standalone (default):** present the file map and ordered task list in the conversation — this is the plan of record for Implement.
-- **Beads-enhanced:** create one **child issue per task** under the feature epic — put the file-map slice, named tests, **risk marker, skill hints, and (where applicable) the `security-sensitive` label** in each issue body — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically.
+Create one **child issue per task** under the feature epic — put the file-map slice, named tests, **risk marker, skill hints, and (where applicable) the `security-sensitive` label** in each issue body — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically. Beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
 Do not write a `3_plan.md` or any step-doc file — there is no `.docs/`.
 

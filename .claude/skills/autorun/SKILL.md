@@ -19,7 +19,10 @@ runs them after Define.
 
 ## Before you run
 
-- An **approved spec must be in context** (ideally a beads epic from `define`). If there
+- **Preflight (required).** Verify beads is set up:
+  `test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+  proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
+- An **approved spec must be in context** (a beads epic from `define`). If there
   isn't one, stop and point the user at `define` — autorun does not replace gate 1.
 - **Run from the main session.** autorun spawns the `implementer` agent, the `plan-review`
   agent, and the `senior-review`/`design-review`/`qa-review` agents, plus `efficiency-review`
@@ -40,8 +43,7 @@ runs them after Define.
 
 1. **Research** — run `research` against the approved spec.
 2. **Plan** — run `planning-and-task-breakdown`: file map + dependency-ordered tasks, each
-   with a **risk marker** and **skill hints**, recorded as beads child issues (beads mode) or
-   an in-session task list (standalone).
+   with a **risk marker** and **skill hints**, recorded as beads child issues under the epic.
 3. **Plan review** — run the `plan-review` gate below (autonomous, not a human gate) before
    any code is written.
 4. **Implement** — the loop below, one task at a time.
@@ -56,8 +58,8 @@ halt the run at any point and hand control back to the human.
 After Plan and **before** the implement loop, spawn the [`plan-review`](../../agents/plan-review.md)
 agent (Agent tool) on the spec + plan — a staff-engineer design review of the approach,
 decomposition, interfaces, reuse, risk, spec-alignment, and sequencing, before any code is
-written. It reads the spec from the epic and the tasks / file map from its children (beads
-mode) or the in-session plan (standalone). This is the pre-build mirror of `validate`:
+written. It reads the spec from the epic and the tasks / file map from its children via beads.
+This is the pre-build mirror of `validate`:
 **autonomous, not a third human gate.**
 
 Triage the returned verdict:
@@ -76,9 +78,7 @@ code and on the plan).
 
 ## The implement loop
 
-Detect mode per [`.claude/references/beads.md`](../../references/beads.md).
-
-**Beads-enhanced.** On (re)invoke, **reclaim stranded work first**: `bd ready` lists only
+On (re)invoke, **reclaim stranded work first**: `bd ready` lists only
 `open` tasks, so a task claimed (`in_progress`) but not yet closed — the common interruption
 point — would otherwise be skipped on resume. Pull it back in before taking new work.
 
@@ -101,8 +101,6 @@ while `bd ready` lists an implementable task (skip the epic / non-leaf issues):
 ```
 
 Find stranded tasks with `bd list --status in_progress` scoped to the epic.
-
-**Standalone:** work down the plan's task list the same way, tracking status in the session.
 
 Statuses follow [`.claude/references/subagent-status-protocol.md`](../../references/subagent-status-protocol.md).
 You own the beads lifecycle (`claim`/`close`) and the terminal push; the implementer only
@@ -207,17 +205,12 @@ exception-stop instead of forcing anything.
 
 ## Status & summary
 
-Record per the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
-beads-enhanced — progress is the issue states (claimed → closed) and the validation summary
-on the epic; standalone — present a run summary in the session at the end.
+Progress is the issue states (claimed → closed) and the validation summary on the epic — beads
+is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
-## Dual-mode & resuming
+## Resuming
 
-- **Beads-enhanced (recommended):** loop state lives in beads, so the run is **resumable** —
-  if you stop it, deny a permission, or hit an exception-stop, re-invoking autorun first
-  reclaims any `in_progress` task (claimed but not closed) under the epic via the resume step
-  in "The implement loop," then continues with the remaining `bd ready` tasks. Closed tasks
-  stay closed.
-- **Standalone:** the task list lives in the session, so resumability is best-effort — a fresh
-  session re-derives the plan from the spec. Use `setup-beads` for any feature you might pause
-  and resume.
+Loop state lives in beads, so the run is **resumable** — if you stop it, deny a permission,
+or hit an exception-stop, re-invoking autorun first reclaims any `in_progress` task (claimed
+but not closed) under the epic via the resume step in "The implement loop," then continues
+with the remaining `bd ready` tasks. Closed tasks stay closed.
