@@ -18,7 +18,14 @@ Read the full diff — this is the source of truth for what changed:
 ```bash
 BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
 git diff $(git merge-base HEAD ${BASE:-main}) HEAD
+git status --porcelain          # also catch untracked/unstaged files the diff above misses
 ```
+
+The diff shows only *committed* work; it cannot show a file that was created but never
+committed. Run `git status --porcelain` too — durable artifacts authored earlier in the
+workflow (most often an **ADR written during Define**, or generated docs) can sit untracked
+and would otherwise slip past both this audit and the PR. Treat any untracked durable file as
+in scope.
 
 Then read the spec (if one exists) to understand intent.
 
@@ -44,4 +51,8 @@ Write the PR body following the `create-pr` skill (what/why, no AI attribution).
 `test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
-Commit the documentation changes (`Skill(git-commit)` first; stage explicit paths), push, and ready the PR (`gh pr ready` if it was a draft). This is also `autorun`'s terminal step: ready the PR and **stop** — never merge or approve, that's the human's gate. File issues for any deliberately-deferred documentation and close out the feature epic — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+Commit the documentation changes (`Skill(git-commit)` first; stage explicit paths), push, and ready the PR (`gh pr ready` if it was a draft). When staging, **explicitly include durable docs authored earlier in the workflow that no task commit owns** — above all an **ADR from Define** under `docs/decisions/` (or the project's ADR dir). These are created with `Write` long before this step and are easy to leave untracked.
+
+Before you ready the PR, confirm nothing durable is orphaned: `git status --porcelain` should show no untracked file that belongs in the repo (transient scratch is fine). A dangling ADR that the PR description links to is the classic miss — catch it here.
+
+This is also `autorun`'s terminal step: ready the PR and **stop** — never merge or approve, that's the human's gate. File issues for any deliberately-deferred documentation and close out the feature epic — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.

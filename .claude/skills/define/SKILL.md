@@ -65,6 +65,8 @@ Do not write step-doc files — there is no `.docs/`.
 
 **Record any ADRs.** Write each architecturally significant decision settled during the conversation to the project's ADR location (an existing `docs/decisions/`, `docs/adr/`, etc., or `docs/decisions/` if the project has none yet), using the template and lifecycle in `documentation-and-adrs`. Number them sequentially, set status `Accepted`, and link them from the spec so Research and Plan inherit the rationale. ADR files are the exception to "no step-doc files" — they are durable project records, not workflow scratch. If no decision rose to that bar, write nothing; don't manufacture an ADR for a trivial feature.
 
+An ADR written here is a real file that must reach the repo. It won't be picked up by the task-scoped commits during Implement (no task owns it) and it's invisible to a `git diff` until committed, so **stage it now** (`git add` + commit it with the branch's first commit) rather than leaving it untracked — `document` sweeps for orphaned ADRs as a backstop, but don't rely on the backstop.
+
 ## Approval checkpoint
 
 Before handing off to Research, present the **Summary** and **Acceptance Criteria** and ask the user to approve or give feedback. Revise and re-present until approved. Only after approval, move on — either continue by hand with the `research` skill, or hand the rest of the workflow to `autorun` to run Research → Document autonomously under supervision (see `feature-workflow`).
