@@ -13,7 +13,7 @@ A thin wrapper around the `efficiency-review` skill, run in a fresh context for 
 
 ## Gate
 
-1. Determine the task diff to review. Accept what the caller passes (a commit range, file path, or `git show HEAD` for the last commit). If nothing is passed, default to:
+1. Determine the task diff to review. Prefer the caller-passed per-task diff scope (a pinned commit range per [`../references/diff-scope.md`](../references/diff-scope.md) — `git diff <base>..<head>`). If the caller passed a file path or `git show HEAD`, use that instead. If nothing was passed, default to:
    ```bash
    git diff HEAD
    ```

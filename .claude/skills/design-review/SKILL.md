@@ -18,9 +18,10 @@ Non-frontend diffs. If the change touches only backend, CLI, config, or docs —
 
 Engage **only when the diff touches frontend** — component or markup or style files: `.tsx/.jsx/.vue/.svelte`, CSS/SCSS/Tailwind, and HTML/template files.
 
+Use the caller-passed diff scope (or any path/range specified) to get the file list; for scope derivation and fallback, see [`../../references/diff-scope.md`](../../references/diff-scope.md). Then filter to frontend files:
+
 ```bash
-BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-git diff --name-only $(git merge-base HEAD ${BASE:-main}) HEAD \
+git diff --name-only <base>..<head> \
   | grep -iE '\.(tsx|jsx|vue|svelte|css|scss|less|html|hbs|ejs|astro)$'
 ```
 
@@ -28,7 +29,7 @@ If nothing matches, **no-op**: report "No frontend changes — nothing to review
 
 ## Scope
 
-Review the change under review — by default the branch diff (the `git diff` between `git merge-base HEAD <base>` and `HEAD`), or a path/range the caller specifies. If a spec and plan exist (from `define` / `planning-and-task-breakdown`), review against them; if not (e.g. an external PR), review on frontend quality alone.
+Review the scope you're given — prefer the caller-passed diff scope (pinned `<base>..<head>` range) or any other path/range specified. For scope derivation and fallback, see [`../../references/diff-scope.md`](../../references/diff-scope.md). If a spec and plan exist (from `define` / `planning-and-task-breakdown`), review against them; if not (e.g. an external PR), review on frontend quality alone.
 
 ## Runtime vs. static mode
 

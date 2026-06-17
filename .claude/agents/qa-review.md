@@ -13,7 +13,7 @@ A thin wrapper around the `qa-review` skill, run in a fresh context for independ
 
 ## Gate
 
-1. Pull the diff and read the spec's user stories / acceptance criteria (if a spec exists).
+1. Determine the diff to review. Use the caller-passed diff scope if present (a pinned `<base>..<head>` range per [`../references/diff-scope.md`](../references/diff-scope.md) — `git diff <base>..<head>`); otherwise fall back to `git diff <default-branch>...HEAD` (three-dot form). Then read the spec's user stories / acceptance criteria (if a spec exists).
 2. If there is no behavior to test (docs/config/formatting only), say so and stop.
 
 ## Review

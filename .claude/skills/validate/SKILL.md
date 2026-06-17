@@ -25,9 +25,23 @@ Before spawning any review agent, run [`project-checks`](../project-checks/SKILL
 
 Trivial changes (typo, copy, config) don't need the full gate — a quick `senior-review` in-session is enough. Reserve `validate` for real features and risky changes.
 
+## Computing the diff scope
+
+Before each spawn, compute the **branch diff scope** (per [`.claude/references/diff-scope.md`](../../references/diff-scope.md)) and include it in the agent dispatch:
+
+```bash
+BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+base=$(git merge-base HEAD ${BASE:-main})
+head=$(git rev-parse HEAD)
+files=$(git diff --name-only $base $head)
+# Dispatch line: "Diff scope: $base..$head — changed files: $files"
+```
+
+**Recompute at each spawn.** Fix commits move HEAD between rounds — a scope pinned at Round 1 would miss those commits. Recompute `head` and `files` immediately before each `Agent(...)` call so the reviewer sees current HEAD.
+
 ## Round 1 — Senior code review
 
-1. Spawn the **`senior-review` agent** (Agent tool). Pass the spec and plan if they exist, plus the diff scope.
+1. Compute the diff scope (above), then spawn the **`senior-review` agent** (Agent tool). Pass the spec and plan if they exist, plus the computed diff scope.
 2. If it returns findings: fix each exactly as specified, run the test suite to confirm nothing broke, commit the fixes (`Skill(git-commit)` first), and re-spawn the agent.
 3. Repeat until it approves — **max 3 fix iterations**. If the same issues persist after 3, stop and report which remain, what was tried, and your assessment of the root cause. Do not attempt a 4th.
 
@@ -35,7 +49,7 @@ Do not advance to the security review until the senior review approves.
 
 ## Round 2 — Security review
 
-1. Spawn the **`security-scan` agent** (Agent tool). Pass the diff scope (spec and plan if present).
+1. Recompute the diff scope, then spawn the **`security-scan` agent** (Agent tool). Pass the diff scope (spec and plan if present).
 2. If it returns CRITICAL or HIGH findings: fix each exactly as specified, run the test suite to confirm nothing broke, commit the fixes (`Skill(git-commit)` first), and re-spawn the agent.
 3. Repeat until no CRITICAL or HIGH findings remain — **max 3 fix iterations**. If CRITICAL or HIGH findings persist after 3, stop and report which remain, what was tried, and your assessment of the root cause. Do not attempt a 4th. MEDIUM/LOW/INFO findings are surfaced in the summary but do not block advancement.
 
@@ -45,7 +59,7 @@ Do not advance to the design review until the security review reports no CRITICA
 
 Runs **only when the change touches frontend** — component, markup, or style files (`.tsx/.jsx/.vue/.svelte`, CSS/SCSS/Tailwind, HTML/templates). On a non-frontend change, the agent no-ops gracefully ("No frontend changes — nothing to review") and validate skips straight to Round 4; this round never blocks a backend-only or docs-only change.
 
-1. Spawn the **`design-review` agent** (Agent tool) in **runtime mode** — validate reviews your own pre-ship code, so running the app via a browser MCP (the Chrome DevTools MCP, or Playwright as a fallback) is fine. (The agent falls back to static review gracefully when the app can't run or no browser MCP is configured.) Pass the spec and plan if they exist, plus the diff scope.
+1. Recompute the diff scope, then spawn the **`design-review` agent** (Agent tool) in **runtime mode** — validate reviews your own pre-ship code, so running the app via a browser MCP (the Chrome DevTools MCP, or Playwright as a fallback) is fine. (The agent falls back to static review gracefully when the app can't run or no browser MCP is configured.) Pass the spec and plan if they exist, plus the computed diff scope.
 2. If it returns findings: fix each exactly as specified, re-run [`project-checks`](../project-checks/SKILL.md) to confirm nothing broke, commit the fixes (`Skill(git-commit)` first), and re-spawn the agent.
 3. Repeat until it approves — **max 3 fix iterations**, same stop rule as Round 1: if the same issues persist after 3, stop and report which remain, what was tried, and your assessment of the root cause. Do not attempt a 4th.
 
@@ -53,7 +67,7 @@ Do not advance to QA until the design review approves (or is skipped as a non-fr
 
 ## Round 4 — QA review
 
-1. Spawn the **`qa-review` agent**. It runs the e2e suite first (graceful when none exists), then audits coverage and test quality.
+1. Recompute the diff scope, then spawn the **`qa-review` agent**. Pass the diff scope. It runs the e2e suite first (graceful when none exists), then audits coverage and test quality.
 2. If it returns **Gaps**: fix each, run the suite, verify coverage holds, commit, and re-spawn — **max 3 iterations**, same stop rule as Round 1.
 3. If it returns **Blocked** (e2e couldn't reach green in 3 attempts, or a required runtime is missing): stop and report; don't force an approval.
 4. **Green-suite gate:** if QA reports Approved but the final state wasn't "e2e green (or absent-and-noted)," treat it as a defect and re-spawn with the gap called out (counts against the Round 4 cap).

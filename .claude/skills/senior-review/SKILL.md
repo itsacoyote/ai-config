@@ -16,14 +16,9 @@ Trivial changes where the diff is self-evidently correct (a typo, a copy tweak, 
 
 ## Scope
 
-Review the change under review — by default the branch diff:
+Review the scope you're given — prefer the caller-passed diff scope (pinned `<base>..<head>` range) or any other path/range specified. For scope derivation and fallback behavior, see [`../../references/diff-scope.md`](../../references/diff-scope.md).
 
-```bash
-BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-git diff $(git merge-base HEAD ${BASE:-main}) HEAD
-```
-
-Or a path/range the user specifies. If a spec and plan exist (from `define` / `planning-and-task-breakdown`), review against them; if not (e.g. an external change), review on engineering quality alone.
+If a spec and plan exist (from `define` / `planning-and-task-breakdown`), review against them; if not (e.g. an external change), review on engineering quality alone.
 
 ## The review passes
 
