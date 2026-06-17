@@ -13,6 +13,10 @@ Run this **from the main session** — it spawns the `senior-review`, `security-
 
 `autorun` calls this skill as its always-run end-of-run review pass, and reuses its loop shape (bounded fix iterations) for per-task reviews of risky tasks.
 
+**Preflight (required).** Before doing any workflow work, verify beads is set up:
+`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
+
 ## Pre-flight — mechanical checks first
 
 Before spawning any review agent, run [`project-checks`](../project-checks/SKILL.md) once over the change — typecheck, lint, format, spell, tests, discovered from the project. Fix (or auto-fix) anything red **before** Round 1. A failing mechanical check means a review round would be wasted on noise that the pipeline would reject anyway, so fail fast and cheap here. Only proceed to the senior review once the tree is green.
@@ -58,6 +62,6 @@ Do not advance to QA until the design review approves (or is skipped as a non-fr
 
 Produce a validation summary: senior verdict + fix-iteration count; security verdict (highest severity found, fix-iteration count, and any unresolved MEDIUM/LOW/INFO items); design verdict + fix-iteration count (or "skipped — no frontend changes"); QA verdict, coverage, fix-iteration count, and the e2e result; each finding that required a fix and what resolved it; any evidence captured.
 
-Record per the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone, present the summary in-session; beads-enhanced, record it on the feature epic and close out resolved finding issues.
+Record the validation summary on the feature epic and close out resolved finding issues — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
 Then push the branch (`git push`) to flush any fix commits made during the rounds. Hand off to the `document` skill for the final documentation pass and PR (see `feature-workflow`).

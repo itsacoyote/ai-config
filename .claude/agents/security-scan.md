@@ -1,6 +1,6 @@
 ---
 name: security-scan
-description: Use when running a standalone security audit during Validate — a read-only scan of the branch diff for vulnerabilities, returning findings with suggested fixes. Spawn from the main session at the Validate gate (or on demand for security-sensitive changes). Distinct from pr-security, which reviews a PR diff via gh pr diff in the PR-review context; this agent reviews the branch diff via git merge-base in the Validate context. Read-only — reviews and reports, does not change code.
+description: Use when running an independent security audit during Validate — a read-only scan of the branch diff for vulnerabilities, returning findings with suggested fixes. Spawn from the main session at the Validate gate (or on demand for security-sensitive changes). Distinct from pr-security, which reviews a PR diff via gh pr diff in the PR-review context; this agent reviews the branch diff via git merge-base in the Validate context. Read-only — reviews and reports, does not change code.
 model: opus
 skills:
   - security-scan
@@ -49,4 +49,4 @@ Close with a status from
 the human (no `AskUserQuestion`) and cannot spawn subagents (no `Agent`), so you **always return a
 status, never hang.** When you can't proceed, pick `NEEDS_CONTEXT` or `BLOCKED` and explain.
 
-Record findings per the dual-mode beads contract in [`.claude/references/beads.md`](../references/beads.md) only when the caller asks; by default just return them.
+Record findings per the beads contract in [`.claude/references/beads.md`](../references/beads.md) only when the caller asks; by default just return them.

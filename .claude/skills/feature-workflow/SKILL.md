@@ -35,7 +35,11 @@ Each step has a clear entry/exit; advance only when the previous step's output i
 
 ## State and handoff
 
-State flows through **beads** when it's set up, and conversationally when it isn't — every step skill follows the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md). There is no `.docs/` folder and no `context.yaml`; beads (or the conversation) is the system of record.
+**Preflight (required).** Before doing any workflow work, verify beads is set up:
+`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
+
+State flows through **beads** (required) — see [`.claude/references/beads.md`](../../references/beads.md) for the full model. There is no `.docs/` folder and no `context.yaml`; beads is the system of record.
 
 ## Scope
 

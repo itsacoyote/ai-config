@@ -114,7 +114,7 @@ Grade every finding with exactly one of `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` /
   - **What** — the precise problem
   - **Fix** — exactly what to change, not a vague suggestion
 
-Record findings per the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone, present them in the session; beads-enhanced, file an issue per unresolved finding linked to the feature epic/task.
+File an issue per unresolved finding linked to the feature epic/task (see [`.claude/references/beads.md`](../../references/beads.md)).
 
 ## Read-only
 

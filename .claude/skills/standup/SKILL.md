@@ -25,22 +25,18 @@ Default to the **last 24 hours**. The window is arbitrary — honor whatever the
 
 Pull from the richest source available. **Check for beads first**, then fill gaps with git, PRs, and notes. Cross-reference — a closed beads issue plus its commits tells a fuller story than either alone.
 
-### 1. Beads first (if available)
+### 1. Beads
 
-Detect per the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
+**Preflight (required).** Before doing any workflow work, verify beads is set up:
+`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
-```bash
-test -d .beads && command -v bd >/dev/null 2>&1 && echo "beads-enhanced" || echo "standalone"
-```
-
-When **beads-enhanced**, it's the primary source of truth. Read (never mutate):
+Beads is the primary source of truth. Read (never mutate):
 
 - **Done** — issues closed within the window. Check `bd --help` / `bd list --help` for a status + time filter; fall back to `bd list` and read the timestamps.
 - **In progress** — issues currently `in_progress` (where you left off), and any `blocked` ones with their blockers.
 - **Next** — `bd ready` for unblocked issues ready to pick up, highest priority first.
 - Open `bd show <id>` on the few most relevant issues for titles and context. Don't invent IDs — read them from `bd` output.
-
-When **standalone**, skip `bd` entirely and rely on the sources below.
 
 ### 2. Git — what was actually written
 

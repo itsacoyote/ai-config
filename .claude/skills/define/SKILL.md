@@ -54,10 +54,12 @@ Avoid TBDs/TODOs/placeholders and contradictions between sections.
 
 ## Recording the spec
 
-Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md):
+**Preflight (required).** Before doing any workflow work, verify beads is set up:
+`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
-- **Standalone (default):** present the finished spec in the conversation. It is the working record for Research and Plan.
-- **Beads-enhanced:** create the feature **epic** with the spec as its body.
+Create the feature **epic** with the spec as its body — beads is the system of record.
+See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
 Do not write step-doc files — there is no `.docs/`.
 

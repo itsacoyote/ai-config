@@ -43,7 +43,11 @@ For each slice:
 
 ## Working from a plan
 
-When a plan exists (from `planning-and-task-breakdown`), implement its tasks in dependency order, one task per increment. Follow the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): **standalone**, work down the plan's task list; **beads-enhanced**, pull the next task with `bd ready`, `bd update <id> --claim` before starting it, and `bd close <id>` once its commit lands. Maintain test coverage as you go — don't defer tests to the end (see `writing-tests`).
+**Preflight (required).** Before doing any workflow work, verify beads is set up:
+`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
+
+When a plan exists (from `planning-and-task-breakdown`), implement its tasks in dependency order, one task per increment. Pull the next task with `bd ready`, `bd update <id> --claim` before starting it, and `bd close <id>` once its commit lands — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model. Maintain test coverage as you go — don't defer tests to the end (see `writing-tests`).
 
 ### Review checkpoints (optional)
 

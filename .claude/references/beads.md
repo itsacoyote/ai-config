@@ -3,8 +3,9 @@
 Single source of truth for how the workflow skills (`define`, `research`,
 `planning-and-task-breakdown`, `plan-review`, `incremental-implementation`, `efficiency-review`,
 `senior-review`, `security-scan`, `design-review`, `qa-review`, `validate`, `document`, `standup`)
-use **beads** as the project's task tracker and system of record. Skills point here instead of restating the model —
-when the beads model changes, this file is the only edit.
+use **beads** as the project's task tracker and system of record. Beads is a **hard requirement**
+for the workflow — skills point here instead of restating the model, and when the beads model
+changes, this file is the only edit.
 
 Beads: <https://github.com/gastownhall/beads>. CLI is `bd`. To install and
 initialize it in a project, use the **`setup-beads`** skill.
@@ -20,29 +21,34 @@ truth.** `dolt.auto-commit` (on by default) makes a *local* Dolt commit after wr
 default. In the recommended personal/local setup, `.beads/` is git-ignored entirely
 and nothing syncs anywhere.
 
-## Dual-mode contract (read this first)
+## Beads is required (read this first)
 
-Every workflow skill runs in one of two modes, decided by whether beads is set up:
+Beads is a **hard requirement** for the workflow. Every workflow skill assumes beads is
+present and does not fall back to conversational tracking.
+
+### Preflight gate
+
+Before doing any workflow work, every skill must verify beads is set up:
 
 ```bash
-# Detection — beads is active only if BOTH are true:
-test -d .beads && command -v bd >/dev/null 2>&1 && echo "beads-enhanced" || echo "standalone"
+test -d .beads && command -v bd >/dev/null 2>&1
 ```
 
-- **Standalone (default).** `.beads/` is absent or `bd` is not installed. The skill
-  works fully **conversationally** — it presents its output (spec, task list,
-  findings, summary) in the session for the user to act on. **Never run `bd` in this
-  mode.** Nothing is lost: the work is real, it's just tracked in the conversation
-  and git instead of beads.
-- **Beads-enhanced.** `.beads/` exists and `bd` is on PATH. The skill additionally
-  records its output as beads issues using the model below.
+If the check fails, **stop** — do not proceed without beads — and tell the user to run
+the `setup-beads` skill, then retry.
 
-A skill must never block, error, or degrade in quality because beads is missing.
-Beads is an enhancement, not a dependency.
+The canonical copy-pasteable block for embedding in step skills:
+
+> **Preflight (required).** Before doing any workflow work, verify beads is set up:
+> `test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+> proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
+
+`setup-beads` and `bd-cleanup` are exempt — they are the bootstrap and maintenance paths
+and cannot require what they install.
 
 ## The feature model
 
-When beads is active, a feature maps onto the issue graph like this:
+A feature maps onto the issue graph like this:
 
 | Workflow concept | Beads representation |
 |---|---|
@@ -59,7 +65,6 @@ Status vocabulary: `open` → `in_progress` → `blocked` → `closed`. Priority
 ## Command cheat sheet
 
 ```bash
-bd prime                               # inject current beads context (run at session start)
 bd ready                               # list unblocked issues ready to start
 bd create "Title" -p 1 -t epic         # create an issue (epic, feature, or task)
 bd create "Task title" -p 1 -t task --parent <epic-id>   # create a child task
@@ -106,7 +111,7 @@ Hard-won details when an agent (not a human) runs `bd`:
   The usual cause is Dolt commit history, not issue count, so `bd admin compact --dolt`
   (non-destructive) is typically the fix.
 
-## How each step uses beads (when active)
+## How each step uses beads
 
 - **Define** → create the feature **epic** with the spec as its body; record the
   approval in the epic.
@@ -131,13 +136,14 @@ Hard-won details when an agent (not a human) runs `bd`:
 
 ## Guardrails
 
-- **Never run `bd` until `.beads/` exists.** Detect first (snippet above). If beads
-  isn't set up and the user wants it, point them at the `setup-beads` skill.
+- **Never run `bd` until the preflight passes.** Run the detection snippet first. If
+  beads is not set up, redirect the user to the `setup-beads` skill — do not proceed.
 - **Never auto-close or auto-transition** issues the user owns without surfacing it.
 - **Don't invent issue IDs.** Read them back from `bd` output (e.g. capture the ID
   printed by `bd create`).
-- If a `bd` command fails, report the stderr and fall back to standalone (present the
-  result conversationally) — don't halt the workflow.
+- If a `bd` command fails, **report the stderr to the user** — do not silently swallow
+  the error or continue as though the command succeeded. Surface the failure and let the
+  user decide how to proceed.
 - In the recommended personal/local setup there is **no remote and no push** — don't
   run `bd dolt push` / `bd dolt remote add` unless the project was deliberately set up
   in tracked mode (see `setup-beads`).

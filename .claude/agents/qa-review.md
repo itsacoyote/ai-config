@@ -24,4 +24,4 @@ The skill's e2e fix loop is the one case where this agent may edit and commit co
 
 ## Return
 
-Return the skill's verdict: **Approved** / **Gaps** / **Blocked**, with the specifics (gaps as type + what's missing + the required test; Blocked with the per-attempt e2e log). Record findings per the dual-mode contract in `.claude/references/beads.md` only if the caller asks.
+Return the skill's verdict: **Approved** / **Gaps** / **Blocked**, with the specifics (gaps as type + what's missing + the required test; Blocked with the per-attempt e2e log). Record findings per the beads contract in `.claude/references/beads.md` only if the caller asks.
