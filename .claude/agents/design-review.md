@@ -1,6 +1,6 @@
 ---
 name: design-review
-description: Independent frontend/UX/accessibility review in an isolated context. Reviews a frontend diff for component reuse, design-system correctness, component architecture, cross-component state/data flow, UX, and accessibility, then returns a verdict. Spawn from the main session (e.g. during Validate or as pr-review's frontend pass). Read-only on code — it reviews and reports, it does not change code.
+description: Use when reviewing a frontend diff for component reuse, design-system correctness, UX, and accessibility — at Validate or as pr-review's frontend pass.
 model: opus
 skills:
   - design-review

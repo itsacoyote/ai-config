@@ -1,6 +1,6 @@
 ---
 name: pr-security
-description: Use when running the security pass of a PR review — a read-only audit of the PR diff for vulnerabilities, returning findings with suggested comment text. Spawn from the pr-review orchestrator in parallel with the senior and test passes, after pr-context. Read-only by tool definition — it audits and reports, it never edits code, applies patches, commits, posts, or touches the PR or repo.
+description: Use when running the security pass of a PR review — audits the PR diff for vulnerabilities and returns findings with suggested comment text.
 model: opus
 skills:
   - security-scan

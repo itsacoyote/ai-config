@@ -1,6 +1,6 @@
 ---
 name: efficiency-review
-description: Use when you want a fast, read-only review of ONE task's recently-changed code for YAGNI, simplification, and clarity/naming — scoped to the task diff, not the full branch. Spawn from the main session after an implementer agent finishes a single task. Does not cover correctness, security, or test coverage.
+description: Use when reviewing ONE task's recently-changed code for YAGNI, simplification, and clarity/naming — scoped to the task diff, not the full branch (unlike senior-review).
 model: sonnet
 skills:
   - efficiency-review

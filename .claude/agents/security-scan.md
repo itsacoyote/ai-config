@@ -1,6 +1,6 @@
 ---
 name: security-scan
-description: Use when running an independent security audit during Validate — a read-only scan of the branch diff for vulnerabilities, returning findings with suggested fixes. Spawn from the main session at the Validate gate (or on demand for security-sensitive changes). Distinct from pr-security, which reviews a PR diff via gh pr diff in the PR-review context; this agent reviews the branch diff via a caller-passed scope (merge-base fallback) in the Validate context. Read-only — reviews and reports, does not change code.
+description: Use when running an independent security audit during Validate — scans the branch diff for vulnerabilities and returns findings with suggested fixes. Distinct from pr-security, which audits a PR diff in the PR-review context.
 model: opus
 skills:
   - security-scan

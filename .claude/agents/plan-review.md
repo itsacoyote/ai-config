@@ -1,6 +1,6 @@
 ---
 name: plan-review
-description: Independent staff-engineer design review of the spec + plan in an isolated context, before any code is written. Reviews approach, decomposition, interfaces, reuse, risk, spec-alignment, and sequencing, then returns a severity-gated verdict. Spawn from the main session at the Plan → Implement boundary (by autorun after Plan, or manually). Read-only on code — it reviews and reports, it does not write code or edit the plan.
+description: Use when reviewing a spec and plan before implementation begins — at the Plan → Implement boundary, after the task breakdown and before any code is written.
 model: opus
 skills:
   - plan-review

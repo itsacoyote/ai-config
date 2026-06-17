@@ -1,6 +1,6 @@
 ---
 name: pr-tests
-description: Use when running the test-quality pass of a PR review — a read-only review of whether the PR's changed behavior is covered and whether its tests are meaningful, returning findings with suggested comment text. Spawn from the pr-review orchestrator in parallel with the security and senior passes, after pr-context. Read-only by tool definition — it reads and reports, it never runs, edits, or commits tests, and never touches the PR or repo.
+description: Use when running the test-quality pass of a PR review — reads the PR diff and reports whether the changed behavior is meaningfully covered, with suggested comment text.
 model: opus
 skills:
   - writing-tests
