@@ -157,9 +157,10 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 |-----------|---------|
 | `beads.md` | every workflow skill (the beads-required tracking contract) |
 | `diff-scope.md` | the review agents + `validate`/`autorun` (how a spawner pins the change-under-review and passes it to reviewers) |
+| `review-agent-contract.md` | the six review agents (`security-scan`, `senior-review`, `efficiency-review`, `qa-review`, `design-review`, `plan-review`) — the shared read-only/return-status contract; return shape stays agent-specific |
 | `testing-patterns.md` | `writing-tests` |
 | `accessibility-checklist.md`, `performance-checklist.md` | `frontend-ui-engineering` |
-| `security-checklist.md` | `security-and-hardening` |
+| `security-checklist.md` | `security-and-hardening` (quick-ref; the canonical preventive inventory lives in the `security-and-hardening` skill, detective signals in `security-scan`) |
 
 ---
 
