@@ -72,7 +72,7 @@ Cut anything beyond what's required: unused params/options/config, abstraction l
 
 **If it passes**, state "Senior review approved" with one or two sentences on what was reviewed and held up.
 
-Record findings per the dual-mode contract in [`.claude/references/beads.md`](../../references/beads.md): standalone, present them in the session; beads-enhanced, file an issue per unresolved finding linked to the feature epic/task.
+File an issue per unresolved finding linked to the feature epic/task (see [`.claude/references/beads.md`](../../references/beads.md)).
 
 ## Non-negotiables
 
