@@ -12,12 +12,11 @@ A thin wrapper around the `senior-review` skill. Your value is the fresh context
 
 ## Gate
 
-1. Determine the change under review. Default to the branch diff:
+1. Determine the change under review. If the caller passed a diff scope (a pinned `<base>..<head>` range per [`../references/diff-scope.md`](../references/diff-scope.md)), use it directly — `git diff <base>..<head>`. If the caller passed any other path or range (e.g. a `gh pr diff` scope), review that instead. If nothing was passed, fall back to the branch diff:
    ```bash
    BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
    git diff $(git merge-base HEAD ${BASE:-main}) HEAD
    ```
-   If the caller passed a path or range, review that instead.
 2. If there is no diff, stop and report "nothing to review."
 3. If a spec/plan was provided or exists in the repo, read it and review against it; otherwise review on engineering quality alone.
 

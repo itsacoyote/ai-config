@@ -44,10 +44,10 @@ Follow these steps **in order** every time:
 
 ### Step 1 — Scope Resolution
 
-Determine what to scan:
+Determine what to scan — review the scope you're given; see [`../../references/diff-scope.md`](../../references/diff-scope.md) for derivation and fallback details:
 
-- **When reviewing branch changes (default)**: scan the files changed in the current branch (`git diff main...HEAD --name-only`). Cross-file data flow analysis (Step 5) may read adjacent files for context, but the primary scan targets the diff.
-- **When called with a path**: scan only that scope
+- **When a diff scope is passed** (pinned `<base>..<head>` range): use it directly — `git diff --name-only <base>..<head>`. If any other path or range is passed, use that instead.
+- **When reviewing branch changes (default fallback)**: scan the files changed in the current branch. Cross-file data flow analysis (Step 5) may read adjacent files for context, but the primary scan targets the diff.
 - **When called with no path**: scan the entire project from the root
 - Identify the language(s) and framework(s) in use (check `package.json`, `Gemfile`, etc.)
 - Read `references/language-patterns.md` to load language-specific vulnerability patterns

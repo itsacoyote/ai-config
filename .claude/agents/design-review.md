@@ -14,12 +14,11 @@ A thin wrapper around the `design-review` skill, run in a fresh context for inde
 
 ## Gate
 
-1. Determine the change under review. Default to the branch diff:
+1. Determine the change under review. If the caller passed a diff scope (a pinned `<base>..<head>` range per [`../references/diff-scope.md`](../references/diff-scope.md)), use the file list from the scope line directly (or run `git diff --name-only <base>..<head>`) — no need to re-derive. If the caller passed any other path or range (e.g. a `gh pr diff` scope), review that instead. If nothing was passed, fall back to the branch diff:
    ```bash
    BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
    git diff --name-only $(git merge-base HEAD ${BASE:-main}) HEAD
    ```
-   If the caller passed a path or range, review that instead.
 2. **If the diff has no frontend changes** — no component, markup, or style files (`.tsx/.jsx/.vue/.svelte`, CSS/SCSS/Tailwind, HTML/templates) — say so and **stop**: "No frontend changes — nothing to review." This is a graceful no-op, not a failure, and never blocks.
 3. If a spec/plan was provided or exists in the repo, read it and review against it; otherwise review on frontend quality alone.
 

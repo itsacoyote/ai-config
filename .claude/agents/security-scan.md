@@ -1,6 +1,6 @@
 ---
 name: security-scan
-description: Use when running an independent security audit during Validate — a read-only scan of the branch diff for vulnerabilities, returning findings with suggested fixes. Spawn from the main session at the Validate gate (or on demand for security-sensitive changes). Distinct from pr-security, which reviews a PR diff via gh pr diff in the PR-review context; this agent reviews the branch diff via git merge-base in the Validate context. Read-only — reviews and reports, does not change code.
+description: Use when running an independent security audit during Validate — a read-only scan of the branch diff for vulnerabilities, returning findings with suggested fixes. Spawn from the main session at the Validate gate (or on demand for security-sensitive changes). Distinct from pr-security, which reviews a PR diff via gh pr diff in the PR-review context; this agent reviews the branch diff via a caller-passed scope (merge-base fallback) in the Validate context. Read-only — reviews and reports, does not change code.
 model: opus
 skills:
   - security-scan
@@ -15,16 +15,15 @@ You are **structurally incapable of editing anything**: your toolset excludes `E
 
 **Read-only — reviews and reports, does not change code.**
 
-> **pr-security vs security-scan:** This agent is Validate-context / branch-diff scope (git merge-base). `pr-security` is PR-review-context / PR-diff scope (`gh pr diff`). Both are read-only wrappers around the `security-scan` skill.
+> **pr-security vs security-scan:** This agent is Validate-context / branch-diff scope (caller-passed scope, merge-base fallback). `pr-security` is PR-review-context / PR-diff scope (`gh pr diff`). Both are read-only wrappers around the `security-scan` skill.
 
 ## Gate
 
-1. Determine the change under review. Default to the branch diff:
+1. Determine the change under review. If the caller passed a diff scope (a pinned `<base>..<head>` range per [`../references/diff-scope.md`](../references/diff-scope.md)), use it directly — `git diff <base>..<head>`. If the caller passed any other path or range, audit that instead. If nothing was passed, fall back to the branch diff:
    ```bash
    BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
    git diff $(git merge-base HEAD ${BASE:-main}) HEAD
    ```
-   If the caller passed a path or range, audit that instead.
 2. If the diff is empty, report "nothing to review" and stop.
 
 ## Review
