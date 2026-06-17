@@ -30,11 +30,11 @@ Define ──▶ Research ──▶ Plan ──▶ Implement ──▶ Validate 
 
 Run the steps in order; advance only when the previous step's output is in hand. Skip the whole thing for trivial changes — it earns its keep on real features where a missed requirement or skipped review is expensive. Start with `feature-workflow` if you want the full map.
 
-### Tracking: works with or without beads
+### Tracking: requires beads
 
-State and tasks flow through **[beads](https://github.com/gastownhall/beads)** (the `bd` CLI) when it's set up, and **conversationally** when it isn't. Every workflow skill follows the dual-mode contract in [`.claude/references/beads.md`](.claude/references/beads.md): fully usable standalone, and better when beads exists (a feature becomes an epic, plan tasks become child issues, review findings become issues). There is no `.docs/` folder or `context.yaml` — beads (or the conversation) is the system of record.
+State and tasks flow through **[beads](https://github.com/gastownhall/beads)** (the `bd` CLI) — it is required. Workflow skills hard-stop and redirect to `setup-beads` when beads is absent. A feature becomes an epic, plan tasks become child issues, review findings become issues. There is no `.docs/` folder or `context.yaml` — beads is the system of record.
 
-To turn beads on for a project, run the **`setup-beads`** skill — it installs `bd`, initializes an isolated local database, and keeps it out of git by default.
+Run the **`setup-beads`** skill to install `bd` and initialize an isolated local database (nothing committed by default). The committed session-start gate hook (`.claude/hooks/beads-gate.sh`) warns when beads is missing and injects current task context when it's present.
 
 ---
 
@@ -155,7 +155,7 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 
 | Reference | Used by |
 |-----------|---------|
-| `beads.md` | every workflow skill (the dual-mode tracking contract) |
+| `beads.md` | every workflow skill (the beads-required tracking contract) |
 | `testing-patterns.md` | `writing-tests` |
 | `accessibility-checklist.md`, `performance-checklist.md` | `frontend-ui-engineering` |
 | `security-checklist.md` | `security-and-hardening` |
@@ -186,9 +186,9 @@ orchestrator. See the `feature-workflow` skill for the map.
 
 ## Task tracking
 
-If [beads](https://github.com/gastownhall/beads) is set up (`.beads/` exists),
-the workflow records features/tasks/findings as beads issues. If not, it runs
-conversationally — both work. Run the `setup-beads` skill to enable it. See
+[beads](https://github.com/gastownhall/beads) is required — the workflow records
+features/tasks/findings as beads issues and hard-stops when beads is absent. Run
+the `setup-beads` skill to install and initialize it. See
 `.claude/references/beads.md`.
 
 ## Conventions

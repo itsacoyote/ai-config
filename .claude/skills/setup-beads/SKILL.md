@@ -1,6 +1,6 @@
 ---
 name: setup-beads
-description: Use when setting up beads (the `bd` issue tracker) in a project so the workflow skills can track tasks — installs `bd` if missing, runs an isolated local `bd init`, keeps `.beads/` out of git, and optionally wires the `bd prime` session-start hook. Developer-invoked one-time setup; defaults to personal/local use with nothing committed.
+description: Use when setting up beads (the `bd` issue tracker) in a project so the workflow skills can track tasks — installs `bd` if missing, runs an isolated local `bd init`, and keeps `.beads/` out of git. Required by all workflow skills; this is the bootstrap. Developer-invoked one-time setup; defaults to personal/local use with nothing committed.
 disable-model-invocation: true
 allowed-tools: Read Write Edit Bash(bd *) Bash(git *) Bash(command -v *) Bash(test *) Bash(ls *) Bash(uname *) Bash(brew *) Bash(npm *)
 ---
@@ -14,7 +14,8 @@ The default it steers toward is **personal, local, isolated use**: the issue dat
 ## When NOT to use
 
 - Beads is already initialized here (`.beads/` exists and `bd ready` works) — there's nothing to set up. Re-run only to change the git mode or the session hook.
-- You don't actually want issue tracking for this project — the workflow skills all run fine standalone without beads (see [`.claude/references/beads.md`](../../references/beads.md)).
+
+Note: beads is now **required** by the workflow skills (they hard-stop and redirect here when `.beads/` is absent). This skill is how you satisfy that requirement — it is the bootstrap and must remain runnable without beads itself.
 
 ## How beads stores data (read this first)
 
@@ -93,21 +94,25 @@ beads ships a `bd setup claude` command, but **avoid it in this config.** It wri
 
 Add `Bash(bd *)` to the `allow` list in **`.claude/settings.local.json`** (project-local, git-excluded under stealth) so the workflow skills can run `bd` smoothly. Use the `update-config` skill for the edit.
 
-## Session-start priming (optional — off by default)
+## Session-start gate hook
 
-`bd prime` injects ~1–2k tokens of beads context at session start — useful, **but** its injected text is opinionated: it instructs the agent not to use `MEMORY.md` or `TaskCreate` and to run a session-close/push protocol, which fights this config's memory system and isolated (no-push) setup. So **don't wire it automatically.**
+A committed `SessionStart` hook (`.claude/hooks/beads-gate.sh`, wired in the committed `.claude/settings.json`) ships as standard in this config. It runs automatically at the start of every session and:
 
-The workflow skills already invoke beads on demand via [`.claude/references/beads.md`](../../references/beads.md) (`bd ready`, `bd prime`, etc.) when doing real workflow work — that's enough, without injecting contradictory guidance into every session.
+- detects whether beads is present (`.beads/` exists, `bd` on PATH)
+- warns and tells the user to run `setup-beads` when beads is absent
+- injects `bd ready` context when beads is present, so the session starts with current task state
 
-If a user explicitly wants auto-priming despite the caveat, add a `SessionStart` (and optionally `PreCompact`) hook running `bd prime --stealth` to **`.claude/settings.local.json`** (git-excluded) via the `update-config` skill — never to the committed `settings.json`.
+**Do NOT wire `bd prime` as an additional hook.** `bd prime` injects ~1–2k tokens of opinionated context that instructs the agent not to use `MEMORY.md` or `TaskCreate` and to run a session-close/push protocol — that fights this config's memory system and isolated (no-push) setup. The committed gate hook is purpose-built and avoids those conflicts.
+
+`Bash(bd *)` permissions still go to **`.claude/settings.local.json`** (git-excluded under stealth) via the `update-config` skill — never to committed settings.
 
 ## Verify and recap
 
 1. `bd version` — confirm the CLI works.
 2. `bd ready` — smoke-test the database (empty list is success: it means beads is initialized with no ready issues yet).
-3. Recap what was configured: install method, mode (local/isolated), `bd init` flags used, that bd's `.gitignore` edit was reverted and `.beads/` is excluded via `.git/info/exclude`, the `Bash(bd *)` permission, and whether a `bd prime` hook was added (default: no).
+3. Recap what was configured: install method, mode (local/isolated), `bd init` flags used, that bd's `.gitignore` edit was reverted and `.beads/` is excluded via `.git/info/exclude`, and the `Bash(bd *)` permission added to `settings.local.json`. Note that the session-start gate hook (`.claude/hooks/beads-gate.sh`) ships committed and is already wired — no action needed.
 
-Then point the user at the next step: the workflow skills now run in **beads-enhanced** mode automatically — `define` creates a feature epic, `planning-and-task-breakdown` files tasks, and so on, per [`.claude/references/beads.md`](../../references/beads.md). Try `define` to start a feature, or `standup` to read current state.
+Then point the user at the next step: the workflow skills now run with beads — `define` creates a feature epic, `planning-and-task-breakdown` files tasks, and so on, per [`.claude/references/beads.md`](../../references/beads.md). Try `define` to start a feature, or `standup` to read current state.
 
 ## What this skill will not do
 

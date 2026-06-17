@@ -28,9 +28,9 @@ When creating or editing skills, follow the `writing-skills` skill, and:
 
 Everything must be self-contained in `.claude/` so it works after a copy-paste into another project. This repo's `CLAUDE.md` is **not** copied — so don't put workflow guidance only here; it belongs in the skills/agents/rules/references that travel. When a skill depends on a `.claude/references/` file, that file must be copied alongside it.
 
-## Workflow state: beads, not files
+## Workflow state: beads is required
 
-This project uses **beads** as the system of record when available, and conversational tracking otherwise — there is **no `.docs/` folder and no `context.yaml`**. Workflow skills must stay dual-mode (fully usable standalone, enhanced when `.beads/` exists) by following `.claude/references/beads.md`. Don't reintroduce step-doc files.
+This project uses **beads** as the system of record — there is **no `.docs/` folder and no `context.yaml`**. Workflow skills hard-stop and redirect to `setup-beads` when beads is absent; there is no standalone/conversational fallback. See [docs/decisions/0001-beads-required.md](docs/decisions/0001-beads-required.md) for the rationale. Don't reintroduce step-doc files.
 
 ## Commits and PRs
 
