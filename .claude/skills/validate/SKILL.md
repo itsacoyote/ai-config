@@ -49,7 +49,7 @@ Do not advance to the security review until the senior review approves.
 
 ## Round 2 — Security review
 
-1. Recompute the diff scope, then spawn the **`security-scan` agent** (Agent tool). Pass the diff scope (spec and plan if present).
+1. Recompute the diff scope, then spawn the **`security-scan` agent** (Agent tool). Pass the diff scope (spec and plan if present). **This round is non-optional and must run as an independent agent.** If the `security-scan` agent can't be dispatched — e.g. it isn't installed in `.claude/agents/` — **stop and report a setup defect**; do **not** fall back to reviewing security inline. An in-context security pass defeats the fresh-context independence the round exists for (it's the same context that may have written the code), and a missing agent is fixed by installing it, not worked around.
 2. If it returns CRITICAL or HIGH findings: fix each exactly as specified, run the test suite to confirm nothing broke, commit the fixes (`Skill(git-commit)` first), and re-spawn the agent.
 3. Repeat until no CRITICAL or HIGH findings remain — **max 3 fix iterations**. If CRITICAL or HIGH findings persist after 3, stop and report which remain, what was tried, and your assessment of the root cause. Do not attempt a 4th. MEDIUM/LOW/INFO findings are surfaced in the summary but do not block advancement.
 
@@ -72,9 +72,22 @@ Do not advance to QA until the design review approves (or is skipped as a non-fr
 3. If it returns **Blocked** (e2e couldn't reach green in 3 attempts, or a required runtime is missing): stop and report; don't force an approval.
 4. **Green-suite gate:** if QA reports Approved but the final state wasn't "e2e green (or absent-and-noted)," treat it as a defect and re-spawn with the gap called out (counts against the Round 4 cap).
 
+## Security backstop — a `security-sensitive` task must not ship unscanned
+
+Round 2 runs unconditionally, so a normal branch diff is already covered. This backstop catches the failure mode where the security round was **skipped or silently inlined** — a missing agent, an interrupted run — while the work included tasks the planner flagged for security. That is exactly how a scan gets lost without anyone noticing.
+
+Before producing the summary, query beads for epic children carrying the `security-sensitive` marker the planning step records (see [`planning-and-task-breakdown`](../planning-and-task-breakdown/SKILL.md)):
+
+```bash
+bd list --json | jq -r '.[] | select((.labels // []) | index("security-sensitive")) | .id'
+# If the planner recorded it as a body marker (`Security-sensitive: yes`) instead of a label, match that line in the issue body.
+```
+
+If that returns nothing, there is nothing extra to assert — proceed. If it returns any task, **completion is blocked until** the validation summary records that Round 2's independent `security-scan` agent actually ran to a no-CRITICAL/HIGH verdict over a diff scope that includes those tasks' files. If Round 2 didn't run, was inlined, or its scope didn't cover them, go back and run it now — do **not** push or hand off to `document`. A `security-sensitive` task shipping without an independent scan is a gate failure, not a warning.
+
 ## Completion
 
-Produce a validation summary: senior verdict + fix-iteration count; security verdict (highest severity found, fix-iteration count, and any unresolved MEDIUM/LOW/INFO items); design verdict + fix-iteration count (or "skipped — no frontend changes"); QA verdict, coverage, fix-iteration count, and the e2e result; each finding that required a fix and what resolved it; any evidence captured.
+Produce a validation summary: senior verdict + fix-iteration count; security verdict (highest severity found, fix-iteration count, and any unresolved MEDIUM/LOW/INFO items) — plus, if the backstop found any `security-sensitive` task, explicit confirmation the independent scan covered it; design verdict + fix-iteration count (or "skipped — no frontend changes"); QA verdict, coverage, fix-iteration count, and the e2e result; each finding that required a fix and what resolved it; any evidence captured.
 
 Record the validation summary on the feature epic and close out resolved finding issues — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
