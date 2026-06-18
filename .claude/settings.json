@@ -21,7 +21,19 @@
       "Bash(git pull *)",
       "Bash(git push *)",
       "Bash(git merge *)",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "Bash(bd --version)",
+      "Bash(bd version *)",
+      "Bash(bd init *)",
+      "Bash(bd doctor *)",
+      "Bash(bd config *)",
+      "Bash(bd create *)",
+      "Bash(bd list *)",
+      "Bash(bd ready *)",
+      "Bash(bd show *)",
+      "Bash(bd blocked *)",
+      "Bash(bd update *)",
+      "Bash(bd close *)"
     ]
   },
   "statusLine": {
