@@ -11,7 +11,7 @@ The last gate before a change ships. Run a senior code review, a security scan, 
 
 Run this **from the main session** — it spawns the `senior-review`, `security-scan`, `design-review`, and `qa-review` agents, and subagents can't spawn subagents. Spawning them in isolated contexts is the point: an independent reviewer that didn't write the code won't rubber-stamp it.
 
-`autorun` calls this skill as its always-run end-of-run review pass, and reuses its loop shape (bounded fix iterations) for per-task reviews of risky tasks.
+`autorun` runs this review pass at the end of its loop — **reading and following this skill directly** (it can't invoke a `disable-model-invocation` skill via the Skill tool), and reusing its loop shape (bounded fix iterations) for per-task reviews of risky tasks.
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
 `test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not

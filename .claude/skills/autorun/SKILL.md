@@ -41,14 +41,21 @@ runs them after Define.
 
 ## The run
 
-1. **Research** — run `research` against the approved spec.
+1. **Research** — read and follow [`research`](../research/SKILL.md) against the approved spec.
 2. **Plan** — run `planning-and-task-breakdown`: file map + dependency-ordered tasks, each
    with a **risk marker** and **skill hints**, recorded as beads child issues under the epic.
 3. **Plan review** — run the `plan-review` gate below (autonomous, not a human gate) before
    any code is written.
 4. **Implement** — the loop below, one task at a time.
-5. **Validate** — run `validate` (the always-run end-of-run review pass).
-6. **Document** — run `document`: update docs, write the PR, `gh pr ready`. **Stop here.**
+5. **Validate** — read and follow [`validate`](../validate/SKILL.md) (the always-run end-of-run review pass).
+6. **Document** — read and follow [`document`](../document/SKILL.md): update docs, write the PR, `gh pr ready`. **Stop here.**
+
+`research`, `validate`, and `document` are `disable-model-invocation` skills — autorun **cannot
+fire them through the Skill tool** (the model can't invoke a `disable-model-invocation` skill, and
+there is no skill-to-skill trigger). Compose each by **reading its `SKILL.md` and following it**
+directly — including spawning the agents that skill directs — so its current content (e.g.
+`validate`'s security backstop) always applies. `planning-and-task-breakdown` is model-invocable
+and runs normally.
 
 Advance only when the previous step's output is in hand. An exception-stop (see below) can
 halt the run at any point and hand control back to the human.
