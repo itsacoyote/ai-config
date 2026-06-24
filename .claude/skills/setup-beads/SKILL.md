@@ -14,6 +14,7 @@ The default it steers toward is **personal, local, isolated use**: the issue dat
 ## When NOT to use
 
 - Beads is already initialized here (`.beads/` exists and `bd ready` works) — there's nothing to set up. Re-run only to change the git mode or the session hook.
+- **You are in a git worktree.** Worktrees share the main repo's single `.beads/` (see "Worktrees share the database" below) — `bd ready` already works there. Never run setup or `bd init` from a worktree; doing so forks the database.
 
 Note: beads is now **required** by the workflow skills (they hard-stop and redirect here when `.beads/` is absent). This skill is how you satisfy that requirement — it is the bootstrap and must remain runnable without beads itself.
 
@@ -86,6 +87,18 @@ grep -q '\.beads/' .git/info/exclude && echo "✓ .beads/ excluded locally"
 
 After this, `git status` should show **nothing** beads-related.
 
+## Worktrees share the database
+
+There is **one `.beads/` per repository**, in the main working tree, and **every git
+worktree shares it** — `bd` resolves the database through the repo's shared git common dir,
+so `bd` run from a worktree reads and writes the main repo's `.beads/`. This is what lets
+parallel sessions reference each other's issues. Two rules protect it:
+
+- **Never `bd init` in a worktree** — it forks a second database that drifts from the main one.
+- **Never add `.beads/**` to `.worktreeinclude`** — Claude Code *copies* (does not symlink)
+  those patterns, so each worktree would get its own fork. Leave `.beads/` out and let the
+  git-common-dir resolution share the one database. See [`.claude/references/beads.md`](../../references/beads.md).
+
 ## Do NOT run `bd setup claude`
 
 beads ships a `bd setup claude` command, but **avoid it in this config.** It writes hooks to the **committed** `.claude/settings.json` and appends a beads section to the **committed** `CLAUDE.md` — and that injected section tells the agent to stop using `MEMORY.md` and the harness task tools (`TaskCreate`/TodoWrite) and to follow a mandatory git-push session protocol. All of that conflicts with how this workflow operates. Wire only what you need, by hand, below.
@@ -123,3 +136,4 @@ Then point the user at the next step: the workflow skills now run with beads —
 - **Never write hooks or permissions to committed settings** — `.claude/settings.local.json` only (git-excluded under stealth).
 - **Never pass `--contributor` or `--team`** — this is personal-use setup.
 - **Never trust a flag it hasn't verified** against `bd <command> --help` — the CLI evolves (e.g. `--skip-agents` does not exist; `-q` only suppresses output).
+- **Never `bd init` in a git worktree or copy `.beads/` into one** — worktrees share the main repo's single database via the git common dir; forking it loses writes.
