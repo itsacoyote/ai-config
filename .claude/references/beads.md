@@ -21,6 +21,24 @@ truth.** `dolt.auto-commit` (on by default) makes a *local* Dolt commit after wr
 default. In the recommended personal/local setup, `.beads/` is git-ignored entirely
 and nothing syncs anywhere.
 
+## Worktrees: one database per repo, shared by all worktrees
+
+There is **one `.beads/` per repository**, living in the main working tree, and **every
+git worktree shares it.** `bd` resolves the database through the repo's shared git common
+dir, so running `bd` from inside a worktree automatically reads and writes the main repo's
+single `.beads/`. This is what lets parallel sessions — each in its own worktree — see and
+reference each other's issues.
+
+To keep that guarantee:
+
+- **Never `bd init` inside a worktree.** It would create a second, forked database that
+  drifts from the main one. If `bd ready` works from the worktree, beads is already wired
+  — that is the shared database, not a missing one to initialize.
+- **Never copy `.beads/` into a worktree.** Claude Code's `.worktreeinclude` *copies*
+  (does not symlink) matched files, so listing `.beads/**` there gives each worktree its own
+  fork — writes diverge and are lost. **Do not add `.beads/**` to `.worktreeinclude`;** rely
+  on the git-common-dir resolution above instead.
+
 ## Beads is required (read this first)
 
 Beads is a **hard requirement** for the workflow. Every workflow skill assumes beads is
