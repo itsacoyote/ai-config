@@ -46,20 +46,27 @@ present and does not fall back to conversational tracking.
 
 ### Preflight gate
 
-Before doing any workflow work, every skill must verify beads is set up:
+Before doing any workflow work, every skill must verify beads is set up by running:
 
 ```bash
-test -d .beads && command -v bd >/dev/null 2>&1
+sh .claude/references/beads-preflight.sh
 ```
 
-If the check fails, **stop** — do not proceed without beads — and tell the user to run
+If it exits non-zero, **stop** — do not proceed without beads — and tell the user to run
 the `setup-beads` skill, then retry.
+
+**Use the script, not a bare `test -d .beads`.** In a git worktree, `.beads/` is absent from
+the worktree's own root (it is deliberately *not* copied — see [worktrees](#worktrees-one-database-per-repo-shared-by-all-worktrees)), yet beads works there via the shared git common dir. A
+`test -d .beads` check therefore *falsely fails* inside worktrees and would wrongly send the
+user to `setup-beads` (which must never run in a worktree). `beads-preflight.sh` resolves
+`.beads` through the git common dir, so it is correct in the main tree, subdirectories, and
+worktrees alike.
 
 The canonical copy-pasteable block for embedding in step skills:
 
-> **Preflight (required).** Before doing any workflow work, verify beads is set up:
-> `test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
-> proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
+> **Preflight (required).** Before doing any workflow work, verify beads is set up by running
+> `sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not proceed
+> without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 `setup-beads` and `bd-cleanup` are exempt — they are the bootstrap and maintenance paths
 and cannot require what they install.

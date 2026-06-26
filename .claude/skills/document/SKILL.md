@@ -48,7 +48,7 @@ Write the PR body following the `create-pr` skill (what/why, no AI attribution).
 ## Completion
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 Commit the documentation changes (`Skill(git-commit)` first; stage explicit paths), push, and ready the PR (`gh pr ready` if it was a draft). When staging, **explicitly include durable docs authored earlier in the workflow that no task commit owns** — above all an **ADR from Define** under `docs/decisions/` (or the project's ADR dir). These are created with `Write` long before this step and are easy to leave untracked.

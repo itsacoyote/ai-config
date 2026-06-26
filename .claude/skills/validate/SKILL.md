@@ -14,7 +14,7 @@ Run this **from the main session** — it spawns the `senior-review`, `security-
 `autorun` runs this review pass at the end of its loop — **reading and following this skill directly** (it can't invoke a `disable-model-invocation` skill via the Skill tool), and reusing its loop shape (bounded fix iterations) for per-task reviews of risky tasks.
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 ## Pre-flight — mechanical checks first

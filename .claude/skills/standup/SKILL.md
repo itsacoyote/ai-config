@@ -28,7 +28,7 @@ Pull from the richest source available. **Check for beads first**, then fill gap
 ### 1. Beads
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 Beads is the primary source of truth. Read (never mutate):

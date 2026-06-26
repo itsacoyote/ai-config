@@ -2,14 +2,27 @@
 name: setup-beads
 description: Use when setting up beads (the `bd` issue tracker) in a project for the first time so workflow skills can track tasks.
 disable-model-invocation: true
-allowed-tools: Read Write Edit Bash(bd *) Bash(git *) Bash(command -v *) Bash(test *) Bash(ls *) Bash(uname *) Bash(brew *) Bash(npm *)
+allowed-tools: Read Write Edit Bash(bd *) Bash(git *) Bash(command -v *) Bash(test *) Bash(ls *) Bash(uname *) Bash(brew *) Bash(npm *) Bash(sh .claude/skills/setup-beads/scripts/setup-beads.sh*) Bash(bash .claude/skills/setup-beads/scripts/setup-beads.sh*)
 ---
 
 # Setup Beads
 
-Stand up [beads](https://github.com/gastownhall/beads) (`bd`) in a project so the workflow skills (`define`, `research`, `planning-and-task-breakdown`, `incremental-implementation`, `validate`, `document`, `standup`) can track features, tasks, and findings as real issues. This is a guided, one-time setup — it asks a couple of questions and applies the right configuration, it is not a fixed script.
+Stand up [beads](https://github.com/gastownhall/beads) (`bd`) in a project so the workflow skills (`define`, `research`, `planning-and-task-breakdown`, `incremental-implementation`, `validate`, `document`, `standup`) can track features, tasks, and findings as real issues.
 
-The default it steers toward is **personal, local, isolated use**: the issue database lives only on this machine, nothing beads-related is committed to the repo, and there is no remote or push. That suits public, private, and shared repos alike — beads stays invisible to everyone else.
+The default — **personal, local, isolated use** — is fully deterministic and lives in a script: the issue database lives only on this machine, nothing beads-related is committed to the repo, and there is no remote or push. That suits public, private, and shared repos alike — beads stays invisible to everyone else. Your job is the two judgment calls the script deliberately leaves out (installing `bd`, and whether the user wants the non-default *tracked* mode); the script does the rest.
+
+## Do this
+
+For the standard local/isolated setup, run the script from the repo root:
+
+```bash
+sh .claude/skills/setup-beads/scripts/setup-beads.sh            # prefix defaults to the dir name
+sh .claude/skills/setup-beads/scripts/setup-beads.sh -p myprefix  # override the issue prefix
+```
+
+It is idempotent and self-guarding. In one pass it: refuses to run in a git worktree, no-ops if `.beads/` already exists, stops with install instructions if `bd` is missing (it never installs software), runs `bd init --stealth --non-interactive`, reverts bd's `.gitignore` edit, ensures the `.git/info/exclude` entries, adds `Bash(bd *)` to `.claude/settings.local.json`, then verifies (`bd version` / `bd ready`) and prints a recap.
+
+**Read the script's output.** If it exits non-zero it tells you exactly why (not a git repo, in a worktree, or `bd` not installed) — handle that condition per the sections below, then re-run. If it succeeds, the recap is your report to the user; relay it. There is nothing to do by hand on the happy path.
 
 ## When NOT to use
 
@@ -29,14 +42,9 @@ Two consequences shape this setup:
 
 **The CLI is large and evolves.** Before relying on any flag below, verify it with `bd <command> --help`. If a flag named here has changed, prefer what `--help` reports.
 
-## Preflight
+## When the script says `bd` is missing
 
-1. Confirm this is a git repository: `git rev-parse --is-inside-work-tree`. If not, tell the user beads can still run but the isolated-mode `.gitignore` step won't apply, and ask whether to continue.
-2. Check whether `bd` is already on PATH: `command -v bd`. If present, run `bd version` and skip to **Initialize**. If absent, go to **Install bd**.
-
-## Install bd
-
-`bd` is not installed. Offer the install methods below and **confirm before running anything** — this installs software on the user's machine.
+The script never installs software — if `bd` is not on PATH it stops and prints the methods below. **Confirm with the user before installing anything** (it touches their machine), then run the chosen command and re-run the script.
 
 | Method | Command |
 |--------|---------|
@@ -44,48 +52,22 @@ Two consequences shape this setup:
 | npm | `npm install -g @beads/bd` |
 | curl (Linux/macOS/FreeBSD) | `curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh \| bash` |
 
-Pick the one matching the user's environment (prefer an already-present package manager). After install, verify with `bd version`. If it fails, surface the error and stop — don't proceed to `bd init`.
+Pick the one matching the user's environment (prefer an already-present package manager). After install, verify with `bd version`. If it fails, surface the error and stop — don't re-run the script.
 
 ## Choose the git mode
 
-Ask which mode the user wants. **Default to Local/isolated** — it's the right answer for personal use and shared repos.
+The script only does the **default, local/isolated** mode. Before running it, confirm that's what the user wants — it's the right answer for personal use and shared repos, so default to it unless they ask otherwise.
 
-- **Local / isolated (default).** Issues live only on this machine. Nothing beads-related is committed; no remote; no push. Achieved with `bd init --stealth`, which configures `.git/info/exclude` (local, never committed). Best for shared/public/private repos where beads is just *your* tracker.
-- **Tracked (advanced).** Issues travel with the repo via a git-backed Dolt remote on the `refs/dolt/data` ref (separate from code branches). Only choose this if the user explicitly wants issues shared through the repo. Setup: after init, `bd dolt remote add origin <repo-url>` and optionally enable `dolt.auto-push`; a fresh clone re-hydrates with `bd bootstrap`. This skill does not push for the user.
+- **Local / isolated (default — the script's job).** Issues live only on this machine. Nothing beads-related is committed; no remote; no push. The script runs `bd init --stealth`, which configures `.git/info/exclude` (local, never committed) so `.beads/` and `.claude/settings.local.json` stay invisible to the repo and collaborators. Best for shared/public/private repos where beads is just *your* tracker.
+- **Tracked (advanced — manual, NOT the script).** Issues travel with the repo via a git-backed Dolt remote on the `refs/dolt/data` ref (separate from code branches). Only choose this if the user explicitly wants issues shared through the repo. Do **not** run the script; instead `bd init` (no `--stealth`), then `bd dolt remote add origin <repo-url>` and optionally enable `dolt.auto-push`; a fresh clone re-hydrates with `bd bootstrap`. Never push for the user without asking.
 
-The rest of this skill assumes **Local/isolated** unless the user picked Tracked.
+### Why stealth, and what the script reverts
 
-## Initialize (local/isolated)
+Useful context if you need to debug a run or do tracked mode by hand:
 
-Initialize in **stealth + non-interactive** mode:
-
-```bash
-bd init --stealth --non-interactive
-```
-
-- `--stealth` — the purpose-built personal-use mode: configures `.git/info/exclude` (local, never committed) so `.beads/` and `.claude/settings.local.json` stay invisible to the repo and collaborators. This — not a tracked `.gitignore` — is how "nothing committed" is achieved.
-- `--non-interactive` — skips all prompts (role defaults to `maintainer`; `--contributor`/`--team` are rejected here anyway). Auto-detected for non-TTY, but pass it explicitly.
-- The issue prefix defaults to the directory name (e.g. `ai-config` → `ai-config-<hash>`); pass `-p <prefix>` to override.
-- **Verify flags with `bd init --help` first — they evolve.** Notably there is **no** `--skip-agents`; the `AGENTS.md` profile is `--agents-profile` (default `minimal`, just a pointer to `bd prime`), and `-q/--quiet` only *suppresses output*, it does not skip prompts.
-
-(For **tracked mode**, omit `--stealth`, then add a remote — see "Tracked mode" below.)
-
-## Clean up bd's tracked `.gitignore` edit
-
-Even in stealth mode, `bd init` appends a beads block (`.dolt/`, `*.db`, `.beads-credential-key`) to the repo's **tracked** root `.gitignore`. Since `.git/info/exclude` already hides all of `.beads/`, that block is redundant and would commit beads-related lines — so remove it:
-
-```bash
-git diff .gitignore         # confirm the only change is bd's "# Beads / Dolt files" block
-git checkout -- .gitignore  # revert if that block is the sole change
-```
-
-If `.gitignore` had other unstaged edits, delete just the bd-added block by hand instead of reverting the whole file. Then confirm the local exclude is in place:
-
-```bash
-grep -q '\.beads/' .git/info/exclude && echo "✓ .beads/ excluded locally"
-```
-
-After this, `git status` should show **nothing** beads-related.
+- `--stealth` is the purpose-built personal-use mode — `.git/info/exclude` (local, never committed), not a tracked `.gitignore`, is how "nothing committed" is achieved. `--non-interactive` skips prompts (role defaults to `maintainer`).
+- Even in stealth, `bd init` appends a beads block to the **tracked** root `.gitignore`. Since the exclude already hides `.beads/`, that block is redundant and would commit beads-related lines — so the script reverts `.gitignore` to its pre-init content. After a run, `git status` shows **nothing** beads-related.
+- **The CLI is large and evolves — verify flags with `bd <command> --help` before relying on them.** Notably there is **no** `--skip-agents`; the `AGENTS.md` profile is `--agents-profile` (default `minimal`); `-q/--quiet` only *suppresses output*, it does not skip prompts. If a flag the script passes has changed, update the script.
 
 ## Worktrees share the database
 
@@ -103,10 +85,6 @@ parallel sessions reference each other's issues. Two rules protect it:
 
 beads ships a `bd setup claude` command, but **avoid it in this config.** It writes hooks to the **committed** `.claude/settings.json` and appends a beads section to the **committed** `CLAUDE.md` — and that injected section tells the agent to stop using `MEMORY.md` and the harness task tools (`TaskCreate`/TodoWrite) and to follow a mandatory git-push session protocol. All of that conflicts with how this workflow operates. Wire only what you need, by hand, below.
 
-## Let the skills drive bd without prompts
-
-Add `Bash(bd *)` to the `allow` list in **`.claude/settings.local.json`** (project-local, git-excluded under stealth) so the workflow skills can run `bd` smoothly. Use the `update-config` skill for the edit.
-
 ## Session-start gate hook
 
 A committed `SessionStart` hook (`.claude/hooks/beads-gate.sh`, wired in the committed `.claude/settings.json`) ships as standard in this config. It runs automatically at the start of every session and:
@@ -117,15 +95,11 @@ A committed `SessionStart` hook (`.claude/hooks/beads-gate.sh`, wired in the com
 
 **Do NOT wire `bd prime` as an additional hook.** `bd prime` injects ~1–2k tokens of opinionated context that instructs the agent not to use `MEMORY.md` or `TaskCreate` and to run a session-close/push protocol — that fights this config's memory system and isolated (no-push) setup. The committed gate hook is purpose-built and avoids those conflicts.
 
-`Bash(bd *)` permissions still go to **`.claude/settings.local.json`** (git-excluded under stealth) via the `update-config` skill — never to committed settings.
+The script writes the `Bash(bd *)` permission to **`.claude/settings.local.json`** (git-excluded under stealth) using `jq` — never to committed settings. If `jq` is unavailable it says so; add the permission by hand with the `update-config` skill.
 
-## Verify and recap
+## After the script succeeds
 
-1. `bd version` — confirm the CLI works.
-2. `bd ready` — smoke-test the database (empty list is success: it means beads is initialized with no ready issues yet).
-3. Recap what was configured: install method, mode (local/isolated), `bd init` flags used, that bd's `.gitignore` edit was reverted and `.beads/` is excluded via `.git/info/exclude`, and the `Bash(bd *)` permission added to `settings.local.json`. Note that the session-start gate hook (`.claude/hooks/beads-gate.sh`) ships committed and is already wired — no action needed.
-
-Then point the user at the next step: the workflow skills now run with beads — `define` creates a feature epic, `planning-and-task-breakdown` files tasks, and so on, per [`.claude/references/beads.md`](../../references/beads.md). Try `define` to start a feature, or `standup` to read current state.
+The script's recap is your report — relay it (mode, flags, that `.gitignore` was reverted, the exclude and permission, and that the gate hook ships committed). Then point the user at the next step: the workflow skills now run with beads — `define` creates a feature epic, `planning-and-task-breakdown` files tasks, and so on, per [`.claude/references/beads.md`](../../references/beads.md). Try `define` to start a feature, or `standup` to read current state.
 
 ## What this skill will not do
 
