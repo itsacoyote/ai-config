@@ -1,9 +1,9 @@
 ---
 name: standup
-description: Use when returning from a break, a night, or a weekend and you want a read-only recap of recent work — what got done, what's in progress, and what to pick up next — formatted for a standup. Pulls from beads when available, otherwise git history, PRs, and notes.
+description: Use when returning from a break, a night, or a weekend and you want a read-only recap of recent work — what got done, what's in progress, and what to pick up next — formatted for a standup. Requires beads; cross-references git history, PRs, and notes.
 disable-model-invocation: true
 argument-hint: "[time window, e.g. 24h, 3d, since friday]"
-allowed-tools: Read Bash(git log *) Bash(git status*) Bash(git diff *) Bash(git branch *) Bash(git stash list*) Bash(gh pr list *) Bash(gh pr view *) Bash(gh issue list *) Bash(gh run list *) Bash(bd *)
+allowed-tools: Read Bash(sh .claude/skills/standup/scripts/standup-gather.sh*) Bash(bash .claude/skills/standup/scripts/standup-gather.sh*) Bash(git log *) Bash(git status*) Bash(git diff *) Bash(git branch *) Bash(git stash list*) Bash(gh pr list *) Bash(gh pr view *) Bash(gh issue list *) Bash(gh run list *) Bash(bd *)
 ---
 
 # Standup
@@ -17,45 +17,28 @@ Reconstruct what's happened recently and present it as a standup-ready briefing 
 - Mid-task, when you already hold the context — this is for *regaining* lost context, not narrating work you're in the middle of.
 - As a substitute for the real workflow steps — it reports on work, it doesn't plan or do it.
 
-## The time window
+## Gathering the picture (run the script)
 
-Default to the **last 24 hours**. The window is arbitrary — honor whatever the user passes as an argument (`24h`, `3d`, `since friday`, `last week`) and translate it to the right flags (`git log --since=...`, etc.). If a weekend or holiday sits in the window, widen to the last working session rather than reporting "nothing happened." State the window you used at the top of the report.
+Run the gather script — it does the deterministic, **read-only** collection so you don't re-derive the commands. Pass the time window as its argument (default: last 24h):
 
-## Gathering the picture
+```bash
+sh .claude/skills/standup/scripts/standup-gather.sh                 # last 24h
+sh .claude/skills/standup/scripts/standup-gather.sh 3d              # 24h / 3d / 2w
+sh .claude/skills/standup/scripts/standup-gather.sh "since friday"  # or a phrase: "last week", "yesterday"
+```
 
-Pull from the richest source available. **Check for beads first**, then fill gaps with git, PRs, and notes. Cross-reference — a closed beads issue plus its commits tells a fuller story than either alone.
+**Beads is required.** The script gates on it (via `beads-preflight.sh`) and **exits non-zero if beads isn't set up** — if that happens, **stop** and tell the user to run the `setup-beads` skill, then retry. It does not produce a beads-less recap.
 
-### 1. Beads
+When beads is present it dumps, in labeled sections (all read-only — nothing is mutated):
 
-**Preflight (required).** Before doing any workflow work, verify beads is set up:
-`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
-proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
+- **BEADS** — closed issues (Done candidates), `in_progress` (where you left off), `blocked` with blockers, and `bd ready` (Next). Cross-reference a closed issue with its commits for the fuller story; don't invent IDs — read them from the output.
+- **GIT** — commits in the window across branches (filtered to you), current branch, working-tree status, stashes, unpushed commits, and the uncommitted diffstat. The concrete "what got done" and the real "in progress."
+- **PULL REQUESTS / CI** — your open PRs, recently merged (with `mergedAt`), review requests waiting on you, and recent CI runs. Skipped with a note if `gh` is missing or unauthed.
 
-Beads is the primary source of truth. Read (never mutate):
+Two things the script leaves to you:
 
-- **Done** — issues closed within the window. Check `bd --help` / `bd list --help` for a status + time filter; fall back to `bd list` and read the timestamps.
-- **In progress** — issues currently `in_progress` (where you left off), and any `blocked` ones with their blockers.
-- **Next** — `bd ready` for unblocked issues ready to pick up, highest priority first.
-- Open `bd show <id>` on the few most relevant issues for titles and context. Don't invent IDs — read them from `bd` output.
-
-### 2. Git — what was actually written
-
-Works in every project, beads or not:
-
-- **Commits in the window**, across branches: `git log --all --since="<window>" --author="<you>" --pretty=...`. Group by branch. These are the concrete "what got done."
-- **Where you left off**: current branch (`git branch --show-current`), uncommitted changes (`git status -s`), stashes (`git stash list`), and unpushed commits (`git log @{u}.. ` or compare against the remote). This is the real "in progress."
-- Skim `git diff --stat` on uncommitted work to describe it without dumping the diff.
-
-### 3. Pull requests (if `gh` is available and authed)
-
-- **Open PRs** you authored: `gh pr list --author "@me" --state open` — status, review state, CI.
-- **Recently merged**: `gh pr list --author "@me" --state merged --search "merged:>=<date>"` — done work that's landed.
-- **Review requests waiting on you**: `gh pr list --search "review-requested:@me"` — a "next" item and a potential blocker for others.
-- Optionally `gh run list` for the state of recent CI on your branch.
-
-### 4. Notes and context on hand
-
-If the project surfaces other recent signal — a memory/MEMORY index, a changelog, TODOs touched in the window — fold in anything that clarifies *why* the work happened. Label inferences as inferences; don't present a guess as fact.
+- **Window edge cases.** It passes the window straight to git and computes a cutoff for relative windows; `bd` closed and `gh` merged are dumped recent-with-timestamps, so **filter those to the window** during synthesis (the script's header says which). If a weekend or holiday sits in the window and the result is empty, **widen to the last working session** and re-run rather than reporting "nothing happened."
+- **Notes / "why".** Fold in other recent signal the script doesn't gather — a changelog, a memory index, TODOs touched in the window — anything that clarifies *why* the work happened. Label inferences as inferences; don't present a guess as fact.
 
 ## The report
 
@@ -85,6 +68,6 @@ Adapt to what you found: drop a bucket that's genuinely empty (note it briefly r
 
 ## Guardrails
 
-- **Read-only, always.** No writes of any kind. If `bd`, `git`, or `gh` would mutate, don't run it.
-- **Don't fabricate.** If a source is unavailable (no `gh` auth, no beads, shallow clone), say what you couldn't check rather than guessing.
+- **Read-only, always.** The gather script is read-only by construction (it runs only `bd`/`git`/`gh` read commands); keep it that way and never add a write. Any tidying you're tempted to do goes in the report as a suggestion, not an action.
+- **Don't fabricate.** If a source is unavailable (no `gh` auth, shallow clone), say what you couldn't check rather than guessing. (Missing beads stops the run entirely — it doesn't degrade.)
 - **Attribute to the user where it matters** — filter to their commits/PRs for "what *I* did," but note significant work by others in the same window when it affects what they pick up next.
