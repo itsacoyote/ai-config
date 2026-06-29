@@ -14,7 +14,7 @@ Run this **from the main session** — it spawns the `senior-review`, `security-
 `autorun` runs this review pass at the end of its loop — **reading and following this skill directly** (it can't invoke a `disable-model-invocation` skill via the Skill tool), and reusing its loop shape (bounded fix iterations) for per-task reviews of risky tasks.
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 ## Pre-flight — mechanical checks first
@@ -27,17 +27,14 @@ Trivial changes (typo, copy, config) don't need the full gate — a quick `senio
 
 ## Computing the diff scope
 
-Before each spawn, compute the **branch diff scope** (per [`.claude/references/diff-scope.md`](../../references/diff-scope.md)) and include it in the agent dispatch:
+Before each spawn, compute the **branch diff scope** and include the line it prints in the agent dispatch (the script is the single source of this git plumbing — see [`.claude/references/diff-scope.md`](../../references/diff-scope.md)):
 
 ```bash
-BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-base=$(git merge-base HEAD ${BASE:-main})
-head=$(git rev-parse HEAD)
-files=$(git diff --name-only $base $head)
-# Dispatch line: "Diff scope: $base..$head — changed files: $files"
+sh .claude/references/diff-scope.sh
+# prints: Diff scope: <base>..<head> — changed files: …
 ```
 
-**Recompute at each spawn.** Fix commits move HEAD between rounds — a scope pinned at Round 1 would miss those commits. Recompute `head` and `files` immediately before each `Agent(...)` call so the reviewer sees current HEAD.
+**Recompute at each spawn.** Fix commits move HEAD between rounds — a scope pinned at Round 1 would miss those commits. Re-run the script immediately before each `Agent(...)` call so the reviewer sees current HEAD.
 
 ## Round 1 — Senior code review
 

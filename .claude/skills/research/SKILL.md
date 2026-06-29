@@ -61,7 +61,7 @@ Use these skills as needed during research:
 ## Output
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`test -d .beads && command -v bd >/dev/null 2>&1`. If it is NOT, **stop** — do not
+`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 Present findings **conversationally in this session**, using [template.md](template.md) as the structure for what to cover (a findings outline — not a file to write). Don't write step-doc files.

@@ -16,7 +16,18 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-if test -d .beads && command -v bd >/dev/null 2>&1; then
+# Detect beads the worktree-correct way: a worktree's own root has no .beads/
+# (it shares the main tree's via the git common dir), so a bare `test -d .beads`
+# would falsely report "absent" in worktree sessions. Defer to the shared
+# preflight script, with a bare-check fallback if it isn't present.
+preflight="$(dirname "$0")/../references/beads-preflight.sh"
+if [ -f "$preflight" ]; then
+  sh "$preflight" >/dev/null 2>&1 && beads_ok=1 || beads_ok=0
+else
+  { test -d .beads && command -v bd >/dev/null 2>&1; } && beads_ok=1 || beads_ok=0
+fi
+
+if [ "$beads_ok" = 1 ]; then
   # Beads present — inject reminder + bd ready output
   bd_output="$(bd ready 2>&1)"
   context="$(printf 'This project uses beads (bd) as the system of record.\n\n%s' "$bd_output" | jq -Rs .)"

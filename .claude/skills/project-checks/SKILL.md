@@ -1,7 +1,7 @@
 ---
 name: project-checks
 description: Use after implementing a task, or as a pre-flight before the Validate review gate, to run the project's own mechanical quality gates — typecheck, lint, format, spellcheck, tests.
-allowed-tools: Read Glob Grep Bash(test *) Bash(command -v *) Bash(ls *)
+allowed-tools: Read Glob Grep Bash(test *) Bash(command -v *) Bash(ls *) Bash(sh .claude/skills/project-checks/scripts/project-checks.sh*) Bash(bash .claude/skills/project-checks/scripts/project-checks.sh*)
 ---
 
 # Project Checks
@@ -37,46 +37,45 @@ wasted on lint noise.
 - As a substitute for `senior-review` / `qa-review` — green checks don't mean correct or
   well-tested. This gate is necessary, not sufficient.
 
-## Step 1 — Discover what the project actually defines
+## Step 1 — Discover and run the checks
 
-Detect the toolchain; **only run what exists.** Check in this order and stop at the first
-layer that covers a category:
-
-1. **JS/TS — `package.json` scripts.** Read it and look for scripts named (or prefixed)
-   `lint`, `typecheck` / `type-check` / `tsc`, `format` / `format:check` / `fmt`,
-   `spell` / `cspell`, `test`. Use the project's package manager — infer from the lockfile:
-   `pnpm-lock.yaml`→`pnpm`, `yarn.lock`→`yarn`, `bun.lockb`→`bun`, else `npm run`.
-2. **`Makefile` / `Justfile` targets** — `make lint`, `make fmt`, `make check`, `make test`
-   (or `just …`).
-3. **`.pre-commit-config.yaml`** — `pre-commit run --all-files` (or `--files <changed>`)
-   bundles many of these.
-4. **Language-native, when no script wraps them:**
-   - **Rust:** `cargo fmt --check`, `cargo clippy`, `cargo test`
-   - **Go:** `gofmt -l .`, `go vet ./...`, `golangci-lint run`, `go test ./...`
-   - **Python:** `ruff check`, `ruff format --check` (or `black --check`), `mypy`, `pytest`
+Run the script from the repo root. It does the deterministic part: detect the toolchain the
+project actually defines, then run the checks cheapest-first (format → lint → typecheck →
+spell → test), failing fast.
 
 ```bash
-# example probes — adapt to what you find
-test -f package.json && echo "node project"
-command -v pnpm >/dev/null && ls pnpm-lock.yaml 2>/dev/null
+sh .claude/skills/project-checks/scripts/project-checks.sh          # discover + run, fail-fast
+sh .claude/skills/project-checks/scripts/project-checks.sh --list   # discover only — print the plan, run nothing
+sh .claude/skills/project-checks/scripts/project-checks.sh -k       # --keep-going: run all even after a failure
 ```
 
-Report the set you found (e.g. "found: lint, typecheck, test — no format/spell script") before
-running, so it's clear what's covered and what isn't.
+What the script does for you, so you don't re-derive it each time:
 
-## Step 2 — Run, fast checks first
+- **Detects the package manager** from the lockfile (`pnpm-lock.yaml`→`pnpm`, `yarn.lock`→`yarn`,
+  `bun.lockb`→`bun`, else `npm run`).
+- **Only runs what exists**, picking one command per category by precedence: `package.json`
+  script → `Makefile` target → `Justfile` target → language-native (Rust / Go / Python). It
+  prefers non-mutating script variants (`format:check` over `format`) and ignores `*:fix`.
+- **Prints the discovered plan first**, then runs in order. If the project defines nothing, it
+  reports "no project checks found" and exits 0 — that's the graceful skip; don't invent
+  commands or install tooling.
 
-Run cheapest-to-slowest and **fail fast**: format → lint → typecheck → spellcheck → tests.
-A formatting or type break is found in seconds; don't pay for the test suite to learn the code
-doesn't compile.
+The script is **non-mutating** — it runs checks in check mode and reports failures; it does
+**not** auto-fix. That decision (Step 2) is yours. Its exit code is 0 (all passed / nothing to
+run) or 1 (a check failed).
 
-Prefer scoping to the **touched files** when the tool supports it (`eslint <files>`,
-`prettier --check <files>`, `cspell <files>`); fall back to whole-project when it doesn't.
+**Two things the script does not do — apply them yourself when they help:**
 
-Skip a check whose inputs haven't changed since it last passed — re-running an unchanged check
-adds no information (same discipline as `incremental-implementation`'s checklist note).
+- **Scope to touched files** when the tool supports it (`eslint <files>`, `prettier --check
+  <files>`, `cspell <files>`) for a faster pre-commit gate. The script runs the project's own
+  whole-project command; for a tight inner loop you can run a scoped command by hand instead.
+- **Skip a check whose inputs haven't changed** since it last passed — re-running it adds no
+  information (same discipline as `incremental-implementation`'s checklist note).
 
-## Step 3 — On failure: auto-fix, then block
+If a flag or detection looks wrong for this project (the CLI/toolchain evolved), update the
+script — that's the single place the discovery logic lives.
+
+## Step 2 — On failure: auto-fix, then block
 
 1. **Auto-fixable categories — fix first, then re-run the check:**
    - format: `prettier -w`, `ruff format`, `cargo fmt`, `gofmt -w`
