@@ -44,32 +44,42 @@ Diff scope: a1b2c3d4..e5f6a7b8 — changed files: .claude/references/diff-scope.
 
 ## How a spawner computes it
 
+A spawner runs **`diff-scope.sh`** (this directory) — the single source of the resolution
+logic — and copies the line it prints into the agent dispatch. Do not re-derive the
+merge-base inline.
+
 ### Branch scope (validate / end-of-run)
 
-Used when reviewing everything on the current branch relative to the default branch:
+Reviewing everything on the current branch relative to the default branch:
 
 ```bash
-BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-base=$(git merge-base HEAD ${BASE:-main})
-head=$(git rev-parse HEAD)
-files=$(git diff --name-only $base $head)
-# Payload: "Diff scope: $base..$head — changed files: $files"
+sh .claude/references/diff-scope.sh
+# Diff scope: <merge-base>..<HEAD> — changed files: …
 ```
+
+The default branch is resolved from `origin/HEAD` (fallback `main`); override with
+`--base <branch>`.
 
 ### Per-task scope (autorun per-task reviews)
 
-Used when autorun spawns a per-task reviewer after the implementer commits. Pin the
-implementer's commit(s) for that task. For a single-commit task:
+When autorun spawns a per-task reviewer after the implementer commits, pin that task's
+commit(s):
 
 ```bash
-head=$(git rev-parse HEAD)
-base=$(git rev-parse HEAD~1)
-files=$(git diff --name-only $base $head)
-# Payload: "Diff scope: $base..$head — changed files: $files"
+sh .claude/references/diff-scope.sh --task              # single-commit task (base = HEAD~1)
+sh .claude/references/diff-scope.sh --task <first-sha>  # multi-commit task: explicit base autorun knows
 ```
 
-For a multi-commit task, use the explicit SHA range autorun already knows from the
-implementer's return (first commit of the task through `HEAD`).
+For a multi-commit task, pass the first commit of the task (autorun knows it from the
+implementer's return); the range runs through `HEAD`.
+
+### Reading the diff yourself (e.g. document)
+
+A caller that consumes the diff directly rather than dispatching agents gets just the range:
+
+```bash
+git diff "$(sh .claude/references/diff-scope.sh --range)"
+```
 
 ## SHA-resolution boundary (important)
 

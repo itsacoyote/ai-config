@@ -16,8 +16,7 @@ Do not cut corners. "This seems obvious" and "this is a small change" are not re
 Read the full diff — this is the source of truth for what changed:
 
 ```bash
-BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-git diff $(git merge-base HEAD ${BASE:-main}) HEAD
+git diff "$(sh .claude/references/diff-scope.sh --range)"   # base..HEAD via the shared base detection
 git status --porcelain          # also catch untracked/unstaged files the diff above misses
 ```
 
