@@ -1,7 +1,7 @@
 ---
 name: project-checks
 description: Use after implementing a task, or as a pre-flight before the Validate review gate, to run the project's own mechanical quality gates — typecheck, lint, format, spellcheck, tests.
-allowed-tools: Read Glob Grep Bash(test *) Bash(command -v *) Bash(ls *) Bash(sh .claude/skills/project-checks/scripts/project-checks.sh*) Bash(bash .claude/skills/project-checks/scripts/project-checks.sh*)
+allowed-tools: Read Glob Grep Bash(test *) Bash(command -v *) Bash(ls *) Bash(sh ${CLAUDE_SKILL_DIR}/scripts/project-checks.sh*) Bash(bash ${CLAUDE_SKILL_DIR}/scripts/project-checks.sh*)
 ---
 
 # Project Checks
@@ -44,9 +44,9 @@ project actually defines, then run the checks cheapest-first (format → lint �
 spell → test), failing fast.
 
 ```bash
-sh .claude/skills/project-checks/scripts/project-checks.sh          # discover + run, fail-fast
-sh .claude/skills/project-checks/scripts/project-checks.sh --list   # discover only — print the plan, run nothing
-sh .claude/skills/project-checks/scripts/project-checks.sh -k       # --keep-going: run all even after a failure
+sh ${CLAUDE_SKILL_DIR}/scripts/project-checks.sh          # discover + run, fail-fast
+sh ${CLAUDE_SKILL_DIR}/scripts/project-checks.sh --list   # discover only — print the plan, run nothing
+sh ${CLAUDE_SKILL_DIR}/scripts/project-checks.sh -k       # --keep-going: run all even after a failure
 ```
 
 What the script does for you, so you don't re-derive it each time:

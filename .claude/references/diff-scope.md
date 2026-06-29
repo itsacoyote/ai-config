@@ -46,14 +46,16 @@ Diff scope: a1b2c3d4..e5f6a7b8 — changed files: .claude/references/diff-scope.
 
 A spawner runs **`diff-scope.sh`** (this directory) — the single source of the resolution
 logic — and copies the line it prints into the agent dispatch. Do not re-derive the
-merge-base inline.
+merge-base inline. The spawner is a skill, so it invokes the script via
+`${CLAUDE_SKILL_DIR}/../../references/diff-scope.sh` (substituted to the library's
+`references/` at load — works whether the library is project-local or global, from any cwd).
 
 ### Branch scope (validate / end-of-run)
 
 Reviewing everything on the current branch relative to the default branch:
 
 ```bash
-sh .claude/references/diff-scope.sh
+sh ${CLAUDE_SKILL_DIR}/../../references/diff-scope.sh
 # Diff scope: <merge-base>..<HEAD> — changed files: …
 ```
 
@@ -66,8 +68,8 @@ When autorun spawns a per-task reviewer after the implementer commits, pin that 
 commit(s):
 
 ```bash
-sh .claude/references/diff-scope.sh --task              # single-commit task (base = HEAD~1)
-sh .claude/references/diff-scope.sh --task <first-sha>  # multi-commit task: explicit base autorun knows
+sh ${CLAUDE_SKILL_DIR}/../../references/diff-scope.sh --task              # single-commit task (base = HEAD~1)
+sh ${CLAUDE_SKILL_DIR}/../../references/diff-scope.sh --task <first-sha>  # multi-commit task: explicit base autorun knows
 ```
 
 For a multi-commit task, pass the first commit of the task (autorun knows it from the
@@ -78,7 +80,7 @@ implementer's return); the range runs through `HEAD`.
 A caller that consumes the diff directly rather than dispatching agents gets just the range:
 
 ```bash
-git diff "$(sh .claude/references/diff-scope.sh --range)"
+git diff "$(sh ${CLAUDE_SKILL_DIR}/../../references/diff-scope.sh --range)"
 ```
 
 ## SHA-resolution boundary (important)
