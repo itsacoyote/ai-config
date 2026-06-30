@@ -4,7 +4,7 @@ description: Use when a feature involves a third-party tool, API, or library —
 model: sonnet
 skills:
   - web-search
-allowed-tools: Read Bash(find *) Bash(grep *) Bash(bd show *) Bash(bd list *)
+allowed-tools: Read WebSearch WebFetch Bash(find *) Bash(grep *) Bash(bd show *) Bash(bd list *)
 ---
 
 # Research Libraries Agent
