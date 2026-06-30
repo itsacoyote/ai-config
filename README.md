@@ -22,7 +22,7 @@ Define ──▶ Research ──▶ Plan ──▶ Implement ──▶ Validate 
 | Step | Invoke | What it produces |
 |------|--------|------------------|
 | **Define** | `/define` | An approved spec and the feature branch |
-| **Research** | `/research` | Findings: reusable code, gaps, patterns, constraints |
+| **Research** | `/research` | Findings: reuse, patterns, risks — fan-out across parallel lens agents, synthesized |
 | **Plan** | `planning-and-task-breakdown` | A file map + dependency-ordered tasks with named tests |
 | **Implement** | `incremental-implementation` | The change, built task by task, tests passing, committed |
 | **Validate** | `/validate` | Reviews passed (spawns the `senior-review` + `security-scan` + `design-review` (conditional, frontend) + `qa-review` agents), findings fixed |
@@ -47,7 +47,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | Skill | |
 |-------|--|
 | `define` `/cmd` | Collaborative spec dialogue — scope, goals, constraints, acceptance criteria; creates the branch; approval checkpoint |
-| `research` `/cmd` | Study the codebase for a feature — reuse, gaps, patterns, constraints |
+| `research` `/cmd` | Fan-out orchestrator: spawns parallel lens agents (`research-reuse`, `research-patterns`, `research-risks`, and conditional lenses) and synthesizes their findings |
 | `planning-and-task-breakdown` | File map + dependency-ordered tasks with explicit test names |
 | `incremental-implementation` | Build in thin vertical slices, test-and-commit per increment |
 | `validate` `/cmd` | Sequence senior + security + QA review with bounded fix loops |
@@ -60,6 +60,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | Skill | |
 |-------|--|
 | `analyze-code` | Survey a file/module — responsibility, interface, dependencies, reuse |
+| `edge-cases-and-risks` | Surface security-sensitive paths, domain rules, gotchas, and "this bites you if missed" hazards before implementation; advisory awareness notes, not tracked tasks |
 | `find-patterns` | Identify conventions and architectural decisions to stay consistent with |
 | `onboard` | ADR-aware whole-codebase orientation for joining/returning to a project — stack, setup/run/test, architecture, conventions, decisions; in-session plus an opt-in `ONBOARDING.md` |
 | `web-search` | Verify external library/API behavior against versioned official docs |
@@ -132,6 +133,11 @@ Thin wrappers that run a review skill in an **isolated context** — the value i
 | `design-review` | Runs the `design-review` skill; the conditional frontend/UX/a11y pass for `validate` and `pr-review` — returns findings, never edits code |
 | `qa-review` | Runs the `qa-review` skill; owns the e2e run and optional evidence capture |
 | `implementer` | Implements one planned task in isolation (spawned by `autorun`); commits and returns a status — doesn't review or push |
+| `research-reuse` | Read-only Research lens: surveys the codebase for reuse opportunities and gaps — existing utilities, patterns, and abstractions the implementation should leverage |
+| `research-patterns` | Read-only Research lens: surfaces structural and naming conventions, and architecture the implementation must follow |
+| `research-risks` | Read-only Research lens: identifies edge cases, failure modes, and gotchas the implementation plan must address |
+| `research-libraries` | Read-only Research lens: surveys the external library and API landscape (conditional — run only when the feature involves a third-party tool or API) |
+| `research-history` | Read-only Research lens: surfaces prior art, past attempts, and historical decisions from git history (ask-first — run only when the orchestrator requests it) |
 | `pr-context` | Read-only PR-review orientation pass (spawned by `pr-review`); surveys the touched code area and returns a brief the other passes build on — never edits |
 | `pr-security` | Read-only PR-review security pass (spawned by `pr-review`); audits the diff for vulnerabilities and returns findings with suggested comment text — never patches or posts |
 | `pr-tests` | Read-only PR-review test-quality pass (spawned by `pr-review`); checks whether changed behavior is meaningfully covered and returns findings — never runs, edits, or commits tests |
