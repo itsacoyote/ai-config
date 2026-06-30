@@ -45,10 +45,16 @@ Anything about system design, integration points, or constraints that shapes how
 
 ## Key Insights
 
-Distilled observations that affect how this feature should be planned or built. Include anything that would affect sequencing, complexity, or approach.
+Distilled observations that affect how this feature should be planned or built. Include anything that would affect sequencing, complexity, or approach — not risks (those go below).
 
 - Insight 1
 - Insight 2
+
+## Risks & Gotchas
+
+Edge cases, failure modes, and known traps the implementation plan must address. These are attached to the epic as advisory notes, not created as separate issues.
+
+- Risk or gotcha — description and suggested mitigation
 
 ## Artifacts
 
