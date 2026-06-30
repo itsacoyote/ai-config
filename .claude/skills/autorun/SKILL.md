@@ -42,6 +42,10 @@ runs them after Define.
 ## The run
 
 1. **Research** — read and follow [`research`](../research/SKILL.md) against the approved spec.
+   Following `research` fans out to parallel lens agents — spawn them from this context
+   (autorun is already in the main session; subagents can't spawn subagents). The
+   `research-history` (prior-art/history) lens is **skipped by default** under autorun:
+   it requires an ask-first confirmation that can't be answered unattended.
 2. **Plan** — run `planning-and-task-breakdown`: file map + dependency-ordered tasks, each
    with a **risk marker** and **skill hints**, recorded as beads child issues under the epic.
 3. **Plan review** — run the `plan-review` gate below (autonomous, not a human gate) before
