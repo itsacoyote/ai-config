@@ -1,7 +1,7 @@
 ---
 name: research
 description: Analyze the codebase for a feature and present research findings conversationally — reusable code, gaps, patterns, risks, and architectural context. Works standalone or as a pipeline step.
-allowed-tools: Read Bash(find *) Bash(grep *) Bash(git log *) Bash(git show *) Bash(git blame *) Agent
+allowed-tools: Read Bash(sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh*) Bash(find *) Bash(grep *) Bash(git log *) Bash(git show *) Bash(git blame *) Bash(bd *) Agent
 disable-model-invocation: true
 ---
 
@@ -36,9 +36,9 @@ Dispatch each lens with:
 
 ## Fan-out: Conditional lenses
 
-**`research-libraries`** — spawn only when the feature involves a third-party tool, library, or external API. Pass the dependency name(s) and the feature spec.
+**[`research-libraries`](../../agents/research-libraries.md)** — spawn only when the feature involves a third-party tool, library, or external API. Pass the dependency name(s) and the feature spec.
 
-**`research-history`** — ask-first lens. Offer it to the user before spawning ("Do you want me to run the history lens to check for prior attempts in this area?"). Default to **skip** if the user doesn't confirm. Under autorun (unattended — the prompt can't be answered), skip this lens entirely.
+**[`research-history`](../../agents/research-history.md)** — ask-first lens. Offer it to the user before spawning ("Do you want me to run the history lens to check for prior attempts in this area?"). Default to **skip** if the user doesn't confirm. Under autorun (unattended — the prompt can't be answered), skip this lens entirely.
 
 ## Synthesis
 
@@ -48,7 +48,7 @@ Once all spawned lenses have returned, synthesize their reports into unified fin
 
 **Organize findings** using [template.md](template.md) as the structure (a findings outline — not a file to write). Present conversationally in this session. Don't write step-doc files.
 
-**Risks and gotchas** (from `research-risks`) attach to the epic as advisory notes — they are **never** created as standalone beads issues. Use `bd attach-note` or equivalent to record them on the epic.
+**Risks and gotchas** (from `research-risks`) attach to the epic as advisory notes — they are **never** created as standalone beads issues. Record them on the epic with `bd comment <epic-id> --file <notes.md>` (see [`.claude/references/beads.md`](../../references/beads.md)).
 
 **Gaps** (from `research-reuse`) still become beads child issues with dependencies, one per actionable gap. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
