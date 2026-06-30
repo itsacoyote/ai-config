@@ -14,7 +14,7 @@ This is portable on purpose — it travels with the skills when copied into anot
 | # | Step | Skill / agent | Output |
 |---|------|---------------|--------|
 | 1 | **Define** | `define` skill (+ `documentation-and-adrs`) | An approved spec; ADRs for any significant decisions; the feature branch created |
-| 2 | **Research** | `research` skill (+ `analyze-code`, `find-patterns`, `web-search`) | Findings: reusable code, gaps, patterns, constraints |
+| 2 | **Research** | `research` skill → spawns parallel lens agents (`research-reuse`, `research-patterns`, `research-risks`; conditional `research-libraries`, ask-first `research-history`) | Findings: reuse, gaps, patterns, risks, architectural context — synthesized |
 | 3 | **Plan** | `planning-and-task-breakdown` skill | File map + dependency-ordered tasks with named tests |
 | 4 | **Implement** | `incremental-implementation` skill (+ `writing-tests`; `efficiency-review` for per-chunk cheaply during implementation) | The change, built task by task, tests passing, committed |
 | — | *Gate: Plan → Implement* | `plan-review` skill → `plan-review` agent | Plan reviewed before any code; design findings fixed (see below) |
@@ -24,7 +24,7 @@ This is portable on purpose — it travels with the skills when copied into anot
 ## How to run it
 
 1. **Define** — `define` walks the spec conversation, creates the branch, and ends at an approval checkpoint. Don't proceed until the spec is approved.
-2. **Research** — `research` studies the codebase against the approved spec.
+2. **Research** — `research` fans out to parallel read-only lens agents (reuse & gaps, patterns & architecture, risks) — plus conditional `research-libraries` and ask-first `research-history` — and synthesizes their reports into the findings against the approved spec.
 3. **Plan** — `planning-and-task-breakdown` turns spec + research into a file map and ordered tasks.
    - **Gate (Plan → Implement):** before building, run `plan-review` — a staff-engineer design review of the spec + plan (approach, decomposition, interfaces, reuse, risk, spec-alignment, sequencing). It's the pre-build mirror of Validate's reviewers: it catches design flaws while they're a paragraph, not a diff. The skill spawns the `plan-review` agent in a fresh context; fix what it surfaces (a fundamentally wrong approach goes back to Define), then implement. In manual mode it's surfaced for you to act on; under `autorun` it runs automatically (revise-and-re-review, bounded to 3) and only interrupts you if the whole approach is wrong.
 4. **Implement** — `incremental-implementation` builds the tasks in order, one increment at a time, with optional mid-implement review checkpoints for risky work. Use `efficiency-review` for cheap per-chunk reviews during implementation (reuse, simplification, efficiency cleanups) without waiting for the full Validate gate.
