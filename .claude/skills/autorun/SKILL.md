@@ -20,7 +20,7 @@ runs them after Define.
 ## Before you run
 
 - **Preflight (required).** Verify beads is set up:
-  `sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
+  `sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
   proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 - An **approved spec must be in context** (a beads epic from `define`). If there
   isn't one, stop and point the user at `define` — autorun does not replace gate 1.

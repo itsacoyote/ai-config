@@ -14,7 +14,7 @@ Run this **from the main session** — it spawns the `senior-review`, `security-
 `autorun` runs this review pass at the end of its loop — **reading and following this skill directly** (it can't invoke a `disable-model-invocation` skill via the Skill tool), and reusing its loop shape (bounded fix iterations) for per-task reviews of risky tasks.
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
+`sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 ## Pre-flight — mechanical checks first
@@ -30,7 +30,7 @@ Trivial changes (typo, copy, config) don't need the full gate — a quick `senio
 Before each spawn, compute the **branch diff scope** and include the line it prints in the agent dispatch (the script is the single source of this git plumbing — see [`.claude/references/diff-scope.md`](../../references/diff-scope.md)):
 
 ```bash
-sh .claude/references/diff-scope.sh
+sh ${CLAUDE_SKILL_DIR}/../../references/diff-scope.sh
 # prints: Diff scope: <base>..<head> — changed files: …
 ```
 

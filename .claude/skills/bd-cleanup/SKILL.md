@@ -2,7 +2,7 @@
 name: bd-cleanup
 description: Use when the beads database has grown large or needs maintenance — reclaim disk space and prune or compact old closed issues. A script does the non-destructive reclaim (assess + bd compact); flatten, semantic compaction, and deletion are lossy and stay dry-run-first, confirmed last resorts. Developer-invoked.
 disable-model-invocation: true
-allowed-tools: Read Bash(bd *) Bash(du *) Bash(test *) Bash(command -v *) Bash(ls *) Bash(sh .claude/skills/bd-cleanup/scripts/bd-cleanup.sh*) Bash(bash .claude/skills/bd-cleanup/scripts/bd-cleanup.sh*)
+allowed-tools: Read Bash(bd *) Bash(du *) Bash(test *) Bash(command -v *) Bash(ls *) Bash(sh ${CLAUDE_SKILL_DIR}/scripts/bd-cleanup.sh*) Bash(bash ${CLAUDE_SKILL_DIR}/scripts/bd-cleanup.sh*)
 ---
 
 # Beads Cleanup
@@ -37,9 +37,9 @@ Run the script. By default it **assesses read-only**; `--reclaim` then applies t
 **non-destructive** ladder — operations that keep every issue's content fully intact.
 
 ```bash
-sh .claude/skills/bd-cleanup/scripts/bd-cleanup.sh                  # assess: sizes, history, stats, recommendation
-sh .claude/skills/bd-cleanup/scripts/bd-cleanup.sh --reclaim        # assess, then squash old Dolt commits + GC
-sh .claude/skills/bd-cleanup/scripts/bd-cleanup.sh --reclaim --days 90  # only squash commits older than 90 days (default 30)
+sh ${CLAUDE_SKILL_DIR}/scripts/bd-cleanup.sh                  # assess: sizes, history, stats, recommendation
+sh ${CLAUDE_SKILL_DIR}/scripts/bd-cleanup.sh --reclaim        # assess, then squash old Dolt commits + GC
+sh ${CLAUDE_SKILL_DIR}/scripts/bd-cleanup.sh --reclaim --days 90  # only squash commits older than 90 days (default 30)
 ```
 
 What it does for you:

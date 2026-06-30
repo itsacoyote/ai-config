@@ -3,7 +3,7 @@ name: standup
 description: Use when returning from a break, a night, or a weekend and you want a read-only recap of recent work — what got done, what's in progress, and what to pick up next — formatted for a standup. Requires beads; cross-references git history, PRs, and notes.
 disable-model-invocation: true
 argument-hint: "[time window, e.g. 24h, 3d, since friday]"
-allowed-tools: Read Bash(sh .claude/skills/standup/scripts/standup-gather.sh*) Bash(bash .claude/skills/standup/scripts/standup-gather.sh*) Bash(git log *) Bash(git status*) Bash(git diff *) Bash(git branch *) Bash(git stash list*) Bash(gh pr list *) Bash(gh pr view *) Bash(gh issue list *) Bash(gh run list *) Bash(bd *)
+allowed-tools: Read Bash(sh ${CLAUDE_SKILL_DIR}/scripts/standup-gather.sh*) Bash(bash ${CLAUDE_SKILL_DIR}/scripts/standup-gather.sh*) Bash(git log *) Bash(git status*) Bash(git diff *) Bash(git branch *) Bash(git stash list*) Bash(gh pr list *) Bash(gh pr view *) Bash(gh issue list *) Bash(gh run list *) Bash(bd *)
 ---
 
 # Standup
@@ -22,9 +22,9 @@ Reconstruct what's happened recently and present it as a standup-ready briefing 
 Run the gather script — it does the deterministic, **read-only** collection so you don't re-derive the commands. Pass the time window as its argument (default: last 24h):
 
 ```bash
-sh .claude/skills/standup/scripts/standup-gather.sh                 # last 24h
-sh .claude/skills/standup/scripts/standup-gather.sh 3d              # 24h / 3d / 2w
-sh .claude/skills/standup/scripts/standup-gather.sh "since friday"  # or a phrase: "last week", "yesterday"
+sh ${CLAUDE_SKILL_DIR}/scripts/standup-gather.sh                 # last 24h
+sh ${CLAUDE_SKILL_DIR}/scripts/standup-gather.sh 3d              # 24h / 3d / 2w
+sh ${CLAUDE_SKILL_DIR}/scripts/standup-gather.sh "since friday"  # or a phrase: "last week", "yesterday"
 ```
 
 **Beads is required.** The script gates on it (via `beads-preflight.sh`) and **exits non-zero if beads isn't set up** — if that happens, **stop** and tell the user to run the `setup-beads` skill, then retry. It does not produce a beads-less recap.

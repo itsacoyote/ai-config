@@ -2,7 +2,7 @@
 name: sync
 description: Bring the local checkout up to date with main before starting feature work — clean-tree check with optional stash, fetch and fast-forward pull, change summary, and detection-driven refresh of dependencies, migrations, .env keys, and Docker. Developer-invoked; never runs destructive git or auto-applies migrations.
 disable-model-invocation: true
-allowed-tools: Read Bash(sh .claude/skills/sync/scripts/sync.sh*) Bash(bash .claude/skills/sync/scripts/sync.sh*)
+allowed-tools: Read Bash(sh ${CLAUDE_SKILL_DIR}/scripts/sync.sh*) Bash(bash ${CLAUDE_SKILL_DIR}/scripts/sync.sh*)
 ---
 
 # Sync
@@ -16,7 +16,7 @@ It **never** performs destructive git operations, never auto-applies migrations,
 ### 1. Preview (read-only)
 
 ```bash
-sh .claude/skills/sync/scripts/sync.sh --dry-run
+sh ${CLAUDE_SKILL_DIR}/scripts/sync.sh --dry-run
 ```
 
 This mutates nothing. It detects and reports: the main branch (`init.defaultBranch` → `origin/HEAD` → `main`), the current branch, whether the working tree is **dirty** (with the paths), the **package ecosystems** present (lockfile + `package.json` `packageManager`, with the exact install command), **migration** tools (with the command, using the detected JS runner — `npx`/`pnpm dlx`/`yarn`/`bunx`), the **`.env` key diff** (keys in the example file missing from `.env`, names only), **Docker** compose presence, and any **project-specific** sync section in `CLAUDE.md`/`AGENTS.md`/`.cursorrules`/`.windsurfrules`.
@@ -31,7 +31,7 @@ The script is safe by default — it will not touch a dirty tree and will not in
 ### 3. Execute
 
 ```bash
-sh .claude/skills/sync/scripts/sync.sh [--stash] [--install all|<csv>] [--main <branch>]
+sh ${CLAUDE_SKILL_DIR}/scripts/sync.sh [--stash] [--install all|<csv>] [--main <branch>]
 ```
 
 This stashes (if `--stash`), switches to main, `git fetch`, `git pull --ff-only`, captures pre/post SHAs, runs the approved installs (checking each exit code), and prints the structured summary — branch state (+ stash recovery), recent commits (capped at 20 with a `+N more` footer), dependencies (ran/skipped/not-installed), migrations to consider, missing `.env` keys, Docker warning, and project-specific steps. **Relay that summary** to the developer.

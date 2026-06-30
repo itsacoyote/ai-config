@@ -137,7 +137,7 @@ All three fields are still useful without autorun — they document where review
 ### Recording the plan
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
+`sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 Create one **child issue per task** under the feature epic — put the file-map slice, named tests, **risk marker, skill hints, and (where applicable) the `security-sensitive` label** in each issue body — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically. Beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.

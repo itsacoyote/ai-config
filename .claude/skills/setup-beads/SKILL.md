@@ -2,7 +2,7 @@
 name: setup-beads
 description: Use when setting up beads (the `bd` issue tracker) in a project for the first time so workflow skills can track tasks.
 disable-model-invocation: true
-allowed-tools: Read Write Edit Bash(bd *) Bash(git *) Bash(command -v *) Bash(test *) Bash(ls *) Bash(uname *) Bash(brew *) Bash(npm *) Bash(sh .claude/skills/setup-beads/scripts/setup-beads.sh*) Bash(bash .claude/skills/setup-beads/scripts/setup-beads.sh*)
+allowed-tools: Read Write Edit Bash(bd *) Bash(git *) Bash(command -v *) Bash(test *) Bash(ls *) Bash(uname *) Bash(brew *) Bash(npm *) Bash(sh ${CLAUDE_SKILL_DIR}/scripts/setup-beads.sh*) Bash(bash ${CLAUDE_SKILL_DIR}/scripts/setup-beads.sh*)
 ---
 
 # Setup Beads
@@ -16,8 +16,8 @@ The default — **personal, local, isolated use** — is fully deterministic and
 For the standard local/isolated setup, run the script from the repo root:
 
 ```bash
-sh .claude/skills/setup-beads/scripts/setup-beads.sh            # prefix defaults to the dir name
-sh .claude/skills/setup-beads/scripts/setup-beads.sh -p myprefix  # override the issue prefix
+sh ${CLAUDE_SKILL_DIR}/scripts/setup-beads.sh            # prefix defaults to the dir name
+sh ${CLAUDE_SKILL_DIR}/scripts/setup-beads.sh -p myprefix  # override the issue prefix
 ```
 
 It is idempotent and self-guarding. In one pass it: refuses to run in a git worktree, no-ops if `.beads/` already exists, stops with install instructions if `bd` is missing (it never installs software), runs `bd init --stealth --non-interactive`, reverts bd's `.gitignore` edit, ensures the `.git/info/exclude` entries, adds `Bash(bd *)` to `.claude/settings.local.json`, then verifies (`bd version` / `bd ready`) and prints a recap.

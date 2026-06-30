@@ -49,11 +49,14 @@ present and does not fall back to conversational tracking.
 Before doing any workflow work, every skill must verify beads is set up by running:
 
 ```bash
-sh .claude/references/beads-preflight.sh
+sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh
 ```
 
-If it exits non-zero, **stop** — do not proceed without beads — and tell the user to run
-the `setup-beads` skill, then retry.
+`${CLAUDE_SKILL_DIR}` is substituted with the skill's own directory at load, so this resolves
+to the library's `references/` whether the skill is project-local (`./.claude/skills/<name>/`)
+or global (`~/.claude/skills/<name>/`) — and regardless of the current working directory. If it
+exits non-zero, **stop** — do not proceed without beads — and tell the user to run the
+`setup-beads` skill, then retry.
 
 **Use the script, not a bare `test -d .beads`.** In a git worktree, `.beads/` is absent from
 the worktree's own root (it is deliberately *not* copied — see [worktrees](#worktrees-one-database-per-repo-shared-by-all-worktrees)), yet beads works there via the shared git common dir. A
@@ -65,8 +68,8 @@ worktrees alike.
 The canonical copy-pasteable block for embedding in step skills:
 
 > **Preflight (required).** Before doing any workflow work, verify beads is set up by running
-> `sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not proceed
-> without beads — and tell the user to run the `setup-beads` skill, then retry.
+> `sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** —
+> do not proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 `setup-beads` and `bd-cleanup` are exempt — they are the bootstrap and maintenance paths
 and cannot require what they install.

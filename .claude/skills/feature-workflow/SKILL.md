@@ -36,7 +36,7 @@ Each step has a clear entry/exit; advance only when the previous step's output i
 ## State and handoff
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
+`sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 State flows through **beads** (required) — see [`.claude/references/beads.md`](../../references/beads.md) for the full model. There is no `.docs/` folder and no `context.yaml`; beads is the system of record.

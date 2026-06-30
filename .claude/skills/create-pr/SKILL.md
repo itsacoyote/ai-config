@@ -13,8 +13,8 @@ which tool to open the PR with → the `github-tool-preference` rule (`.claude/r
 Run the script first. It does the deterministic discovery so you don't re-derive it:
 
 ```bash
-sh .claude/skills/create-pr/scripts/pr-preflight.sh                  # report + the body scaffold to fill in
-sh .claude/skills/create-pr/scripts/pr-preflight.sh --template-only  # print ONLY the chosen template body
+sh ${CLAUDE_SKILL_DIR}/scripts/pr-preflight.sh                  # report + the body scaffold to fill in
+sh ${CLAUDE_SKILL_DIR}/scripts/pr-preflight.sh --template-only  # print ONLY the chosen template body
 ```
 
 It reports three things and prints the body scaffold to fill in:

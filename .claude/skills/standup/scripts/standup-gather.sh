@@ -51,11 +51,17 @@ fi
 ME="$(git config user.email 2>/dev/null || true)"
 [ -n "$ME" ] || ME="$(git config user.name 2>/dev/null || true)"
 
-# Operate from the repo root so .beads/ and the preflight script resolve.
+# Resolve the shared beads-preflight via THIS script's own location (not cwd), so it
+# works whether the library is project-local or global (~/.claude). This script lives
+# at <lib>/skills/standup/scripts/, the preflight at <lib>/references/. Capture before cd.
+SELF_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
+PREFLIGHT="$SELF_DIR/../../../references/beads-preflight.sh"
+
+# Operate from the repo root so .beads/ resolves against the project.
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" && cd "$ROOT"
 
 # Beads is REQUIRED for standup (see SKILL.md) — gate before gathering anything.
-if ! sh .claude/references/beads-preflight.sh >/dev/null 2>&1; then
+if ! sh "$PREFLIGHT" >/dev/null 2>&1; then
   echo "standup: beads is not set up here — run the setup-beads skill, then retry." >&2
   exit 1
 fi

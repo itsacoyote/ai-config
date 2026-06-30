@@ -16,7 +16,7 @@ Do not cut corners. "This seems obvious" and "this is a small change" are not re
 Read the full diff — this is the source of truth for what changed:
 
 ```bash
-git diff "$(sh .claude/references/diff-scope.sh --range)"   # base..HEAD via the shared base detection
+git diff "$(sh ${CLAUDE_SKILL_DIR}/../../references/diff-scope.sh --range)"   # base..HEAD via the shared base detection
 git status --porcelain          # also catch untracked/unstaged files the diff above misses
 ```
 
@@ -47,7 +47,7 @@ Write the PR body following the `create-pr` skill (what/why, no AI attribution).
 ## Completion
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
+`sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 Commit the documentation changes (`Skill(git-commit)` first; stage explicit paths), push, and ready the PR (`gh pr ready` if it was a draft). When staging, **explicitly include durable docs authored earlier in the workflow that no task commit owns** — above all an **ADR from Define** under `docs/decisions/` (or the project's ADR dir). These are created with `Write` long before this step and are easy to leave untracked.

@@ -62,7 +62,7 @@ different posture: one patches, this one only comments.
 ## The run
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
-`sh .claude/references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
+`sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 ### 1. Intake
