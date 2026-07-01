@@ -37,3 +37,7 @@ sign-off, or a plan-revision loop stay as skills/agents.
 - **Portability:** these travel in `.claude/` like the skills. They reference repo files by
   relative path (e.g. `.claude/references/diff-scope.sh`), so they work after a copy-paste as
   long as those files come along.
+- **Caller still owns completion.** `/validate-fanout` reviews and reports only. The `validate`
+  skill's security-sensitive backstop (query beads for `security-sensitive` tasks and block
+  completion until an independent scan covers them), the beads close-out, and the push all
+  remain the caller's responsibility — the workflow does not perform them.
