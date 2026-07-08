@@ -86,6 +86,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | Skill | |
 |-------|--|
 | `api-and-interface-design` | Stable, hard-to-misuse APIs and module boundaries |
+| `prototype` | Throwaway code that answers a design question — an interactive logic/state TUI, or radically different UI variants switchable on one route; capture the answer, delete the prototype |
 | `frontend-ui-engineering` | Production-quality UIs; honors `DESIGN.md`/`PRODUCT.md` |
 | `impeccable` `/cmd` | Deep design-system workflow (shape, craft, critique, audit, polish) |
 | `documentation-and-adrs` | Record decisions and keep documentation current |

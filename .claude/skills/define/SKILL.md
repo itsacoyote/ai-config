@@ -26,7 +26,7 @@ A one-line, obvious change with no real ambiguity — just make it. Define earns
 
 **Ask clarifying questions — one at a time.** Prefer multiple choice over open-ended; one question per message. Focus on purpose, constraints, success criteria, and non-goals.
 
-**Explore approaches.** Propose 2–3 options with trade-offs; lead with your recommendation and say why. When a settled decision is architecturally significant or expensive to reverse — a framework/library choice, a data model, an auth strategy, an API style — capture it as an **ADR** while the alternatives and trade-offs are still fresh, following the `documentation-and-adrs` skill. Don't defer this to the Document step, where the rejected-alternative reasoning is usually lost.
+**Explore approaches.** Propose 2–3 options with trade-offs; lead with your recommendation and say why. If the conversation stalls on how something should behave or look — a question that's cheaper to answer with throwaway code than more discussion — offer the `prototype` skill and fold its answer back into the spec. When a settled decision is architecturally significant or expensive to reverse — a framework/library choice, a data model, an auth strategy, an API style — capture it as an **ADR** while the alternatives and trade-offs are still fresh, following the `documentation-and-adrs` skill. Don't defer this to the Document step, where the rejected-alternative reasoning is usually lost.
 
 **Present the design section by section.** Scale each section to its complexity. Cover architecture, components, data flow, error handling, and testing. Ask after each section whether it looks right. Be ready to go back and clarify.
 

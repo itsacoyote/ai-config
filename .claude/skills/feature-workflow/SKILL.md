@@ -33,6 +33,8 @@ This is portable on purpose — it travels with the skills when copied into anot
 
 Each step has a clear entry/exit; advance only when the previous step's output is in hand.
 
+**Optional side-step — `prototype`.** When Define or Research stalls on a question that's cheaper to answer with throwaway code than discussion ("does this state model feel right?", "what should this look like?"), the `prototype` skill builds a disposable artifact to react to. Its *answer* feeds the spec or plan; the prototype itself is deleted.
+
 ## State and handoff
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
