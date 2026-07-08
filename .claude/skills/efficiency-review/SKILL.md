@@ -37,7 +37,9 @@ This is a narrower window than `senior-review`, which reviews the entire branch 
 
 Run as a single named pass: **Simplification + YAGNI + Clarity/Naming**.
 
-Work through the diff against the [criteria below](#simplification-and-yagni-criteria). For each finding, note severity, location, the problem, and the exact fix.
+Work through the diff against the [criteria below](#simplification-and-yagni-criteria) and the smell baseline in [`.claude/references/code-smells.md`](../../references/code-smells.md) — a fixed set of Fowler smells that applies even when the repo documents no standards. Smells are always judgment calls ("possible Feature Envy"), a documented repo standard overrides them, and **skip anything tooling already enforces** (formatter, linter, typechecker) — `project-checks` front-loads those; review effort belongs on the calls tooling can't make.
+
+For each finding, note severity, location, the problem, and the exact fix.
 
 This is a read-only skill. Do not edit files, commit, or push — report findings and let the caller decide.
 

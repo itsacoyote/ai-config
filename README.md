@@ -168,6 +168,7 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 | `testing-patterns.md` | `writing-tests` |
 | `accessibility-checklist.md`, `performance-checklist.md` | `frontend-ui-engineering` |
 | `security-checklist.md` | `security-and-hardening` (quick-ref; the canonical preventive inventory lives in the `security-and-hardening` skill, detective signals in `security-scan`) |
+| `code-smells.md` | `efficiency-review` + `senior-review` (the Fowler smell baseline — judgment-call heuristics; repo standards override, tooling-enforced concerns skipped) |
 
 ---
 
