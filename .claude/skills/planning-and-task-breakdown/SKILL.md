@@ -102,7 +102,7 @@ Each task follows this structure:
 - [ ] [Specific, testable condition]
 - [ ] [Specific, testable condition]
 
-**Tests (write first):** name each test case explicitly as it will appear in the test file — assertive statements, not intentions. Write `it("throws AuthError when the token is expired")`, not "should handle errors" or "test auth". The implementer writes these before touching production code (see `writing-tests`).
+**Tests (write first):** name each test case explicitly as it will appear in the test file — assertive statements, not intentions. Write `it("throws AuthError when the token is expired")`, not "should handle errors" or "test auth". The implementer writes these before touching production code (see `writing-tests`). Naming the tests here is also where the **seams** get agreed — each named test pins the public boundary it observes, so testing effort lands on critical paths by decision, not by accident (see "Agree the Seams First" in `writing-tests`).
 
 **Verification:**
 

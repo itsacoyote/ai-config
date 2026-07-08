@@ -27,6 +27,8 @@ Assert on inputs, outputs, and observable effects — not internal calls, privat
 
 Implementation-detail tests break on every refactor and give false confidence.
 
+Expected values must come from an **independent source of truth** — a known-good literal, a worked example, the spec. An assertion that recomputes the expected value the way the code does (`expect(sum(items)).toBe(items.reduce(...))`) is **tautological**: it passes by construction and can never disagree with the code. See the tautological-tests example in the reference.
+
 ## Test at the Right Level
 
 | Level | Scope | Use for |
@@ -36,6 +38,10 @@ Implementation-detail tests break on every refactor and give false confidence.
 | E2E | the whole app through the UI | critical user journeys only |
 
 Favor many fast unit tests, fewer integration tests, a handful of E2E (the pyramid). Don't reach for E2E what a unit test can cover; don't mock so much in a "unit" test that it proves nothing real.
+
+## Agree the Seams First
+
+A **seam** is the public boundary you test at — the interface where behavior is observable without reaching inside. For non-trivial work, name the seams under test *before* writing tests, and confirm them: with the user directly, or through the plan (`planning-and-task-breakdown` records each task's named tests, which pin its seams — and `plan-review` checks them). You can't test everything; agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of scattering across every edge. A test written at an unconfirmed seam is effort spent on a boundary nobody chose.
 
 ## Cover the Cases That Matter
 
@@ -78,6 +84,7 @@ Coverage is a flashlight, not a goal. Use it to find untested branches, not to c
 ## Red Flags
 
 - Tests that break on every refactor (testing implementation details)
+- Expected values computed with the same logic as the code under test (tautological — the test can't disagree)
 - Happy-path-only suites; no error or boundary cases
 - `test.skip` or commented-out tests left in the codebase
 - Shared state leaking between tests

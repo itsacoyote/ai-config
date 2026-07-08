@@ -41,6 +41,8 @@ For each slice:
 4. **Commit** -- save your progress with a descriptive message (see `git-workflow-and-versioning` for atomic commit guidance)
 5. **Move to the next slice** — carry forward, don't restart
 
+The loop is **red → green**: a failing test (or a missing capability), then the minimal code that satisfies it. Refactoring is not a stage of the loop — simplification and cleanup belong to review (`efficiency-review` per task, Validate for the branch), not to the implement-test cycle. Don't fold "while I'm here" restructuring into a slice.
+
 ## Working from a plan
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
