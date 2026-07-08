@@ -20,7 +20,7 @@ A one-line, obvious change with no real ambiguity — just make it. Define earns
    git switch main && git pull && git switch -c <type>/<short-slug>
    ```
 2. **Explore context first** — read relevant files, docs, and recent commits to understand the current state before asking questions.
-3. **Check scope** — if the idea spans multiple independent subsystems (e.g. "a platform with chat, billing, and analytics"), flag it and help decompose into separate features before continuing. A spec should fit a single implementation cycle.
+3. **Check scope** — if the idea spans multiple independent subsystems (e.g. "a platform with chat, billing, and analytics"), flag it and help decompose into separate features before continuing. A spec should fit a single implementation cycle. If the idea is not just big but **foggy** — the open questions can't even be phrased sharply yet, and decomposing in conversation isn't getting traction — hand off to the `wayfinder` skill to chart it as a map of investigation tickets; it returns definable features to Define later.
 
 ## The conversation
 

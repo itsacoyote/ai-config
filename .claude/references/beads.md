@@ -101,6 +101,9 @@ bd update <id> --claim                 # claim/start an issue (sets assignee + i
 bd close <id>                          # complete an issue (or: bd update <id> --status closed)
 bd show <id>                           # view an issue's details
 bd list --json                         # list issues (use --json for programmatic reads)
+bd create "Title" -l lens:a,lens:b     # create with labels (comma-separated)
+bd label add <id> <label>              # add a label (alias: bd tag); also: remove, list, list-all
+bd list -l <label>                     # filter by label (AND); --label-any (OR), --label-pattern 'ns:*'
 ```
 
 The CLI is large and evolving — **verify exact flags with `bd <command> --help`
@@ -132,6 +135,12 @@ Hard-won details when an agent (not a human) runs `bd`:
   the `autorun` skill's resume preamble implements.)
 - **Materialize a whole plan atomically:** `bd create --graph <plan.json>` creates many
   issues *and* their dependencies from one JSON file — cleaner than N creates + N `dep add`s.
+- **Labels are first-class** — `-l` at create, `bd label add/remove/list/list-all` after, and
+  label filters on `bd list` (`-l` ANDs, `--label-any` ORs, `--label-pattern 'ns:*'` globs).
+  Prefer a namespaced convention (`wayfinder:map`, `security-sensitive`) so `--label-pattern`
+  can sweep a family. **Children inherit the parent's labels at create time by default** —
+  pass `--no-inherit-labels` when a child must carry only its own labels (e.g. a marker label
+  that identifies the *parent* specifically, like `wayfinder:map`, must not leak onto children).
 - **Long bodies:** pass `--body-file <f>` / `--stdin` (and `--acceptance`, `--design`) to
   avoid shell-escaping multi-line markdown; attach notes later with `bd comment <id> --file`.
 - **When `.beads/` grows large**, use the `bd-cleanup` skill — it reclaims space

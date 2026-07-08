@@ -37,7 +37,7 @@ The two branches produce very different artifacts — getting this wrong wastes 
 
 The _answer_ is the only thing worth keeping from a prototype. Capture it durably, along with the question it was answering:
 
-- **If the prototype belongs to tracked work** (a feature epic, a task, an investigation ticket), record it as a comment on that beads issue: `bd comment <id> "Prototype answered: <question> → <answer>"`. If the answer settled an architecturally significant decision, capture an ADR per `documentation-and-adrs`.
+- **If the prototype belongs to tracked work** (a feature epic, a task, a `wayfinder` ticket), record it as a comment on that beads issue: `bd comment <id> "Prototype answered: <question> → <answer>"`. If the answer settled an architecturally significant decision, capture an ADR per `documentation-and-adrs`.
 - **Otherwise** (no issue exists yet), put it in the message of the commit that deletes or folds in the prototype, or a `NOTES.md` next to the prototype as a placeholder until the verdict is in. If the answer kicks off tracked work, carry it into the feature epic's spec when `define` creates it.
 
 If the user is around, that capture is a quick conversation; if not, leave the placeholder so they (or you, on the next pass) can fill in the verdict before deleting the prototype.

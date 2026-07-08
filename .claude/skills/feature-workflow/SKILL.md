@@ -35,6 +35,8 @@ Each step has a clear entry/exit; advance only when the previous step's output i
 
 **Optional side-step — `prototype`.** When Define or Research stalls on a question that's cheaper to answer with throwaway code than discussion ("does this state model feel right?", "what should this look like?"), the `prototype` skill builds a disposable artifact to react to. Its *answer* feeds the spec or plan; the prototype itself is deleted.
 
+**Situational on-ramp — `wayfinder`.** When an idea is too big and too foggy for even Define to get traction — the way to the destination isn't visible yet — the `wayfinder` skill charts it as a shared map of investigation tickets in beads, resolved one per session until the route is clear. Most maps end by handing one or more definable features to Define.
+
 ## State and handoff
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:

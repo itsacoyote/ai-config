@@ -54,6 +54,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `document` `/cmd` | Pre-PR documentation audit + PR description |
 | `feature-workflow` | The map of the six steps and which skill/agent owns each |
 | `autorun` `/cmd` | Supervised-autonomous orchestrator: after Define, runs Research→Document one task at a time in fresh subagents, permissions on, stopping at a ready-for-review PR |
+| `wayfinder` `/cmd` | Situational on-ramp *before* Define for ideas too big and foggy for one session — charts a shared map of investigation tickets in beads (a `wayfinder:map` epic; `bd ready --parent` is the frontier), resolves one ticket per session until the way is clear |
 
 ### Research support
 
