@@ -106,7 +106,7 @@ Use the severity scale as follows for efficiency findings:
 
 `CRITICAL` is reserved for findings that indicate a fundamental structural problem worth stopping work for. Rare in a pure efficiency review; use it when the architecture choice will make correct behavior impossible or force a large rewrite later.
 
-File an issue per unresolved finding linked to the feature task (see [`.claude/references/beads.md`](../../references/beads.md)).
+File an issue per unresolved finding linked to the feature task, labelled `finding:efficiency` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)).
 
 ## Non-negotiables
 

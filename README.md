@@ -163,7 +163,7 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 
 | Reference | Used by |
 |-----------|---------|
-| `beads.md` | every workflow skill (the beads-required tracking contract) |
+| `beads.md` | every workflow skill (the beads-required tracking contract, including the canonical label registry — `security-sensitive`, `risk:review-per-task`, `finding:<lens>`, `gap`, `wayfinder:*`) |
 | `diff-scope.md` | the review agents + `validate`/`autorun` (how a spawner pins the change-under-review and passes it to reviewers) |
 | `review-agent-contract.md` | the six review agents (`security-scan`, `senior-review`, `efficiency-review`, `qa-review`, `design-review`, `plan-review`) — the shared read-only/return-status contract; return shape stays agent-specific |
 | `testing-patterns.md` | `writing-tests` |

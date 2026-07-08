@@ -70,7 +70,7 @@ Cut anything beyond what's required: unused params/options/config, abstraction l
 
 **If it passes**, state "Senior review approved" with one or two sentences on what was reviewed and held up.
 
-File an issue per unresolved finding linked to the feature epic/task (see [`.claude/references/beads.md`](../../references/beads.md)).
+File an issue per unresolved finding linked to the feature epic/task, labelled `finding:senior` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)).
 
 ## Non-negotiables
 

@@ -31,7 +31,7 @@ sh ${CLAUDE_SKILL_DIR}/scripts/standup-gather.sh "since friday"  # or a phrase: 
 
 When beads is present it dumps, in labeled sections (all read-only — nothing is mutated):
 
-- **BEADS** — closed issues (Done candidates), `in_progress` (where you left off), `blocked` with blockers, and `bd ready` (Next). Cross-reference a closed issue with its commits for the fuller story; don't invent IDs — read them from the output.
+- **BEADS** — closed issues (Done candidates), `in_progress` (where you left off), `blocked` with blockers, and `bd ready` (Next). Open review findings (`bd list --label-pattern 'finding:*'`) belong in Next — deferred fixes someone still owes. Cross-reference a closed issue with its commits for the fuller story; don't invent IDs — read them from the output.
 - **GIT** — commits in the window across branches (filtered to you), current branch, working-tree status, stashes, unpushed commits, and the uncommitted diffstat. The concrete "what got done" and the real "in progress."
 - **PULL REQUESTS / CI** — your open PRs, recently merged (with `mergedAt`), review requests waiting on you, and recent CI runs. Skipped with a note if `gh` is missing or unauthed.
 

@@ -47,7 +47,8 @@ runs them after Define.
    `research-history` (prior-art/history) lens is **skipped by default** under autorun:
    it requires an ask-first confirmation that can't be answered unattended.
 2. **Plan** — run `planning-and-task-breakdown`: file map + dependency-ordered tasks, each
-   with a **risk marker** and **skill hints**, recorded as beads child issues under the epic.
+   with **routing labels** (`risk:review-per-task`, `security-sensitive`) and **skill hints**,
+   recorded as beads child issues under the epic.
 3. **Plan review** — run the `plan-review` gate below (autonomous, not a human gate) before
    any code is written.
 4. **Implement** — the loop below, one task at a time.
@@ -120,7 +121,7 @@ commits.
 ### The dispatch (lean + pull)
 
 Hand the implementer **only its task's extracted essentials** — description, acceptance
-criteria, named tests, file-map slice, skill hints, risk marker — plus the **beads IDs** of
+criteria, named tests, file-map slice, skill hints, routing labels — plus the **beads IDs** of
 the task, its dependencies, and the epic. Tell it explicitly: *you may `bd show <id>` to pull
 more on a need-to-know basis.* Do **not** paste the whole plan or sibling tasks into the
 dispatch — that lean dispatch is the point (it keeps both contexts small). The implementer
@@ -139,14 +140,16 @@ Hybrid by default, overridable at launch. Four reviewers, four triggers — each
 - **`efficiency-review` (default, every non-trivial task):** a cheap per-task pass for YAGNI,
   simplification, and unnecessary complexity. Runs on every task that touches more than a
   trivial config change; skipped only for XS/documentation-only tasks.
-- **`senior-review` (per-task on `review-per-task` tasks):** triggered by the task's `Risk`
-  marker — `review-per-task` for sensitive or high-blast-radius work (auth, payments,
-  migrations, public API, crypto, concurrency). Tasks marked `end-of-run` are not reviewed
-  individually — the always-run `validate` pass covers them.
+- **`senior-review` (per-task on `risk:review-per-task` tasks):** triggered by the task's
+  `risk:review-per-task` label — set for sensitive or high-blast-radius work (auth, payments,
+  migrations, public API, crypto, concurrency). Tasks without the label are not reviewed
+  individually — the always-run `validate` pass covers them. (Legacy epics may carry the body
+  marker `Risk: review-per-task` instead — see the labels registry in
+  [`.claude/references/beads.md`](../../references/beads.md).)
 - **`security-scan` agent (per-task on `security-sensitive` tasks):** triggered by the
-  task's `security-sensitive` marker — **independent of and orthogonal to `Risk`**. A task
-  marked `security-sensitive` gets a `security-scan` run per-task regardless of whether its
-  Risk is `review-per-task` or `end-of-run`. A typical auth task carries both markers: both
+  task's `security-sensitive` label — **independent of and orthogonal to the risk label**. A
+  task labelled `security-sensitive` gets a `security-scan` run per-task regardless of whether
+  it also carries `risk:review-per-task`. A typical auth task carries both labels: both
   `senior-review` and `security-scan` run as separate passes.
 - **`qa-review` (reserved for end-of-run `validate`):** not spawned per-task; the always-run
   `validate` pass at the end covers test quality and behavioral completeness.

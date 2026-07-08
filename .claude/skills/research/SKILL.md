@@ -50,7 +50,7 @@ Once all spawned lenses have returned, synthesize their reports into unified fin
 
 **Risks and gotchas** (from `research-risks`) attach to the epic as advisory notes — they are **never** created as standalone beads issues. Record them on the epic with `bd comment <epic-id> --file <notes.md>` (see [`.claude/references/beads.md`](../../references/beads.md)).
 
-**Gaps** (from `research-reuse`) still become beads child issues with dependencies, one per actionable gap. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+**Gaps** (from `research-reuse`) still become beads child issues with dependencies, one per actionable gap — labelled `gap` so the Plan step can sweep them (`bd list --parent <epic-id> -l gap`). See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
 ## No step-doc files
 
