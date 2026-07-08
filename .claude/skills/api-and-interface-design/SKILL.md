@@ -23,7 +23,7 @@ Match the rigor to the blast radius. The "from the start" advice below assumes a
 interface with multiple or unknown consumers. **Scope down — don't gold-plate — when:**
 
 - The interface has a single known caller you control on both sides
-- You're writing a throwaway prototype, spike, or one-off script
+- You're writing a throwaway prototype, spike, or one-off script (see the `prototype` skill)
 - The task is narrow and adding pagination/versioning/extension machinery would
   exceed what the task asked for
 

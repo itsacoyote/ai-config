@@ -35,7 +35,9 @@ agent's **Return** section.
 ## Beads
 
 Record findings per the beads contract in [`beads.md`](beads.md) **only when the caller
-asks**; by default just return them inline.
+asks**; by default just return them inline. When a finding does become an issue (by you or
+the spawner), it carries the lens label `finding:<lens>` from the labels registry in
+[`beads.md`](beads.md) — e.g. `finding:security` for a `security-scan` finding.
 
 ## Return shape is agent-specific
 

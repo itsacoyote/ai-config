@@ -50,7 +50,7 @@ Once all spawned lenses have returned, synthesize their reports into unified fin
 
 **Risks and gotchas** (from `research-risks`) attach to the epic as advisory notes — they are **never** created as standalone beads issues. Record them on the epic with `bd comment <epic-id> --file <notes.md>` (see [`.claude/references/beads.md`](../../references/beads.md)).
 
-**Gaps** (from `research-reuse`) still become beads child issues with dependencies, one per actionable gap. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+**Gaps** (from `research-reuse`) still become beads child issues with dependencies, one per actionable gap — labelled `gap` so the Plan step can sweep them (`bd list --parent <epic-id> -l gap`). See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
 ## No step-doc files
 
@@ -58,4 +58,9 @@ Do not write research findings to disk (no `.docs/research.md`, no `context.yaml
 
 ## Next step
 
-Hand the findings to `planning-and-task-breakdown` (Plan). See `feature-workflow` for the full sequence.
+Present the synthesized findings, then **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`):
+
+- **Default:** `planning-and-task-breakdown` (Plan).
+- **Recommend `prototype` first** when the findings surfaced a design question that's cheaper to answer with throwaway code than to plan around — an unsettled interaction model, a state shape the risks lens flagged as hard to reason about.
+
+Do not start planning until the user picks. (Under `autorun`, proceed directly — Define and the PR are the only human gates there.)

@@ -20,13 +20,13 @@ A one-line, obvious change with no real ambiguity — just make it. Define earns
    git switch main && git pull && git switch -c <type>/<short-slug>
    ```
 2. **Explore context first** — read relevant files, docs, and recent commits to understand the current state before asking questions.
-3. **Check scope** — if the idea spans multiple independent subsystems (e.g. "a platform with chat, billing, and analytics"), flag it and help decompose into separate features before continuing. A spec should fit a single implementation cycle.
+3. **Check scope** — if the idea spans multiple independent subsystems (e.g. "a platform with chat, billing, and analytics"), flag it and help decompose into separate features before continuing. A spec should fit a single implementation cycle. If the idea is not just big but **foggy** — the open questions can't even be phrased sharply yet, and decomposing in conversation isn't getting traction — hand off to the `wayfinder` skill to chart it as a map of investigation tickets; it returns definable features to Define later.
 
 ## The conversation
 
 **Ask clarifying questions — one at a time.** Prefer multiple choice over open-ended; one question per message. Focus on purpose, constraints, success criteria, and non-goals.
 
-**Explore approaches.** Propose 2–3 options with trade-offs; lead with your recommendation and say why. When a settled decision is architecturally significant or expensive to reverse — a framework/library choice, a data model, an auth strategy, an API style — capture it as an **ADR** while the alternatives and trade-offs are still fresh, following the `documentation-and-adrs` skill. Don't defer this to the Document step, where the rejected-alternative reasoning is usually lost.
+**Explore approaches.** Propose 2–3 options with trade-offs; lead with your recommendation and say why. If the conversation stalls on how something should behave or look — a question that's cheaper to answer with throwaway code than more discussion — offer the `prototype` skill and fold its answer back into the spec. When a settled decision is architecturally significant or expensive to reverse — a framework/library choice, a data model, an auth strategy, an API style — capture it as an **ADR** while the alternatives and trade-offs are still fresh, following the `documentation-and-adrs` skill. Don't defer this to the Document step, where the rejected-alternative reasoning is usually lost.
 
 **Present the design section by section.** Scale each section to its complexity. Cover architecture, components, data flow, error handling, and testing. Ask after each section whether it looks right. Be ready to go back and clarify.
 
@@ -69,4 +69,12 @@ An ADR written here is a real file that must reach the repo. It won't be picked 
 
 ## Approval checkpoint
 
-Before handing off to Research, present the **Summary** and **Acceptance Criteria** and ask the user to approve or give feedback. Revise and re-present until approved. Only after approval, move on — either continue by hand with the `research` skill, or hand the rest of the workflow to `autorun` to run Research → Document autonomously under supervision (see `feature-workflow`).
+Before handing off to Research, present the **Summary** and **Acceptance Criteria** and ask the user to approve or give feedback. Revise and re-present until approved.
+
+Once the spec is approved, **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`):
+
+- **Default:** the `research` skill.
+- **Recommend `prototype` first** when the spec settled *what* but left *how it behaves or looks* fuzzy — novel or complex UI, an unsettled state model, a data shape nobody can quite picture. Name the open question; the prototype's answer folds back into the spec before Research.
+- **Recommend `autorun`** if the user wants the rest of the workflow (Research → Document) run autonomously under supervision.
+
+Do not start Research (or anything else) until the user picks.

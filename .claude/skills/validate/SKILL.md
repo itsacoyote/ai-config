@@ -73,11 +73,13 @@ Do not advance to QA until the design review approves (or is skipped as a non-fr
 
 Round 2 runs unconditionally, so a normal branch diff is already covered. This backstop catches the failure mode where the security round was **skipped or silently inlined** — a missing agent, an interrupted run — while the work included tasks the planner flagged for security. That is exactly how a scan gets lost without anyone noticing.
 
-Before producing the summary, query beads for epic children carrying the `security-sensitive` marker the planning step records (see [`planning-and-task-breakdown`](../planning-and-task-breakdown/SKILL.md)):
+Before producing the summary, query beads for epic children carrying the `security-sensitive` label the planning step sets (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)):
 
 ```bash
-bd list --json | jq -r '.[] | select((.labels // []) | index("security-sensitive")) | .id'
-# If the planner recorded it as a body marker (`Security-sensitive: yes`) instead of a label, match that line in the issue body.
+bd list --parent <epic-id> -l security-sensitive --json | jq -r '.[].id'
+# Legacy: on an epic that predates the label taxonomy, this may come back empty while a task
+# still carries the body marker `Security-sensitive: yes` — match that line in issue bodies
+# only in that case.
 ```
 
 If that returns nothing, there is nothing extra to assert — proceed. If it returns any task, **completion is blocked until** the validation summary records that Round 2's independent `security-scan` agent actually ran to a no-CRITICAL/HIGH verdict over a diff scope that includes those tasks' files. If Round 2 didn't run, was inlined, or its scope didn't cover them, go back and run it now — do **not** push or hand off to `document`. A `security-sensitive` task shipping without an independent scan is a gate failure, not a warning.
@@ -88,4 +90,6 @@ Produce a validation summary: senior verdict + fix-iteration count; security ver
 
 Record the validation summary on the feature epic and close out resolved finding issues — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
-Then push the branch (`git push`) to flush any fix commits made during the rounds. Hand off to the `document` skill for the final documentation pass and PR (see `feature-workflow`).
+Then push the branch (`git push`) to flush any fix commits made during the rounds.
+
+Present the validation summary, then **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`): the `document` skill — the final documentation pass and PR. If unresolved findings were filed (`finding:*` issues), say so and recommend fixing or consciously deferring them first. Do not start Document until the user approves. (Under `autorun`, proceed directly — Define and the PR are the only human gates there.)

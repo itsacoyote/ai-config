@@ -41,6 +41,8 @@ For each slice:
 4. **Commit** -- save your progress with a descriptive message (see `git-workflow-and-versioning` for atomic commit guidance)
 5. **Move to the next slice** — carry forward, don't restart
 
+The loop is **red → green**: a failing test (or a missing capability), then the minimal code that satisfies it. Refactoring is not a stage of the loop — simplification and cleanup belong to review (`efficiency-review` per task, Validate for the branch), not to the implement-test cycle. Don't fold "while I'm here" restructuring into a slice.
+
 ## Working from a plan
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:
@@ -53,7 +55,7 @@ When a plan exists (from `planning-and-task-breakdown`), implement its tasks in 
 
 For any non-trivial task, invoke [`efficiency-review`](../efficiency-review/SKILL.md) as a
 cheap per-chunk pass — it catches YAGNI violations and unnecessary complexity early. For risky
-work (`Risk: review-per-task`), also invoke [`senior-review`](../senior-review/SKILL.md) at
+work (the task carries the `risk:review-per-task` label), also invoke [`senior-review`](../senior-review/SKILL.md) at
 natural checkpoints for engineering quality. For security-sensitive code (auth, payments, input
 handling, crypto, queries), invoke [`security-scan`](../security-scan/SKILL.md) before
 committing that chunk. Fix what they surface, then continue. For small, low-risk changes with
@@ -269,3 +271,7 @@ After completing all increments for a task:
 - [ ] The build is clean
 - [ ] The feature works end-to-end as specified
 - [ ] No uncommitted changes remain
+
+## Handoff
+
+When the plan's last task is closed, present what was built (tasks closed, tests passing), then **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`): the `validate` skill — the independent review pass. Do not start Validate's reviews until the user approves. (Under `autorun`, proceed directly — Define and the PR are the only human gates there.)

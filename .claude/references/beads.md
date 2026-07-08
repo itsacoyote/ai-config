@@ -90,6 +90,28 @@ A feature maps onto the issue graph like this:
 Status vocabulary: `open` → `in_progress` → `blocked` → `closed`. Priority is `-p 0`
 (highest) … `-p 3`. Type is `-t` (`task`, `feature`, `epic`, …).
 
+## Labels (the workflow taxonomy)
+
+**A label is a routing/filter target — something a skill or human queries by. Content stays
+in the issue body.** Use namespaced `ns:value` labels for families; a bare label for a
+boolean marker. This table is the canonical registry — skills cite it rather than inventing
+labels ad hoc:
+
+| Label | Goes on | Set by | Queried by |
+|---|---|---|---|
+| `security-sensitive` | a plan task touching auth, payments, crypto, input handling, or access control | **Plan** | `validate`'s security backstop; `autorun`'s per-task `security-scan` trigger |
+| `risk:review-per-task` | a plan task needing per-task senior review (high blast radius) | **Plan** | `autorun`'s review cadence — **absence means `end-of-run`** (no `risk:end-of-run` label is written) |
+| `finding:<lens>` — `senior`, `security`, `qa`, `design`, `efficiency`, `plan` | an unresolved review-finding issue | the review skills / their spawner at **Validate** and the plan gate | `validate` close-out, `standup`, humans sweeping open findings (`--label-pattern 'finding:*'`) |
+| `gap` | an actionable reuse-gap child issue | **Research** | **Plan**, when turning gaps into tasks |
+| `wayfinder:map` / `wayfinder:<type>` | a wayfinder map epic / its tickets | `wayfinder` | `wayfinder` (map discovery, ticket typing) |
+
+**Not labels** (body content — nothing filters on them): skill hints, the file-map slice,
+named tests, estimated scope, acceptance criteria.
+
+**Legacy fallback:** issues created before this taxonomy may carry body markers instead
+(`Security-sensitive: yes`, `Risk: review-per-task`). The label is canonical; check the body
+marker only when a label query on an older epic comes back empty.
+
 ## Command cheat sheet
 
 ```bash
@@ -101,6 +123,9 @@ bd update <id> --claim                 # claim/start an issue (sets assignee + i
 bd close <id>                          # complete an issue (or: bd update <id> --status closed)
 bd show <id>                           # view an issue's details
 bd list --json                         # list issues (use --json for programmatic reads)
+bd create "Title" -l lens:a,lens:b     # create with labels (comma-separated)
+bd label add <id> <label>              # add a label (alias: bd tag); also: remove, list, list-all
+bd list -l <label>                     # filter by label (AND); --label-any (OR), --label-pattern 'ns:*'
 ```
 
 The CLI is large and evolving — **verify exact flags with `bd <command> --help`
@@ -132,6 +157,12 @@ Hard-won details when an agent (not a human) runs `bd`:
   the `autorun` skill's resume preamble implements.)
 - **Materialize a whole plan atomically:** `bd create --graph <plan.json>` creates many
   issues *and* their dependencies from one JSON file — cleaner than N creates + N `dep add`s.
+- **Labels are first-class** — `-l` at create, `bd label add/remove/list/list-all` after, and
+  label filters on `bd list` (`-l` ANDs, `--label-any` ORs, `--label-pattern 'ns:*'` globs).
+  Prefer a namespaced convention (`wayfinder:map`, `security-sensitive`) so `--label-pattern`
+  can sweep a family. **Children inherit the parent's labels at create time by default** —
+  pass `--no-inherit-labels` when a child must carry only its own labels (e.g. a marker label
+  that identifies the *parent* specifically, like `wayfinder:map`, must not leak onto children).
 - **Long bodies:** pass `--body-file <f>` / `--stdin` (and `--acceptance`, `--design`) to
   avoid shell-escaping multi-line markdown; attach notes later with `bd comment <id> --file`.
 - **When `.beads/` grows large**, use the `bd-cleanup` skill — it reclaims space
@@ -143,9 +174,11 @@ Hard-won details when an agent (not a human) runs `bd`:
 
 - **Define** → create the feature **epic** with the spec as its body; record the
   approval in the epic.
-- **Research** → attach findings to the epic (comment or `research` child issue).
+- **Research** → attach findings to the epic (comment or `research` child issue); actionable
+  reuse gaps become child issues labelled `gap`.
 - **Plan** → create one **child task** per plan task, with `bd dep add` for ordering;
-  the file map and TDD test names go in each task's body.
+  the file map and TDD test names go in each task's body; routing labels
+  (`security-sensitive`, `risk:review-per-task`) set at create with `-l`.
 - **Plan → Implement gate (`plan-review`)** → read-only: reads the spec from the epic
   (`bd show <epic>`) and the tasks / file map from its children; reports findings (it never
   mutates issues). Actionable findings drive plan revisions (the orchestrator or human edits
@@ -155,7 +188,8 @@ Hard-won details when an agent (not a human) runs `bd`:
   starting it, `bd close <id>` once its commit lands. `efficiency-review` findings during
   implementation are addressed in-flight; no separate beads issues are created for them.
 - **Validate** → file an issue per unresolved finding from the reviewers
-  (`senior-review`, `security-scan`, `design-review` on frontend changes, `qa-review`);
+  (`senior-review`, `security-scan`, `design-review` on frontend changes, `qa-review`),
+  labelled `finding:<lens>` per the [labels registry](#labels-the-workflow-taxonomy);
   close them as fixes land. The validation summary goes on the epic.
 - **Document** → file issues for any documentation deliberately deferred; otherwise
   close out the epic when the PR is ready.

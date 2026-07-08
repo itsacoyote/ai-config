@@ -122,6 +122,43 @@ Mock these:                    Don't mock these:
 └── Time/Date (when needed)    └── Pure functions
 ```
 
+### Designing for Mockability
+
+At the boundaries you do mock, design the interface so mocking is trivial.
+
+**Inject dependencies** — pass external dependencies in rather than creating them internally:
+
+```typescript
+// Easy to mock: the test passes a fake client
+function processPayment(order: Order, paymentClient: PaymentClient) {
+  return paymentClient.charge(order.total);
+}
+
+// Hard to mock: the client is constructed inside
+function processPayment(order: Order) {
+  const client = new StripeClient(process.env.STRIPE_KEY);
+  return client.charge(order.total);
+}
+```
+
+**Prefer SDK-style interfaces over generic fetchers** — one specific function per external operation, not one generic function with conditional logic:
+
+```typescript
+// GOOD: each function is independently mockable, one shape each
+const api = {
+  getUser: (id: string) => fetch(`/users/${id}`),
+  getOrders: (userId: string) => fetch(`/users/${userId}/orders`),
+  createOrder: (data: OrderInput) => fetch("/orders", { method: "POST", body: JSON.stringify(data) }),
+};
+
+// BAD: mocking requires conditional logic inside the mock
+const api = {
+  fetch: (endpoint: string, options?: RequestInit) => fetch(endpoint, options),
+};
+```
+
+The SDK approach means each mock returns one specific shape, test setup has no conditionals, and it's obvious which endpoints a test exercises.
+
 ## React/Component Testing
 
 ```tsx
@@ -225,6 +262,7 @@ test("user can create and complete a task", async ({ page }) => {
 | Anti-Pattern                   | Problem                        | Better Approach            |
 | ------------------------------ | ------------------------------ | -------------------------- |
 | Testing implementation details | Breaks on refactor             | Test inputs/outputs        |
+| Tautological assertions        | Passes by construction         | Independent expected value |
 | Snapshot everything            | No one reviews snapshot diffs  | Assert specific values     |
 | Shared mutable state           | Tests pollute each other       | Setup/teardown per test    |
 | Testing third-party code       | Wastes time, not your bug      | Mock the boundary          |
@@ -232,3 +270,23 @@ test("user can create and complete a task", async ({ page }) => {
 | Using `test.skip` permanently  | Dead code                      | Remove or fix it           |
 | Overly broad assertions        | Doesn't catch regressions      | Be specific                |
 | No async error handling        | Swallowed errors, false passes | Always `await` async tests |
+
+### Tautological Tests
+
+A tautological test recomputes the expected value the same way the code does, so it passes by construction and can never disagree with the code. Expected values must come from an independent source of truth — a known-good literal, a worked example, the spec.
+
+```typescript
+// BAD: expected value is recomputed the way the code computes it
+test("calculateTotal sums line items", () => {
+  const items = [{ price: 10 }, { price: 5 }];
+  const expected = items.reduce((sum, i) => sum + i.price, 0);
+  expect(calculateTotal(items)).toBe(expected);
+});
+
+// GOOD: expected value is an independent, known literal
+test("calculateTotal sums line items", () => {
+  expect(calculateTotal([{ price: 10 }, { price: 5 }])).toBe(15);
+});
+```
+
+Other forms of the same trap: a snapshot derived by hand using the code's own logic, or a constant asserted equal to itself.

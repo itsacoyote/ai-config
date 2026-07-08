@@ -28,7 +28,7 @@ Define ──▶ Research ──▶ Plan ──▶ Implement ──▶ Validate 
 | **Validate** | `/validate` | Reviews passed (spawns the `senior-review` + `security-scan` + `design-review` (conditional, frontend) + `qa-review` agents), findings fixed |
 | **Document** | `/document` | Docs updated, PR description written, PR readied |
 
-Run the steps in order; advance only when the previous step's output is in hand. Skip the whole thing for trivial changes — it earns its keep on real features where a missed requirement or skipped review is expensive. Start with `feature-workflow` if you want the full map.
+Run the steps in order; advance only when the previous step's output is in hand. **Every step ends by recommending the next move — the default next step, plus situational skills its output signals (e.g. `prototype` after a Define that left UI behavior fuzzy) — and waits for your explicit go before starting it** (`autorun` is the opt-out). Skip the whole thing for trivial changes — it earns its keep on real features where a missed requirement or skipped review is expensive. Start with `feature-workflow` if you want the full map.
 
 ### Tracking: requires beads
 
@@ -54,6 +54,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `document` `/cmd` | Pre-PR documentation audit + PR description |
 | `feature-workflow` | The map of the six steps and which skill/agent owns each |
 | `autorun` `/cmd` | Supervised-autonomous orchestrator: after Define, runs Research→Document one task at a time in fresh subagents, permissions on, stopping at a ready-for-review PR |
+| `wayfinder` `/cmd` | Situational on-ramp *before* Define for ideas too big and foggy for one session — charts a shared map of investigation tickets in beads (a `wayfinder:map` epic; `bd ready --parent` is the frontier), resolves one ticket per session until the way is clear |
 
 ### Research support
 
@@ -86,6 +87,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | Skill | |
 |-------|--|
 | `api-and-interface-design` | Stable, hard-to-misuse APIs and module boundaries |
+| `prototype` | Throwaway code that answers a design question — an interactive logic/state TUI, or radically different UI variants switchable on one route; capture the answer, delete the prototype |
 | `frontend-ui-engineering` | Production-quality UIs; honors `DESIGN.md`/`PRODUCT.md` |
 | `impeccable` `/cmd` | Deep design-system workflow (shape, craft, critique, audit, polish) |
 | `documentation-and-adrs` | Record decisions and keep documentation current |
@@ -161,12 +163,13 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 
 | Reference | Used by |
 |-----------|---------|
-| `beads.md` | every workflow skill (the beads-required tracking contract) |
+| `beads.md` | every workflow skill (the beads-required tracking contract, including the canonical label registry — `security-sensitive`, `risk:review-per-task`, `finding:<lens>`, `gap`, `wayfinder:*`) |
 | `diff-scope.md` | the review agents + `validate`/`autorun` (how a spawner pins the change-under-review and passes it to reviewers) |
 | `review-agent-contract.md` | the six review agents (`security-scan`, `senior-review`, `efficiency-review`, `qa-review`, `design-review`, `plan-review`) — the shared read-only/return-status contract; return shape stays agent-specific |
 | `testing-patterns.md` | `writing-tests` |
 | `accessibility-checklist.md`, `performance-checklist.md` | `frontend-ui-engineering` |
 | `security-checklist.md` | `security-and-hardening` (quick-ref; the canonical preventive inventory lives in the `security-and-hardening` skill, detective signals in `security-scan`) |
+| `code-smells.md` | `efficiency-review` + `senior-review` (the Fowler smell baseline — judgment-call heuristics; repo standards override, tooling-enforced concerns skipped) |
 
 ---
 

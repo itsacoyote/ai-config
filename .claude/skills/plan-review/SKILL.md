@@ -72,7 +72,7 @@ A finding's severity isn't enough; the **path back differs**, so mark it:
 
 Conflating the two sends fixable plans back to Define and sends doomed approaches into a revise-and-re-review loop that can never converge. Keep them separate.
 
-File an issue per unresolved finding linked to the feature epic/task (see [`.claude/references/beads.md`](../../references/beads.md)). Surface them for the orchestrator/human to act on — the orchestrator owns the plan revisions and the beads lifecycle, not you.
+File an issue per unresolved finding linked to the feature epic/task, labelled `finding:plan` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)). Surface them for the orchestrator/human to act on — the orchestrator owns the plan revisions and the beads lifecycle, not you.
 
 ## Red flags in your own review
 

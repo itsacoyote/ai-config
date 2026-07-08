@@ -102,7 +102,7 @@ Each task follows this structure:
 - [ ] [Specific, testable condition]
 - [ ] [Specific, testable condition]
 
-**Tests (write first):** name each test case explicitly as it will appear in the test file — assertive statements, not intentions. Write `it("throws AuthError when the token is expired")`, not "should handle errors" or "test auth". The implementer writes these before touching production code (see `writing-tests`).
+**Tests (write first):** name each test case explicitly as it will appear in the test file — assertive statements, not intentions. Write `it("throws AuthError when the token is expired")`, not "should handle errors" or "test auth". The implementer writes these before touching production code (see `writing-tests`). Naming the tests here is also where the **seams** get agreed — each named test pins the public boundary it observes, so testing effort lands on critical paths by decision, not by accident (see "Agree the Seams First" in `writing-tests`).
 
 **Verification:**
 
@@ -119,20 +119,18 @@ Each task follows this structure:
 
 **Estimated scope:** [Small: 1-2 files | Medium: 3-5 files | Large: 5+ files]
 
-**Risk:** `review-per-task` | `end-of-run`
-
-**Security-sensitive:** yes | (omit if not applicable)
-
 **Skill hints:** [candidate craft skills for this task, or "none beyond core"]
 ```
 
-These last three fields feed `autorun` (the supervised-autonomous orchestrator):
+Alongside the body, each task carries **routing labels** (set with `-l` at create — see the
+labels registry in [`.claude/references/beads.md`](../../references/beads.md)), and these plus
+skill hints feed `autorun` (the supervised-autonomous orchestrator):
 
-- **Risk** sets the senior-review cadence — `review-per-task` for tasks touching sensitive or high-blast-radius areas (auth, payments, migrations, public API, crypto, concurrency, or anything the spec flags); `end-of-run` otherwise (the always-run `validate` pass covers them).
-- **Security-sensitive** is an **independent tag, orthogonal to Risk** — mark it for tasks that touch auth, payments, crypto, input handling, or access control. It triggers the `security-scan` agent per-task **regardless of the task's Risk value**. A typical auth task carries both `Risk: review-per-task` *and* `Security-sensitive: yes` — `senior-review` runs for the blast-radius concern, `security-scan` runs for the security concern; they are separate passes. Omit the field (or leave it out entirely) for tasks with no security surface.
-- **Skill hints** seed the implementer's skill selection — the craft skills it's likely to need (e.g. `frontend-ui-engineering`, `api-and-interface-design`, `security-and-hardening`). A seed, not a mandate: the implementer invokes them on demand and may pull more. The always-on core (`incremental-implementation`, `writing-tests`, `find-patterns`) is assumed and not listed.
+- **`risk:review-per-task`** (label) sets the senior-review cadence — apply it to tasks touching sensitive or high-blast-radius areas (auth, payments, migrations, public API, crypto, concurrency, or anything the spec flags). **No label means `end-of-run`** — the always-run `validate` pass covers those.
+- **`security-sensitive`** (label) is **independent of and orthogonal to risk** — apply it to tasks that touch auth, payments, crypto, input handling, or access control. It triggers the `security-scan` agent per-task **regardless of the task's risk label**. A typical auth task carries both labels — `senior-review` runs for the blast-radius concern, `security-scan` runs for the security concern; they are separate passes. Omit it for tasks with no security surface.
+- **Skill hints** (body field, not a label — nothing queries it) seed the implementer's skill selection — the craft skills it's likely to need (e.g. `frontend-ui-engineering`, `api-and-interface-design`, `security-and-hardening`). A seed, not a mandate: the implementer invokes them on demand and may pull more. The always-on core (`incremental-implementation`, `writing-tests`, `find-patterns`) is assumed and not listed.
 
-All three fields are still useful without autorun — they document where review attention belongs and which skills a task implies.
+All three are still useful without autorun — they document where review attention belongs and which skills a task implies.
 
 ### Recording the plan
 
@@ -140,7 +138,7 @@ All three fields are still useful without autorun — they document where review
 `sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
-Create one **child issue per task** under the feature epic — put the file-map slice, named tests, **risk marker, skill hints, and (where applicable) the `security-sensitive` label** in each issue body — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically. Beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+Create one **child issue per task** under the feature epic — put the file-map slice, named tests, and skill hints in each issue body, and set the **routing labels at create** (`-l risk:review-per-task`, `-l security-sensitive`, where applicable) — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically. Beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
 Do not write a `3_plan.md` or any step-doc file — there is no `.docs/`.
 
@@ -274,3 +272,7 @@ Before starting implementation, confirm:
 - [ ] No task touches more than ~5 files
 - [ ] Checkpoints exist between major phases
 - [ ] The human has reviewed and approved the plan (manual mode; under `autorun` the plan is recorded and surfaced but not gated — Define and the PR are the only human gates)
+
+## Handoff
+
+Present the file map and task list, then **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`): the `plan-review` gate — a staff-engineer design review of the spec + plan before any code. After it passes, the next recommendation is `incremental-implementation`. Do not create code or claim tasks until the user approves. (Under `autorun`, proceed directly — Define and the PR are the only human gates there.)

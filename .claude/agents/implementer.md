@@ -21,8 +21,9 @@ You run on a fast model by default; the caller may override the model per spawn.
 ## What you're given
 
 The dispatch contains your task's **extracted essentials** — description, acceptance
-criteria, named tests, file-map slice, **skill hints**, **risk marker** — plus the relevant
-**beads IDs** (your task, its dependencies, the epic). Work from that.
+criteria, named tests, file-map slice, **skill hints**, **routing labels** (`risk:*`,
+`security-sensitive`) — plus the relevant **beads IDs** (your task, its dependencies, the
+epic). Work from that.
 
 **Pull more on a need-to-know basis — don't preload.** If you discover you need something
 not in the dispatch (a dependency task's interface, a broader constraint on the epic, a

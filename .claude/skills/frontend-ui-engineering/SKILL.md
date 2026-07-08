@@ -334,7 +334,7 @@ function useToggleTask() {
 | "Accessibility is a nice-to-have"              | It's a legal requirement in many jurisdictions and an engineering quality standard.          |
 | "We'll make it responsive later"               | Retrofitting responsive design is 3x harder than building it from the start.                 |
 | "The design isn't final, so I'll skip styling" | Use the design system defaults. Unstyled UI creates a broken first impression for reviewers. |
-| "This is just a prototype"                     | Prototypes become production code. Build the foundation right.                               |
+| "This is just a prototype"                     | Prototypes become production code. Build the foundation right — a *deliberate* throwaway belongs in the `prototype` skill and gets deleted, never promoted. |
 | "The AI aesthetic is fine for now"             | It signals low quality. Use the project's actual design system from the start.               |
 
 ## Red Flags

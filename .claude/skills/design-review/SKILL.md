@@ -115,7 +115,7 @@ Grade every finding with exactly one of `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` /
   - **What** — the precise problem
   - **Fix** — exactly what to change, not a vague suggestion
 
-File an issue per unresolved finding linked to the feature epic/task (see [`.claude/references/beads.md`](../../references/beads.md)).
+File an issue per unresolved finding linked to the feature epic/task, labelled `finding:design` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)).
 
 ## Read-only
 
