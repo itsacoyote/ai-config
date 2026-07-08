@@ -271,3 +271,7 @@ After completing all increments for a task:
 - [ ] The build is clean
 - [ ] The feature works end-to-end as specified
 - [ ] No uncommitted changes remain
+
+## Handoff
+
+When the plan's last task is closed, present what was built (tasks closed, tests passing), then **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`): the `validate` skill — the independent review pass. Do not start Validate's reviews until the user approves. (Under `autorun`, proceed directly — Define and the PR are the only human gates there.)

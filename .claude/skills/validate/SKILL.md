@@ -90,4 +90,6 @@ Produce a validation summary: senior verdict + fix-iteration count; security ver
 
 Record the validation summary on the feature epic and close out resolved finding issues — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
 
-Then push the branch (`git push`) to flush any fix commits made during the rounds. Hand off to the `document` skill for the final documentation pass and PR (see `feature-workflow`).
+Then push the branch (`git push`) to flush any fix commits made during the rounds.
+
+Present the validation summary, then **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`): the `document` skill — the final documentation pass and PR. If unresolved findings were filed (`finding:*` issues), say so and recommend fixing or consciously deferring them first. Do not start Document until the user approves. (Under `autorun`, proceed directly — Define and the PR are the only human gates there.)

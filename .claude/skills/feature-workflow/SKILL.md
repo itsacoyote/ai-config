@@ -37,6 +37,26 @@ Each step has a clear entry/exit; advance only when the previous step's output i
 
 **Situational on-ramp — `wayfinder`.** When an idea is too big and too foggy for even Define to get traction — the way to the destination isn't visible yet — the `wayfinder` skill charts it as a shared map of investigation tickets in beads, resolved one per session until the route is clear. Most maps end by handing one or more definable features to Define.
 
+## Step handoff: recommend, then wait
+
+In manual mode, **every step ends the same way** — this is the contract each step skill implements:
+
+1. **Present the step's output** (the spec, the findings, the plan, the validation summary).
+2. **Recommend the next move by name** — the default next step, plus any situational skill the output signals (table below). The user shouldn't have to remember which skills exist; the recommendation is the reminder.
+3. **Stop and wait for explicit approval.** Do not begin the next step's work — no research reads, no task creation, no code — until the user says go. "No objection" is not approval; ask and wait.
+
+| After | Default next | Recommend instead / first, when the output signals it |
+|---|---|---|
+| Define | `research` | Spec approved but *how it behaves or looks* is still fuzzy (novel/complex UI, unsettled state model) → `prototype` first, fold the answer back in. Idea still foggy despite the conversation → `wayfinder`. |
+| Research | `planning-and-task-breakdown` | Findings surfaced a design question cheaper to answer in code than in the plan → `prototype` first. |
+| Plan | `plan-review` (the mandatory gate) | — |
+| Plan review passed | `incremental-implementation` | Fundamental approach concerns → back to Define. |
+| Implement | `validate` | Risky chunk mid-implement → `efficiency-review` / `senior-review` checkpoint now rather than at the end. |
+| Validate | `document` | Unresolved findings → fix or file them first. |
+| Document | done — PR ready for human review | — |
+
+Under `autorun` this per-step gate deliberately does **not** apply — autorun is the explicit opt-in to run Research → Document without stopping; Define and the PR stay the only human gates there.
+
 ## State and handoff
 
 **Preflight (required).** Before doing any workflow work, verify beads is set up:

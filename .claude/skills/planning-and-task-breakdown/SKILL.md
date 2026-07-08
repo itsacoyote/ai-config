@@ -272,3 +272,7 @@ Before starting implementation, confirm:
 - [ ] No task touches more than ~5 files
 - [ ] Checkpoints exist between major phases
 - [ ] The human has reviewed and approved the plan (manual mode; under `autorun` the plan is recorded and surfaced but not gated — Define and the PR are the only human gates)
+
+## Handoff
+
+Present the file map and task list, then **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`): the `plan-review` gate — a staff-engineer design review of the spec + plan before any code. After it passes, the next recommendation is `incremental-implementation`. Do not create code or claim tasks until the user approves. (Under `autorun`, proceed directly — Define and the PR are the only human gates there.)

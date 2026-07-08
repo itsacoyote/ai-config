@@ -69,4 +69,12 @@ An ADR written here is a real file that must reach the repo. It won't be picked 
 
 ## Approval checkpoint
 
-Before handing off to Research, present the **Summary** and **Acceptance Criteria** and ask the user to approve or give feedback. Revise and re-present until approved. Only after approval, move on — either continue by hand with the `research` skill, or hand the rest of the workflow to `autorun` to run Research → Document autonomously under supervision (see `feature-workflow`).
+Before handing off to Research, present the **Summary** and **Acceptance Criteria** and ask the user to approve or give feedback. Revise and re-present until approved.
+
+Once the spec is approved, **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`):
+
+- **Default:** the `research` skill.
+- **Recommend `prototype` first** when the spec settled *what* but left *how it behaves or looks* fuzzy — novel or complex UI, an unsettled state model, a data shape nobody can quite picture. Name the open question; the prototype's answer folds back into the spec before Research.
+- **Recommend `autorun`** if the user wants the rest of the workflow (Research → Document) run autonomously under supervision.
+
+Do not start Research (or anything else) until the user picks.
