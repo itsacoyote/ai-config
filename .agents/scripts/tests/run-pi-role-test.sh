@@ -33,7 +33,7 @@ printf '%s\n' "${PI_ROLE_FAKE_OUTPUT:-fake-pi-output}"
 FAKE
 chmod +x "$TMP/pi"
 
-export PI_ROLE_PI_BIN="$TMP/pi"
+export PATH="$TMP:$PATH"
 export PI_ROLE_LOCK_ROOT="$TMP/locks"
 
 capture_run() {
@@ -142,6 +142,13 @@ assert args[index + 1] == os.environ["EXTENSION"]
 PY
 }
 
+test_direct_implementation_requires_sandbox_launcher() {
+  local capture="$TMP/direct-implementation.json"
+  rm -f "$capture"
+  if PI_ROLE_SANDBOXED_IMPLEMENTATION=1 PI_ROLE_CAPTURE="$capture" "$RUNNER" implementer -- "edit" >"$TMP/out" 2>"$TMP/err"; then return 1; fi
+  [[ ! -e "$capture" ]] && grep -q 'disabled in the generic runner' "$TMP/err"
+}
+
 test_parallel_implementation_rejected() {
   local capture="$TMP/parallel.json"
   rm -f "$capture"
@@ -153,7 +160,7 @@ test_parallel_implementation_rejected() {
 
 test_full_absolute_methodology_paths() {
   local capture="$TMP/methodology.json"
-  capture_run "$capture" implementer -- "bounded task"
+  capture_run "$capture" qa-review -- "bounded verification"
   ROOT="$ROOT" python3 - "$capture" <<'PY'
 import json, os, sys
 from pathlib import Path
@@ -162,11 +169,9 @@ root = Path(os.environ["ROOT"])
 appended = [args[i + 1] for i, value in enumerate(args[:-1]) if value == "--append-system-prompt"]
 expected = [
     root / "AGENTS.md",
-    root / ".agents/agents/implementer.md",
-    root / ".agents/skills/incremental-implementation/SKILL.md",
+    root / ".agents/agents/qa-review.md",
+    root / ".agents/skills/qa-review/SKILL.md",
     root / ".agents/skills/writing-tests/SKILL.md",
-    root / ".agents/skills/find-patterns/SKILL.md",
-    root / ".agents/skills/project-checks/SKILL.md",
 ]
 for path in expected:
     resolved = str(path.resolve())
@@ -191,16 +196,16 @@ test_out_of_tree_skill_symlink_fails_closed() {
   [[ ! -e "$capture" ]] && grep -q 'containment failed' "$TMP/err"
 }
 
-test_implementation_lock() {
+test_verification_lock() {
   local first="$TMP/lock-first.json"
   local second="$TMP/lock-second.json"
-  PI_ROLE_CAPTURE="$first" PI_ROLE_FAKE_SLEEP=2 "$RUNNER" implementer -- "first" >"$TMP/first-out" 2>"$TMP/first-err" &
+  PI_ROLE_CAPTURE="$first" PI_ROLE_FAKE_SLEEP=2 "$RUNNER" qa-review -- "first" >"$TMP/first-out" 2>"$TMP/first-err" &
   local pid=$!
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     [[ -e "$first" ]] && break
     sleep 0.1
   done
-  if PI_ROLE_CAPTURE="$second" "$RUNNER" implementer -- "second" >"$TMP/second-out" 2>"$TMP/second-err"; then
+  if PI_ROLE_CAPTURE="$second" "$RUNNER" qa-review -- "second" >"$TMP/second-out" 2>"$TMP/second-err"; then
     wait "$pid"
     return 1
   fi
@@ -212,7 +217,7 @@ test_signal_forwarding_and_cleanup() {
   local capture="$TMP/signal.json"
   local child_pid_file="$TMP/child.pid"
   PI_ROLE_CAPTURE="$capture" PI_ROLE_FAKE_PID_FILE="$child_pid_file" PI_ROLE_FAKE_SLEEP=30 \
-    "$RUNNER" implementer -- "cancel me" >"$TMP/signal-out" 2>"$TMP/signal-err" &
+    "$RUNNER" qa-review -- "cancel me" >"$TMP/signal-out" 2>"$TMP/signal-err" &
   local runner_pid=$!
   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     [[ -s "$child_pid_file" ]] && break
@@ -241,11 +246,11 @@ test_saved_session_opt_in() {
 
 test_tools_derive_from_role() {
   local review="$TMP/review-tools.json"
-  local implement="$TMP/implement-tools.json"
+  local verification="$TMP/verification-tools.json"
   capture_run "$review" senior-review -- "review"
-  capture_run "$implement" implementer -- "edit"
+  capture_run "$verification" qa-review -- "verify"
   json_assert "$review" "args[args.index('--tools') + 1] == 'read,grep,find,ls,bash'"
-  json_assert "$implement" "args[args.index('--tools') + 1] == 'read,grep,find,ls,bash,web,browser,edit,write'"
+  json_assert "$verification" "args[args.index('--tools') + 1] == 'read,grep,find,ls,bash,browser,write'"
 }
 
 run_test 'rejects unknown roles before spawning pi' test_unknown_role
@@ -256,16 +261,17 @@ run_test 'keeps CLI-like task prefixes inside task data' test_cli_like_tasks_are
 run_test 'overrides ambient global SYSTEM and APPEND_SYSTEM prompts' test_system_prompts_overridden
 run_test 're-adds only declared role resources and trusted root guidance explicitly' test_declared_resources_only
 run_test 'requires an explicit opt-in to load extensions' test_extension_opt_in
+run_test 'rejects direct implementation without the sandbox launcher' test_direct_implementation_requires_sandbox_launcher
 run_test 'rejects parallel execution for a source-editing role' test_parallel_implementation_rejected
 run_test 'preloads full declared skill files and role prompt by absolute path' test_full_absolute_methodology_paths
 run_test 'fails closed when a declared skill resolves outside the library' test_out_of_tree_skill_symlink_fails_closed
-run_test 'serializes source-editing workers with an atomic lock' test_implementation_lock
+run_test 'serializes verification workers with an atomic lock' test_verification_lock
 run_test 'forwards cancellation to Pi and cleans up the lock' test_signal_forwarding_and_cleanup
 run_test 'allows saved sessions only by explicit opt-in' test_saved_session_opt_in
 run_test 'derives built-in tools from the neutral role capabilities' test_tools_derive_from_role
 
 if [[ "${RUN_REAL_PI_TESTS:-0}" == 1 ]]; then
-  unset PI_ROLE_PI_BIN PI_ROLE_CAPTURE PI_ROLE_FAKE_SLEEP
+  unset PI_ROLE_CAPTURE PI_ROLE_FAKE_SLEEP
   before=$(git -C "$ROOT" status --porcelain)
   output=$(
     "$RUNNER" efficiency-review -- \

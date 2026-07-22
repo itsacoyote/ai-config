@@ -74,6 +74,6 @@ Skip the full workflow for trivial work — a one-line fix does not need the who
 
 ## Running it: by hand or with autorun
 
-Run the steps yourself, one at a time — the manual flow above. Or, after Define, hand the rest to **`autorun`**: a supervised orchestrator that runs Research → Document in one pass, implementing each task in a fresh `implementer` subagent, with permissions enforced (you approve actions as they happen) and stopping at a ready-for-review PR. **Two human gates either way — Define and the PR review.**
+Run the steps yourself, one at a time — the manual flow above. Or, after Define, hand the rest to **`autorun`**: a supervised orchestrator that runs Research → Document in one pass, implementing each task in a fresh `implementer` subagent, with permissions enforced (you approve actions as they happen) and stopping at the draft-PR human handoff. **Two human gates either way — Define and the PR review.**
 
 `autorun` is the in-session, permissions-on automation — *not* an unattended/headless runner; that remains future work. (The archived `/feature` skill automated this differently and is not active.)

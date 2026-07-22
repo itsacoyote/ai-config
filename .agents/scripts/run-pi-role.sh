@@ -4,7 +4,24 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 MANIFEST="$ROOT/.agents/agents/roles.json"
 VALIDATOR="$ROOT/.agents/scripts/validate-roles.py"
-PI_BIN=${PI_ROLE_PI_BIN:-pi}
+PI_BIN=$(command -v pi) || { printf '%s\n' 'run-pi-role: pi executable not found' >&2; exit 2; }
+PI_BIN=$(python3 - "$PI_BIN" <<'PY'
+import os, stat, sys
+path = os.path.realpath(sys.argv[1])
+metadata = os.stat(path)
+if metadata.st_uid not in {0, os.geteuid()} or stat.S_IMODE(metadata.st_mode) & 0o022:
+    raise SystemExit("pi executable has unsafe owner or permissions")
+parent = os.path.dirname(path)
+while True:
+    value = os.stat(parent); mode = stat.S_IMODE(value.st_mode)
+    if value.st_uid not in {0, os.geteuid()} or mode & 0o020 or (mode & 0o002 and not mode & stat.S_ISVTX):
+        raise SystemExit(f"pi executable ancestor is unsafe: {parent}")
+    next_parent = os.path.dirname(parent)
+    if next_parent == parent: break
+    parent = next_parent
+print(path)
+PY
+) || { printf '%s\n' 'run-pi-role: untrusted pi executable' >&2; exit 2; }
 
 usage() {
   cat <<'EOF'
@@ -181,6 +198,9 @@ skill_paths=("${role_lines[@]:3}")
 
 if [[ $mode != read-only && $parallel -eq 1 ]]; then
   die "write-capable role '$role' cannot run in parallel"
+fi
+if [[ $mode == implementation ]]; then
+  die "implementation role '$role' is disabled in the generic runner; use the trusted sandbox launcher"
 fi
 
 for path in "$root_guidance" "$prompt_path" "${skill_paths[@]}"; do
