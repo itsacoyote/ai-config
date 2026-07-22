@@ -17,6 +17,9 @@
       "wayfinder"
     ]
   },
+  "installation": {
+    "upgrade_from_manifest_sha256": []
+  },
   "library": {
     "role_count": 15,
     "skill_count": 49
@@ -58,17 +61,19 @@
       ".agents/scripts/beads-preflight.sh": "sha256:480bd7f1d611694fbd0c5e87937c42265763745111a66d71ead63fdb9a199572",
       ".agents/scripts/diff-scope.sh": "sha256:f2a912cf7efe822eadebf947e2d92d5669b6205fc06c6277325ba25b96c1f55e",
       ".agents/scripts/generate-catalog.py": "sha256:29c3e047345eec97497beb026a5ee6a1d505988e4ca7d0995823472dddcee83a",
+      ".agents/scripts/install-library.sh": "sha256:1915b49219ef97b9ab745e5dae4be91ee13c5b48eb03863e1fd6c0e7de6944c7",
       ".agents/scripts/run-pi-role.sh": "sha256:0b167bb4a00a18ca3f7b5c4c7a304bffcf9886bf5f258cb8e363f3655d79fec1",
+      ".agents/scripts/tests/install-library-test.sh": "sha256:c406e85e202002f66bb2fc9c85f81ebaba4354c8f31a9eb7951d5179de26be8e",
       ".agents/scripts/tests/run-pi-role-test.sh": "sha256:b8170a1f9704a7fe40a1296e5b1083b71ccae88c732ad577d724b66d52a9e146",
       ".agents/scripts/tests/test_foundational_workflow_skills.py": "sha256:e4453da912d37ca951243f0101d0937ff28d0d0a6dff896bf0f9978593182eff",
       ".agents/scripts/tests/test_generate_catalog.py": "sha256:a59d5b13a46475ff65775c2c9e6ee748a9c766b86652d0ac017b49f23165a81f",
       ".agents/scripts/tests/test_review_orchestration_skills.py": "sha256:ed398e168208ad78f70d1d1da58fe9153db3671f4655018b237f539a9fbfc07c",
       ".agents/scripts/tests/test_supervised_workflow_skills.py": "sha256:d781b0127d5734b8a60c185ac1984dea8b9af7090a45e4a3c119fd8ae19c202e",
       ".agents/scripts/tests/test_validate_codex_agents.py": "sha256:a2d798de9ac2cf7649a942d5ac82c3f0b1546fd20117cceafaad6d6999b471e1",
-      ".agents/scripts/tests/test_validate_library.py": "sha256:cdaf58f9d57ff0a4168fa64777cef7e48eb0a43ff48b19fc0cf8f8b35030d34c",
+      ".agents/scripts/tests/test_validate_library.py": "sha256:b04b032d2ab34d83e942406c90fba659a50870fd2d6033be43980d15b895c51a",
       ".agents/scripts/tests/test_validate_qa_result.py": "sha256:c654f07a0169c3994f8f2f41dfa9ec09095c50a797c7a419af46a906c65cd58a",
       ".agents/scripts/tests/test_validate_roles.py": "sha256:e59ba1cf7e21b464f93fc021df4fc261733ab5cbcd353f029698cdd4e281a282",
-      ".agents/scripts/validate-library.py": "sha256:7ab52df62d185f6bb636912c145bb0f2ee177661508ee58f70b9394e8b8d9e51",
+      ".agents/scripts/validate-library.py": "sha256:0276fb44729c95686b81230821e4411fbf00afb81dafa07fd28c349d5a14b124",
       ".agents/scripts/validate-qa-result.py": "sha256:2030c85c0a71c05fc9ac8dc74b806d0fd9511bcb94cd726d34f6d6848f58f551",
       ".agents/scripts/validate-roles.py": "sha256:92a95729fa0d7618dcd8adcddc930114e17ee4f10b1634ddc4429568fa8a9931",
       ".agents/scripts/worktree-status.sh": "sha256:9dddde145e4d4c837ca9e45d6b8263af76ca30a5bccf23c1c914a1ac92238c96",
@@ -303,7 +308,9 @@
       ".agents/scripts/beads-preflight.sh",
       ".agents/scripts/diff-scope.sh",
       ".agents/scripts/generate-catalog.py",
+      ".agents/scripts/install-library.sh",
       ".agents/scripts/run-pi-role.sh",
+      ".agents/scripts/tests/install-library-test.sh",
       ".agents/scripts/tests/run-pi-role-test.sh",
       ".agents/scripts/tests/test_foundational_workflow_skills.py",
       ".agents/scripts/tests/test_generate_catalog.py",

@@ -16,7 +16,7 @@ import tomllib
 from pathlib import Path
 
 SELF = ".agents/manifest.json"
-TOP_KEYS = {"version", "library", "ownership", "explicit_only", "portability", "roles", "source_parity"}
+TOP_KEYS = {"version", "library", "ownership", "explicit_only", "portability", "roles", "source_parity", "installation"}
 PORTABILITY_CLASSES = {"portable", "adapted", "harness-orchestrated", "capability-limited"}
 LINK = re.compile(r"\[[^]]+\]\(([^)]+)\)")
 FORBIDDEN = ("${CLAUDE_SKILL_DIR}", ".claude/", "Agent(", "Agent tool")
@@ -110,6 +110,12 @@ def load_manifest(root: Path) -> dict:
         raise InvalidLibrary("ownership files have invalid types")
     if not isinstance(ownership["checksums"], dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in ownership["checksums"].items()):
         raise InvalidLibrary("ownership checksums have invalid types")
+    installation = manifest["installation"]
+    if not isinstance(installation, dict) or set(installation) != {"upgrade_from_manifest_sha256"}:
+        raise InvalidLibrary("invalid installation schema")
+    prior_hashes = installation["upgrade_from_manifest_sha256"]
+    if not isinstance(prior_hashes, list) or any(not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value) for value in prior_hashes) or prior_hashes != sorted(set(prior_hashes)):
+        raise InvalidLibrary("invalid trusted prior manifest checksum inventory")
     library = manifest["library"]
     if not isinstance(library, dict) or set(library) != {"skill_count", "role_count"} or not all(type(value) is int and value >= 0 for value in library.values()):
         raise InvalidLibrary("invalid library schema")

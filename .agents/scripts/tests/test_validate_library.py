@@ -292,6 +292,16 @@ class ValidateLibraryTest(unittest.TestCase):
         self.assertNotEqual(nested_result.returncode, 0)
         self.assertIn("portability schema", nested_result.stderr.lower())
 
+        temporary3, root3 = self.fixture()
+        self.addCleanup(temporary3.cleanup)
+        mixed = json.loads((root3 / MANIFEST).read_text())
+        mixed["installation"]["upgrade_from_manifest_sha256"] = [1, "sha256:" + "0" * 64]
+        (root3 / MANIFEST).write_text(json.dumps(mixed))
+        mixed_result = self.run_validator(root3)
+        self.assertNotEqual(mixed_result.returncode, 0)
+        self.assertNotIn("Traceback", mixed_result.stderr)
+        self.assertIn("trusted prior", mixed_result.stderr.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
