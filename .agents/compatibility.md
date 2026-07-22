@@ -1,6 +1,6 @@
 # Agent Library Compatibility
 
-This matrix describes behavior, not a security boundary. `roles.json` and harness adapters remain the executable policy sources.
+This matrix describes behavior, not a security boundary. `roles.json` is policy input interpreted by adapters; enforcement comes from the harness or an external sandbox.
 
 ## Compatibility classes
 
@@ -88,5 +88,6 @@ All roles use the neutral `.agents/agents/roles.json` contract. Codex maps them 
 ## Known boundaries
 
 - Pi has no native MCP; browser workflows require an available CLI or extension capability.
+- Pi generic-worker read-only/verification boundaries are behavioral, not an OS sandbox. Untrusted repository or PR content requires an external sandbox/container.
 - Skill tool metadata is descriptive and is not portable permission enforcement.
 - Neither `.claude/` nor `.agents/` is canonical until cross-harness parity has been demonstrated and recorded; intentional differences are declared in `.agents/manifest.json`.

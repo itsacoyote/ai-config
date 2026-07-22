@@ -27,7 +27,10 @@ class ValidateLibraryTest(unittest.TestCase):
         shutil.copytree(ROOT / ".agents", root / ".agents")
         shutil.copytree(ROOT / ".codex", root / ".codex")
         shutil.copytree(ROOT / ".claude", root / ".claude")
-        shutil.copy2(ROOT / "AGENTS.md", root / "AGENTS.md")
+        shutil.copytree(ROOT / "docs", root / "docs")
+        (root / "archive").mkdir()
+        for name in ("AGENTS.md", "README.md", "CLAUDE.md"):
+            shutil.copy2(ROOT / name, root / name)
         return temporary, root
 
     def refresh_checksum(self, root: Path, relative: str) -> None:

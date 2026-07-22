@@ -206,7 +206,9 @@ def validate_links(root: Path) -> None:
     sources = list((root / ".agents/skills").rglob("*.md"))
     sources += list((root / ".agents/agents").glob("*.md"))
     sources += list((root / ".agents/references").glob("*.md"))
-    sources += [root / ".agents/compatibility.md", root / ".agents/catalog.md"]
+    sources += [root / ".agents/compatibility.md", root / ".agents/catalog.md", root / "README.md", root / "CLAUDE.md", root / "AGENTS.md"]
+    sources += list((root / "docs").rglob("*.md"))
+    sources = [source for source in sources if source.is_file()]
     for source in sources:
         for target in LINK.findall(source.read_text()):
             clean = target.split("#", 1)[0]

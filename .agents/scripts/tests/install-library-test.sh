@@ -165,7 +165,8 @@ idempotent_install() {
 }
 installed_project_validates() {
   local project="$TMP/validated-project"
-  mkdir -p "$project"; cp -R "$ROOT/.claude" "$project/.claude"; cp -R "$ROOT/.codex" "$project/.codex"; cp "$ROOT/AGENTS.md" "$project/AGENTS.md"
+  mkdir -p "$project/archive"; cp -R "$ROOT/.claude" "$project/.claude"; cp -R "$ROOT/.codex" "$project/.codex"; cp -R "$ROOT/docs" "$project/docs"
+  cp "$ROOT/AGENTS.md" "$ROOT/README.md" "$ROOT/CLAUDE.md" "$project/"
   "$INSTALLER" --source "$ROOT/.agents" --target "$project/.agents" >/dev/null
   python3 "$ROOT/.agents/scripts/validate-library.py" --root "$project" >/dev/null && cmp "$ROOT/.agents/manifest.json" "$project/.agents/manifest.json"
 }

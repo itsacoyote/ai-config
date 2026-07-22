@@ -1,21 +1,74 @@
 # AI Config
 
-A portable, copy-paste library of [Claude Code](https://docs.claude.com/en/docs/claude-code) **skills, agents, rules, and references**. It gives Claude a structured, manual feature-development workflow — **Define → Research → Plan → Implement → Validate → Document** — plus a deep bench of engineering-quality skills (testing, security, API design, frontend, git, docs).
+A side-by-side configuration library for [Claude Code](https://docs.claude.com/en/docs/claude-code), Codex, and Pi. It provides a structured feature workflow — **Define → Research → Plan → Implement → Validate → Document** — plus engineering-quality skills for testing, security, API design, frontend, git, and documentation.
 
-It runs **manual by default** — you drive each step — with an optional **supervised orchestrator** (`autorun`) that runs the post-Define steps for you, implementing one task at a time in fresh subagents while keeping permissions on and stopping at a ready-for-review PR. There's deliberately no *unattended* runner yet — the human stays in the loop at two gates (Define and the PR) and approves actions as they happen.
+It runs **manual by default**. The optional supervised `autorun` orchestrator runs post-Define phases in order, may parallelize read-only research/review lenses, strictly serializes implementation and source editing, keeps permissions active, and stops at the draft-PR human handoff. The human remains responsible for the Define approval and PR review gates.
 
-Drop `.claude/` into any project and the workflow and skills come with it.
+- `.claude/` preserves the existing Claude Code implementation, including hooks, rules, and settings.
+- `.agents/` is the portable Agent Skills library, shared references/scripts, and neutral role contract.
+- `.codex/` adapts neutral roles to Codex custom agents.
+- Pi uses dedicated sessions and fresh bash-launched workers; no subagent extension or tmux installation is required.
+
+Neither `.claude/` nor `.agents/` is canonical across harnesses until parity is demonstrated and recorded. See [ADR 0003](docs/decisions/0003-agent-agnostic-library.md).
 
 ---
 
-## The workflow
+## Portable library quick start
 
-Six steps, each a skill you invoke when you're ready to move on. The `feature-workflow` skill is the in-repo map of all of this.
+### Install the complete personal library
+
+Install the whole `.agents/` tree; individual skills can depend on its references, scripts, schemas, and role prompts.
+
+```bash
+# Preview first
+./.agents/scripts/install-library.sh --target "$HOME/.agents" --dry-run
+
+# Install or safely upgrade
+./.agents/scripts/install-library.sh --target "$HOME/.agents"
+```
+
+The installer preserves unrelated files and refuses collisions or locally modified owned files. Review its report before using `--replace`. A release that removes files from an older release must authenticate that exact prior manifest in the new source manifest. Optional `.codex/` project adapters and root `AGENTS.md` are intentionally outside the personal install.
+
+For project-local use, copy the complete `.agents/` directory into the project, add the root [`AGENTS.md`](AGENTS.md), and optionally add [`.codex/`](.codex) for Codex custom roles. Claude projects continue to copy `.claude/` as before.
+
+### Invoke by harness
+
+| Harness | Skills | Isolated roles | Important limitation |
+| --- | --- | --- | --- |
+| Claude Code | Existing slash commands such as `/define` and `/validate`; other skills load when relevant | Thin `.claude/agents/*.md` subagents | `.claude/` remains unchanged during parity work |
+| Codex | Discover under `.agents/skills/`; explicitly invoke with `$skill-name` when required | `.codex/agents/*.toml`, validated against neutral `roles.json` | `agents/openai.yaml` supplies Codex's explicit-only policy |
+| Pi | Discover portable skills in interactive sessions; invoke explicitly with `/skill:name` | Fresh `.agents/scripts/run-pi-role.sh` workers or a dedicated Research session | No native MCP; use available browser CLI/extension capability or record a static/skip limitation |
+
+`define`, `research`, `wayfinder`, `validate`, `pr-review`, `autorun`, `document`, and maintenance commands are intentional user actions. Do not treat `allowed-tools` or skill metadata as portable security enforcement.
+
+### Permissions and orchestration
+
+- `.agents/agents/roles.json` is machine-readable policy input interpreted by adapters; it is not itself a security boundary. Prompts and filenames do not grant permissions.
+- Codex read-only roles use a read-only sandbox. `qa-review` may write generated evidence only. The implementer inherits the supervised parent policy.
+- The generic Pi runner rejects implementation, but its read-only/verification boundaries are behavioral—not an OS-enforced filesystem sandbox. Do not use generic workers against untrusted repositories or PR content without an external sandbox/container. Pi source editing must always go through `autorun`'s external sandbox launcher; without that launcher, it blocks.
+- Research on Pi defaults to a dedicated session and persists its synthesis to beads. Saved sessions are optional; tmux is only an optional operator convenience.
+- Browser workflows use available Chrome DevTools, Playwright, CLI, or extension capabilities and explicitly degrade when none exists.
+
+### Validate and maintain
+
+```bash
+python3 .agents/scripts/generate-catalog.py --check
+python3 .agents/scripts/validate-library.py
+bash .agents/scripts/tests/install-library-test.sh
+```
+
+The generated [skill catalog](.agents/catalog.md) groups all 49 flat skills by `metadata.category`. The [compatibility matrix](.agents/compatibility.md) records portable, adapted, harness-orchestrated, and capability-limited behavior.
+
+---
+
+## The Claude workflow
+
+The workflow is shared across harnesses, but the invocation syntax in this section is the preserved Claude Code syntax. Codex and Pi users should follow the [harness table](#invoke-by-harness). Six steps run in order; `feature-workflow` is the in-repo map.
 
 ```text
 Define ──▶ Research ──▶ Plan ──▶ Implement ──▶ Validate ──▶ Document
 (spec +    (study the   (file    (build it    (senior +    (docs +
- approval)  codebase)    map +    task by      QA review)   PR ready)
+ approval)  codebase)    map +    task by      QA review)   PR handoff)
                          tasks)   task)
 ```
 
@@ -26,7 +79,7 @@ Define ──▶ Research ──▶ Plan ──▶ Implement ──▶ Validate 
 | **Plan** | `planning-and-task-breakdown` | A file map + dependency-ordered tasks with named tests |
 | **Implement** | `incremental-implementation` | The change, built task by task, tests passing, committed |
 | **Validate** | `/validate` | Reviews passed (spawns the `senior-review` + `security-scan` + `design-review` (conditional, frontend) + `qa-review` agents), findings fixed |
-| **Document** | `/document` | Docs updated, PR description written, PR readied |
+| **Document** | `/document` | Docs updated, PR description prepared, human PR handoff |
 
 Run the steps in order; advance only when the previous step's output is in hand. **Every step ends by recommending the next move — the default next step, plus situational skills its output signals (e.g. `prototype` after a Define that left UI behavior fuzzy) — and waits for your explicit go before starting it** (`autorun` is the opt-out). Skip the whole thing for trivial changes — it earns its keep on real features where a missed requirement or skipped review is expensive. Start with `feature-workflow` if you want the full map.
 
@@ -38,9 +91,9 @@ Run the **`setup-beads`** skill to install `bd` and initialize an isolated local
 
 ---
 
-## Skills
+## Claude skills
 
-Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load automatically when relevant (and can still be invoked with `/`).
+This catalog describes the preserved `.claude/` library. Skills marked **`/cmd`** are invoked explicitly in Claude Code (`/name`); the rest load automatically when relevant (and can still be invoked with `/`). For portable inventory and cross-harness invocation, use [`.agents/catalog.md`](.agents/catalog.md) and the [harness table](#invoke-by-harness).
 
 ### Workflow steps
 
@@ -53,7 +106,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `validate` `/cmd` | Sequence senior + security + QA review with bounded fix loops |
 | `document` `/cmd` | Pre-PR documentation audit + PR description |
 | `feature-workflow` | The map of the six steps and which skill/agent owns each |
-| `autorun` `/cmd` | Supervised-autonomous orchestrator: after Define, runs Research→Document one task at a time in fresh subagents, permissions on, stopping at a ready-for-review PR |
+| `autorun` `/cmd` | Supervised orchestrator: runs Research→Document phases in order, may parallelize read-only lenses, serializes implementers/source editing, and stops at the human PR handoff |
 | `wayfinder` `/cmd` | Situational on-ramp *before* Define for ideas too big and foggy for one session — charts a shared map of investigation tickets in beads (a `wayfinder:map` epic; `bd ready --parent` is the frontier), resolves one ticket per session until the way is clear |
 
 ### Research support
@@ -93,7 +146,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `documentation-and-adrs` | Record decisions and keep documentation current |
 | `deprecation-and-migration` | Remove and migrate old systems safely |
 | `ci-cd-and-automation` | Build/deploy pipelines and quality gates |
-| `browser-testing-with-devtools` | Verify UI against a real browser (needs the chrome-devtools MCP) |
+| `browser-testing-with-devtools` | Verify UI against a real browser using an available DevTools, Playwright, CLI, MCP, or extension capability |
 
 ### Technology specialists
 
@@ -173,7 +226,9 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 
 ---
 
-## Using this in another project
+## Using the Claude library in another project
+
+The portable/Codex setup is covered in [Portable library quick start](#portable-library-quick-start). For the preserved Claude Code setup:
 
 1. **Copy `.claude/` into the target project's root** — skills, agents, rules, and references all live there and travel together. (When copying an individual skill, bring any `.claude/references/` file it points to as well.)
 2. **The project's own `CLAUDE.md` does not come from here** — this repo's `CLAUDE.md` documents *this* repo. To orient Claude to the workflow in the target project, paste the snippet below into that project's `CLAUDE.md` and adapt it.
@@ -227,13 +282,18 @@ Both are optional — skills degrade gracefully when a server isn't present (e.g
 ## Repo layout
 
 ```text
-.claude/
-├── skills/        # the skills above (one folder each, SKILL.md + optional files)
-├── agents/        # the review/implementer agents above (one .md each)
-├── rules/         # always-on conventions
-└── references/    # shared knowledge skills point to
-archive/           # the previous automated pipeline, kept for reference
-CLAUDE.md          # how to work IN this repo (does not travel to other projects)
+.agents/
+├── skills/        # 49 flat portable Agent Skills
+├── agents/        # neutral role prompts, roles.json, and QA schema
+├── references/    # shared portable knowledge
+├── scripts/       # validators, Pi runner, and safe installer
+├── catalog.md     # generated category catalog
+└── manifest.json  # versioned ownership/checksum contract
+.codex/agents/     # thin project custom-agent adapters
+.claude/           # preserved Claude skills, agents, rules, hooks, and references
+AGENTS.md          # portable project guidance loaded by Codex and Pi
+archive/           # previous automated pipeline, kept for reference
+CLAUDE.md          # maintainer guidance for this repository only
 ```
 
 The `archive/` directory holds the previous fully-automated pipeline (the `/feature` orchestrator, `context.yaml`, step agents) — preserved for reference while the workflow is rebuilt manually.
