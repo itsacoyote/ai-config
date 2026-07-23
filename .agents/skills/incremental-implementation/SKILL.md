@@ -1,0 +1,279 @@
+---
+name: incremental-implementation
+description: Use when implementing a multi-file feature or change from a plan, especially when the work feels too large to land safely in one pass.
+metadata:
+  category: workflow
+---
+
+# Incremental Implementation
+
+## Overview
+
+Build in thin vertical slices — implement one piece, test it, verify it, then expand. Avoid implementing an entire feature in one pass. Each increment should leave the system in a working, testable state. This is the execution discipline that makes large features manageable.
+
+## When to Use
+
+- Implementing any multi-file change
+- Building a new feature from a task breakdown (see `planning-and-task-breakdown` for producing that breakdown)
+- Refactoring existing code
+- Any time you're tempted to write more than ~100 lines before testing
+
+**When NOT to use:** Single-file, single-function changes where the scope is already minimal.
+
+## The Increment Cycle
+
+```
+┌──────────────────────────────────────┐
+│                                      │
+│   Implement ──→ Test ──→ Verify ──┐  │
+│       ▲                           │  │
+│       └───── Commit ◄─────────────┘  │
+│              │                       │
+│              ▼                       │
+│          Next slice                  │
+│                                      │
+└──────────────────────────────────────┘
+```
+
+For each slice:
+
+1. **Implement** the smallest complete piece of functionality
+2. **Test** — run the test suite (or write a test if none exists; see `writing-tests` for what makes a good one)
+3. **Verify** — confirm the slice works as expected (manual check), then use `project-checks` to run the project's mechanical gates (typecheck, lint, format, spell, tests). Keep the tree green at every commit so nothing breaks CI later.
+4. **Commit** -- save your progress with a descriptive message (see `git-workflow-and-versioning` for atomic commit guidance)
+5. **Move to the next slice** — carry forward, don't restart
+
+The loop is **red → green**: a failing test (or a missing capability), then the minimal code that satisfies it. Refactoring is not a stage of the loop — simplification and cleanup belong to review (`efficiency-review` per task, Validate for the branch), not to the implement-test cycle. Don't fold "while I'm here" restructuring into a slice.
+
+## Working from a plan
+
+**Preflight (required).** Before doing any workflow work, resolve
+`../../scripts/beads-preflight.sh` relative to this skill's directory and execute the resolved
+absolute path. If it exits non-zero, **stop** — do not proceed without beads — and tell the
+user to run the `setup-beads` skill, then retry.
+
+When a plan exists (from `planning-and-task-breakdown`), implement its tasks in dependency order, one task per increment. Pull the next task with `bd ready`, `bd update <id> --claim` before starting it, and `bd close <id>` once its commit lands — beads is the system of record. See [`beads.md`](../../references/beads.md) for the full model. Maintain test coverage as you go — don't defer tests to the end (see `writing-tests`).
+
+### Review checkpoints (optional)
+
+For any non-trivial task, invoke `efficiency-review` as a cheap per-chunk pass — it catches
+YAGNI violations and unnecessary complexity early. For risky work (the task carries the
+`risk:review-per-task` label), also invoke `senior-review` at natural checkpoints for
+engineering quality. For security-sensitive code (auth, payments, input handling, crypto,
+queries), invoke `security-scan` before committing that chunk. Fix what they surface, then continue. For small, low-risk changes with
+no security surface, defer all review to the Validate step. This is judgment, not a mandate —
+match it to blast radius.
+
+These are the **canonical skills** you invoke in-session. Under `autorun`, the corresponding
+agents (`efficiency-review`, `senior-review`, `security-scan`) are spawned for you per the
+cadence — the methodology is the same, the mechanism differs.
+
+When the change is complete, hand off to the `validate` skill for the full review gate (see `feature-workflow` for the sequence).
+
+An orchestrator such as `autorun` may drive this loop by running each task in a fresh `implementer` role through the current harness's isolated-worker mechanism. Run exactly one source-editing worker at a time in a worktree; the discipline on this page is what that worker follows.
+
+## Slicing Strategies
+
+### Vertical Slices (Preferred)
+
+Build one complete path through the stack:
+
+```
+Slice 1: Create a task (DB + API + basic UI)
+    → Tests pass, user can create a task via the UI
+
+Slice 2: List tasks (query + API + UI)
+    → Tests pass, user can see their tasks
+
+Slice 3: Edit a task (update + API + UI)
+    → Tests pass, user can modify tasks
+
+Slice 4: Delete a task (delete + API + UI + confirmation)
+    → Tests pass, full CRUD complete
+```
+
+Each slice delivers working end-to-end functionality.
+
+### Contract-First Slicing
+
+When backend and frontend need to develop in parallel:
+
+```
+Slice 0: Define the API contract (types, interfaces, OpenAPI spec)
+Slice 1a: Implement backend against the contract + API tests
+Slice 1b: Implement frontend against mock data matching the contract
+Slice 2: Integrate and test end-to-end
+```
+
+### Risk-First Slicing
+
+Tackle the riskiest or most uncertain piece first:
+
+```
+Slice 1: Prove the WebSocket connection works (highest risk)
+Slice 2: Build real-time task updates on the proven connection
+Slice 3: Add offline support and reconnection
+```
+
+If Slice 1 fails, you discover it before investing in Slices 2 and 3.
+
+## Implementation Rules
+
+### Rule 0: Simplicity First
+
+Before writing any code, ask: "What is the simplest thing that could work?"
+
+After writing code, review it against these checks:
+
+- Can this be done in fewer lines?
+- Are these abstractions earning their complexity?
+- Would a staff engineer look at this and say "why didn't you just..."?
+- Am I building for hypothetical future requirements, or the current task?
+
+```
+SIMPLICITY CHECK:
+✗ Generic EventBus with middleware pipeline for one notification
+✓ Simple function call
+
+✗ Abstract factory pattern for two similar components
+✓ Two straightforward components with shared utilities
+
+✗ Config-driven form builder for three forms
+✓ Three form components
+```
+
+Three similar lines of code is better than a premature abstraction. Implement the naive, obviously-correct version first. Optimize only after correctness is proven with tests.
+
+### Rule 0.5: Scope Discipline
+
+Touch only what the task requires.
+
+Do NOT:
+
+- "Clean up" code adjacent to your change
+- Refactor imports in files you're not modifying
+- Remove comments you don't fully understand
+- Add features not in the spec because they "seem useful"
+- Modernize syntax in files you're only reading
+
+If you notice something worth improving outside your task scope, note it — don't fix it:
+
+```
+NOTICED BUT NOT TOUCHING:
+- src/utils/format.ts has an unused import (unrelated to this task)
+- The auth middleware could use better error messages (separate task)
+→ Want me to create tasks for these?
+```
+
+### Rule 1: One Thing at a Time
+
+Each increment changes one logical thing. Don't mix concerns:
+
+**Bad:** One commit that adds a new component, refactors an existing one, and updates the build config.
+
+**Good:** Three separate commits — one for each change.
+
+### Rule 2: Keep It Compilable
+
+After each increment, the project must build and existing tests must pass. Don't leave the codebase in a broken state between slices.
+
+### Rule 3: Feature Flags for Incomplete Features
+
+If a feature isn't ready for users but you need to merge increments:
+
+```typescript
+// Feature flag for work-in-progress
+const ENABLE_TASK_SHARING = process.env.FEATURE_TASK_SHARING === "true";
+
+if (ENABLE_TASK_SHARING) {
+  // New sharing UI
+}
+```
+
+This lets you merge small increments to the main branch without exposing incomplete work.
+
+### Rule 4: Safe Defaults
+
+New code should default to safe, conservative behavior:
+
+```typescript
+// Safe: disabled by default, opt-in
+export function createTask(data: TaskInput, options?: { notify?: boolean }) {
+  const shouldNotify = options?.notify ?? false;
+  // ...
+}
+```
+
+### Rule 5: Rollback-Friendly
+
+Each increment should be independently revertable:
+
+- Additive changes (new files, new functions) are easy to revert
+- Modifications to existing code should be minimal and focused
+- Database migrations should have corresponding rollback migrations
+- Avoid deleting something in one commit and replacing it in the same commit — separate them
+
+## Working with Isolated Workers
+
+When directing an isolated worker to implement incrementally:
+
+```
+"Let's implement Task 3 from the plan.
+
+Start with just the database schema change and the API endpoint.
+Don't touch the UI yet — we'll do that in the next increment.
+
+After implementing, run `npm test` and `npm run build` to verify
+nothing is broken."
+```
+
+Be explicit about what's in scope and what's NOT in scope for each increment.
+
+## Increment Checklist
+
+After each increment, verify:
+
+- [ ] The change does one thing and does it completely
+- [ ] The project's mechanical checks pass — run `project-checks`, which discovers and runs the project's own tests, build, typecheck, lint, format, and spell commands (don't assume `npm`; it works across toolchains)
+- [ ] The new functionality works as expected
+- [ ] The change is committed with a descriptive message
+
+**Note:** `project-checks` only runs a check after a change that could affect it and skips a check whose inputs haven't changed since it last passed — re-running on unchanged code adds no information.
+
+## Common Rationalizations
+
+| Rationalization                                      | Reality                                                                                                                                                     |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "I'll test it all at the end"                        | Bugs compound. A bug in Slice 1 makes Slices 2-5 wrong. Test each slice.                                                                                    |
+| "It's faster to do it all at once"                   | It _feels_ faster until something breaks and you can't find which of 500 changed lines caused it.                                                           |
+| "These changes are too small to commit separately"   | Small commits are free. Large commits hide bugs and make rollbacks painful.                                                                                 |
+| "I'll add the feature flag later"                    | If the feature isn't complete, it shouldn't be user-visible. Add the flag now.                                                                              |
+| "This refactor is small enough to include"           | Refactors mixed with features make both harder to review and debug. Separate them.                                                                          |
+| "Let me run the build command again just to be sure" | After a successful run, repeating the same command adds nothing unless the code has changed since. Run it again after subsequent edits, not as reassurance. |
+
+## Red Flags
+
+- More than 100 lines of code written without running tests
+- Multiple unrelated changes in a single increment
+- "Let me just quickly add this too" scope expansion
+- Skipping the test/verify step to move faster
+- Build or tests broken between increments
+- Large uncommitted changes accumulating
+- Building abstractions before the third use case demands it
+- Touching files outside the task scope "while I'm here"
+- Creating new utility files for one-time operations
+- Running the same build/test command twice in a row without any intervening code change
+
+## Verification
+
+After completing all increments for a task:
+
+- [ ] Each increment was individually tested and committed
+- [ ] The full test suite passes
+- [ ] The build is clean
+- [ ] The feature works end-to-end as specified
+- [ ] No uncommitted changes remain
+
+## Handoff
+
+When the plan's last task is closed, present what was built (tasks closed, tests passing), then **recommend the next move and wait for an explicit go** (the step-handoff contract in `feature-workflow`): the `validate` skill — the independent review pass. Do not start Validate's reviews until the user approves. (Under `autorun`, proceed directly — Define and the PR are the only human gates there.)
