@@ -62,7 +62,7 @@
       ".agents/scripts/diff-scope.sh": "sha256:f2a912cf7efe822eadebf947e2d92d5669b6205fc06c6277325ba25b96c1f55e",
       ".agents/scripts/generate-catalog.py": "sha256:29c3e047345eec97497beb026a5ee6a1d505988e4ca7d0995823472dddcee83a",
       ".agents/scripts/install-library.sh": "sha256:1915b49219ef97b9ab745e5dae4be91ee13c5b48eb03863e1fd6c0e7de6944c7",
-      ".agents/scripts/pwt": "sha256:6450d5d2a3c7ddb470a0b2a05cf711502266f427c637fb633ef6eabc0000eb69",
+      ".agents/scripts/pwt": "sha256:0e20411711682510e8da0e46564057836edb50b6819471be98d034060b0b9ec5",
       ".agents/scripts/run-pi-role.sh": "sha256:0b167bb4a00a18ca3f7b5c4c7a304bffcf9886bf5f258cb8e363f3655d79fec1",
       ".agents/scripts/tests/install-library-test.sh": "sha256:2a0e3f1096c4bf24d962c1943095b32b65008489fdfb3b4ba6e7c6766f9cc2de",
       ".agents/scripts/tests/pwt-test.sh": "sha256:1de5be8de938437e6854cfc56ca31b92f67f6d9d6a1e6209a3b908a9541edf91",

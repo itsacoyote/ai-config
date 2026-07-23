@@ -83,8 +83,8 @@ EOF
 Usage: pwt remove <branch> [--delete-branch]
 
 Remove a managed worktree by its Git branch name only when it has no tracked,
-untracked, or ignored
-content changes. The local branch is kept unless --delete-branch is supplied;
+untracked, or ignored content changes. The local branch is kept unless
+--delete-branch is supplied;
 branch deletion uses Git's safe -d check and therefore refuses unmerged branches.
 EOF
       ;;
