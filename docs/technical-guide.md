@@ -58,6 +58,44 @@ Review the dry-run report before using `--replace`.
 
 For project-local use, copy the complete `.agents/` directory and root `AGENTS.md` into the project. Add `.codex/` if the project should expose Codex custom roles. Claude projects continue to copy `.claude/` as a complete unit.
 
+## Launch Pi in managed worktrees
+
+The `pwt` helper creates disposable worktrees under
+`~/github/.worktrees/<owner>/<repo>/<feature>/` and starts Pi with that worktree
+as its actual working directory. Pi and its Bash tool can then use ordinary
+relative paths and bare Git commands.
+
+After installing the portable library, expose the versioned launcher on your
+`PATH` (the command refuses to replace an existing file):
+
+```bash
+mkdir -p "$HOME/.local/bin"
+ln -s "$HOME/.agents/scripts/pwt" "$HOME/.local/bin/pwt"
+command -v pwt
+```
+
+If `command -v` prints nothing, add `export PATH="$HOME/.local/bin:$PATH"` to
+your shell profile, restart the shell, and verify again.
+
+Then run:
+
+```bash
+pwt new account-recovery                 # create feat/account-recovery
+pwt branch fix/login-timeout             # open an existing local/remote branch
+pwt open account-recovery                # reopen a managed worktree
+pwt list                                 # list this repository's managed worktrees
+pwt remove account-recovery              # remove a clean worktree, keep branch
+pwt remove account-recovery --delete-branch
+pwt --help
+```
+
+Pass Pi CLI arguments after `--`, for example
+`pwt new account-recovery -- --name "account recovery"`. `remove` refuses tracked, untracked, and ignored
+local data and uses Git's safe branch deletion when requested. Stop editors,
+generators, and development servers before removal so they cannot create files
+concurrently. PR-review launching is intentionally deferred
+until Pi has a verified external sandbox for untrusted content.
+
 ## Invoke skills by harness
 
 | Harness | Skill invocation | Isolated roles |
