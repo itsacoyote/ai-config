@@ -83,15 +83,17 @@ Then run:
 pwt new feat/account-recovery            # create a new feature branch
 pwt new fix/login-timeout                 # create a new fix branch
 pwt branch fix/existing-timeout           # open an existing local/remote branch
-pwt open feat-account-recovery            # reopen a managed worktree
-pwt list                                 # list this repository's managed worktrees
-pwt remove feat-account-recovery         # remove a clean worktree, keep branch
-pwt remove feat-account-recovery --delete-branch
+pwt open feat/account-recovery            # reopen a managed worktree
+pwt list                                  # list this repository's managed worktrees
+pwt remove feat/account-recovery          # remove a clean worktree, keep branch
+pwt remove feat/account-recovery --delete-branch
 pwt --help
 ```
 
-`new` requires the complete branch name so it never guesses the change type.
-Pass Pi CLI arguments after `--`, for example
+`new`, `branch`, `open`, and `remove` consistently accept Git branch names;
+`pwt` handles its internal hyphenated directory names. `new` requires the
+complete branch name so it never guesses the change type. Pass Pi CLI arguments
+after `--`, for example
 `pwt new feat/account-recovery -- --name "account recovery"`. `remove` refuses tracked, untracked, and ignored
 local data and uses Git's safe branch deletion when requested. Stop editors,
 generators, and development servers before removal so they cannot create files

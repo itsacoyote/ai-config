@@ -13,9 +13,9 @@ usage() {
 Usage:
   pwt new <branch> [-- <pi-args...>]
   pwt branch <branch> [-- <pi-args...>]
-  pwt open <name> [-- <pi-args...>]
+  pwt open <branch> [-- <pi-args...>]
   pwt list
-  pwt remove <name> [--delete-branch]
+  pwt remove <branch> [--delete-branch]
   pwt help [command]
   pwt -h | --help
 
@@ -25,7 +25,7 @@ selected worktree as its real working directory.
 Commands:
   new       Create an explicitly named branch from the remote default and run Pi.
   branch    Check out or reuse a managed local/remote branch and run Pi.
-  open      Run Pi in an existing managed worktree.
+  open      Run Pi in an existing managed worktree by branch name.
   list      List this repository's managed worktrees.
   remove    Remove a clean managed worktree; keep its branch by default.
   help      Show general or command-specific help.
@@ -37,10 +37,10 @@ Examples:
   pwt new feat/account-recovery
   pwt new fix/login-timeout -- --name "login timeout"
   pwt branch fix/login-timeout
-  pwt open feat-account-recovery
+  pwt open feat/account-recovery
   pwt list
-  pwt remove feat-account-recovery
-  pwt remove feat-account-recovery --delete-branch
+  pwt remove feat/account-recovery
+  pwt remove feat/account-recovery --delete-branch
 
 PR review is intentionally not included yet. It requires a verified external
 sandbox before Pi can safely inspect untrusted pull-request content.
@@ -70,9 +70,9 @@ EOF
       ;;
     open)
       cat <<'EOF'
-Usage: pwt open <name> [-- <pi-args...>]
+Usage: pwt open <branch> [-- <pi-args...>]
 
-Launch Pi in an existing managed worktree by its directory name.
+Launch Pi in an existing managed worktree by its Git branch name.
 EOF
       ;;
     list)
@@ -80,9 +80,10 @@ EOF
       ;;
     remove)
       cat <<'EOF'
-Usage: pwt remove <name> [--delete-branch]
+Usage: pwt remove <branch> [--delete-branch]
 
-Remove a managed worktree only when it has no tracked, untracked, or ignored
+Remove a managed worktree by its Git branch name only when it has no tracked,
+untracked, or ignored
 content changes. The local branch is kept unless --delete-branch is supplied;
 branch deletion uses Git's safe -d check and therefore refuses unmerged branches.
 EOF
@@ -361,12 +362,13 @@ cmd_branch() {
 cmd_open() {
   [[ $# -gt 0 ]] || { command_usage open; exit 2; }
   [[ $1 != -h && $1 != --help ]] || { command_usage open; exit 0; }
-  local name=$1
+  local branch=$1
   shift
-  validate_name "$name" 'worktree name'
+  validate_branch "$branch"
   split_pi_args "$@"
-  local target="$managed_root/$name"
-  registered_at "$target" || die "managed worktree not found: $name"
+  local target
+  target=$(branch_worktree "$branch")
+  [[ -n $target ]] || die "managed worktree not found for branch: $branch"
   require_managed_worktree "$target"
   launch_selected "$target"
 }
@@ -408,9 +410,9 @@ PY
 cmd_remove() {
   [[ $# -gt 0 ]] || { command_usage remove; exit 2; }
   [[ $1 != -h && $1 != --help ]] || { command_usage remove; exit 0; }
-  local name=$1 delete_branch=0
+  local requested_branch=$1 delete_branch=0
   shift
-  validate_name "$name" 'worktree name'
+  validate_branch "$requested_branch"
   while [[ $# -gt 0 ]]; do
     case $1 in
       --delete-branch) delete_branch=1 ;;
@@ -420,8 +422,9 @@ cmd_remove() {
     shift
   done
 
-  local target="$managed_root/$name" branch_ref branch
-  registered_at "$target" || die "managed worktree not found: $name"
+  local target branch_ref branch
+  target=$(branch_worktree "$requested_branch")
+  [[ -n $target ]] || die "managed worktree not found for branch: $requested_branch"
   require_managed_worktree "$target"
   branch_ref=$(git -C "$target" symbolic-ref --quiet HEAD 2>/dev/null || true)
   branch=${branch_ref#refs/heads/}

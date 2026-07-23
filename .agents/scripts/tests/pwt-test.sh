@@ -101,7 +101,7 @@ else
 fi
 
 : >"$LOG"
-if env -C "$PRIMARY" "$PWT" open fix-alpha -- --thinking high && grep -Fq "$MANAGED/fix-alpha|--thinking high " "$LOG"; then
+if env -C "$PRIMARY" "$PWT" open fix/alpha -- --thinking high && grep -Fq "$MANAGED/fix-alpha|--thinking high " "$LOG"; then
   ok 'open reuses managed worktree and launches Pi there'
 else
   not_ok 'open reuses managed worktree and launches Pi there'
@@ -109,7 +109,7 @@ fi
 
 mv "$MANAGED/fix-alpha" "$TMP/moved-alpha"
 ln -s "$TMP/moved-alpha" "$MANAGED/fix-alpha"
-if env -C "$PRIMARY" "$PWT" open fix-alpha >/dev/null 2>&1; then
+if env -C "$PRIMARY" "$PWT" open fix/alpha >/dev/null 2>&1; then
   not_ok 'open rejects a replaced worktree symlink'
 else
   ok 'open rejects a replaced worktree symlink'
@@ -133,7 +133,7 @@ EOF
   chmod 700 "$PRIMARY/tools/$command"
 done
 : >"$LOG"
-if env -C "$PRIMARY" PATH="$PRIMARY/tools:$PATH" "$PWT" open fix-alpha && ! grep -q UNTRUSTED "$LOG"; then
+if env -C "$PRIMARY" PATH="$PRIMARY/tools:$PATH" "$PWT" open fix/alpha && ! grep -q UNTRUSTED "$LOG"; then
   ok 'launcher rejects repository-provided bootstrap and Pi executables'
 else
   not_ok 'launcher rejects repository-provided bootstrap and Pi executables'
@@ -165,7 +165,7 @@ else
 fi
 
 printf 'dirty\n' >"$MANAGED/fix-alpha/dirty.txt"
-if env -C "$PRIMARY" "$PWT" remove fix-alpha >/dev/null 2>&1; then
+if env -C "$PRIMARY" "$PWT" remove fix/alpha >/dev/null 2>&1; then
   not_ok 'remove refuses dirty worktree'
 else
   ok 'remove refuses dirty worktree'
@@ -174,13 +174,13 @@ rm "$MANAGED/fix-alpha/dirty.txt"
 printf 'ignored.txt\n' >"$TMP/global-ignore"
 git -C "$MANAGED/fix-alpha" config core.excludesFile "$TMP/global-ignore"
 printf 'local data\n' >"$MANAGED/fix-alpha/ignored.txt"
-if env -C "$PRIMARY" "$PWT" remove fix-alpha >/dev/null 2>&1; then
+if env -C "$PRIMARY" "$PWT" remove fix/alpha >/dev/null 2>&1; then
   not_ok 'remove refuses ignored local data'
 else
   ok 'remove refuses ignored local data'
 fi
 rm "$MANAGED/fix-alpha/ignored.txt"
-if env -C "$PRIMARY" "$PWT" remove fix-alpha --delete-branch >/dev/null; then
+if env -C "$PRIMARY" "$PWT" remove fix/alpha --delete-branch >/dev/null; then
   check 'remove deletes clean worktree' test ! -e "$MANAGED/fix-alpha"
   if git -C "$PRIMARY" show-ref --verify --quiet refs/heads/fix/alpha; then
     not_ok 'remove safely deletes requested merged branch'
@@ -191,13 +191,13 @@ else
   not_ok 'remove deletes clean worktree and branch'
 fi
 
-if env -C "$PRIMARY" "$PWT" remove fix-existing >/dev/null; then
+if env -C "$PRIMARY" "$PWT" remove fix/existing >/dev/null; then
   check 'remove keeps branch by default' git -C "$PRIMARY" show-ref --verify --quiet refs/heads/fix/existing
 else
   not_ok 'remove keeps branch by default'
 fi
 
-if env -C "$PRIMARY" "$PWT" open missing >/dev/null 2>&1; then
+if env -C "$PRIMARY" "$PWT" open fix/missing >/dev/null 2>&1; then
   not_ok 'open rejects unknown worktree'
 else
   ok 'open rejects unknown worktree'
