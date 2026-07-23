@@ -11,7 +11,7 @@ pi_arg_count=0
 usage() {
   cat <<'EOF'
 Usage:
-  pwt new <slug> [-- <pi-args...>]
+  pwt new <branch> [-- <pi-args...>]
   pwt branch <branch> [-- <pi-args...>]
   pwt open <name> [-- <pi-args...>]
   pwt list
@@ -23,7 +23,7 @@ Create and manage centrally organized Git worktrees, then launch Pi with the
 selected worktree as its real working directory.
 
 Commands:
-  new       Create feat/<slug> from the latest remote default branch and run Pi.
+  new       Create an explicitly named branch from the remote default and run Pi.
   branch    Check out or reuse a managed local/remote branch and run Pi.
   open      Run Pi in an existing managed worktree.
   list      List this repository's managed worktrees.
@@ -34,13 +34,13 @@ Managed paths:
   ~/github/.worktrees/<owner>/<repo>/<name>/
 
 Examples:
-  pwt new account-recovery
-  pwt new account-recovery -- --name "account recovery"
+  pwt new feat/account-recovery
+  pwt new fix/login-timeout -- --name "login timeout"
   pwt branch fix/login-timeout
-  pwt open account-recovery
+  pwt open feat-account-recovery
   pwt list
-  pwt remove account-recovery
-  pwt remove account-recovery --delete-branch
+  pwt remove feat-account-recovery
+  pwt remove feat-account-recovery --delete-branch
 
 PR review is intentionally not included yet. It requires a verified external
 sandbox before Pi can safely inspect untrusted pull-request content.
@@ -51,11 +51,12 @@ command_usage() {
   case ${1:-} in
     new)
       cat <<'EOF'
-Usage: pwt new <slug> [-- <pi-args...>]
+Usage: pwt new <branch> [-- <pi-args...>]
 
-Create feat/<slug> from the latest origin default branch in the managed
-worktree directory, then launch Pi there. If that branch is already checked out
-in a managed worktree, reuse it; refuse checkouts outside the managed root.
+Create the explicitly named branch from the latest origin default branch in the
+managed worktree directory, then launch Pi there. Include the branch type, such
+as feat/account-recovery or fix/login-timeout. If that branch is already checked
+out in a managed worktree, reuse it; refuse checkouts outside the managed root.
 EOF
       ;;
     branch)
@@ -300,13 +301,13 @@ worktree_name_for_branch() {
 cmd_new() {
   [[ $# -gt 0 ]] || { command_usage new; exit 2; }
   [[ $1 != -h && $1 != --help ]] || { command_usage new; exit 0; }
-  local slug=$1
+  local branch=$1
   shift
-  validate_name "$slug" 'slug'
+  validate_branch "$branch"
+  [[ $branch == */* ]] || die "new requires a full branch name such as feat/account-recovery or fix/login-timeout"
   split_pi_args "$@"
 
-  local branch="feat/$slug" existing base target
-  validate_branch "$branch"
+  local existing base name target
   existing=$(branch_worktree "$branch")
   if [[ -n $existing ]]; then
     require_managed_worktree "$existing"
@@ -318,7 +319,9 @@ cmd_new() {
   printf 'pwt: fetching origin/%s\n' "$base"
   git -C "$repo_root" fetch --quiet origin "refs/heads/$base:refs/remotes/origin/$base"
   mkdir -p "$managed_root"
-  target="$managed_root/$slug"
+  name=$(worktree_name_for_branch "$branch")
+  validate_name "$name" 'derived worktree name'
+  target="$managed_root/$name"
   ensure_available_path "$target"
   git -C "$repo_root" worktree add -b "$branch" "$target" "origin/$base"
   launch_selected "$target"

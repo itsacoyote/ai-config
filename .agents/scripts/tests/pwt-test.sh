@@ -36,7 +36,7 @@ chmod 700 "$HOME/fake-bin" "$HOME/fake-bin/pi"
 ln -s "$PWT" "$HOME/fake-bin/pwt"
 export PATH="$HOME/fake-bin:$PATH"
 
-if pwt --help | grep -q 'pwt new <slug>'; then
+if pwt --help | grep -q 'pwt new <branch>'; then
   ok 'global help works outside a repository'
 else
   not_ok 'global help works outside a repository'
@@ -75,11 +75,17 @@ else
   ok 'branch refuses a checkout outside the managed root'
 fi
 
-if env -C "$PRIMARY" "$PWT" new alpha -- --name 'alpha session'; then
-  check 'new creates feat branch' git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/alpha
-  check 'new creates central worktree' test -d "$MANAGED/alpha"
-  check 'new resolves the current remote default branch' test -f "$MANAGED/alpha/stable.txt"
-  if grep -Fq "$MANAGED/alpha|--name alpha\\ session " "$LOG"; then
+if env -C "$PRIMARY" "$PWT" new alpha >/dev/null 2>&1; then
+  not_ok 'new requires an explicit typed branch name'
+else
+  ok 'new requires an explicit typed branch name'
+fi
+
+if env -C "$PRIMARY" "$PWT" new fix/alpha -- --name 'alpha session'; then
+  check 'new preserves the explicit branch type' git -C "$PRIMARY" show-ref --verify --quiet refs/heads/fix/alpha
+  check 'new creates central worktree' test -d "$MANAGED/fix-alpha"
+  check 'new resolves the current remote default branch' test -f "$MANAGED/fix-alpha/stable.txt"
+  if grep -Fq "$MANAGED/fix-alpha|--name alpha\\ session " "$LOG"; then
     ok 'new launches Pi inside worktree and preserves arguments'
   else
     not_ok 'new launches Pi inside worktree and preserves arguments'
@@ -88,28 +94,28 @@ else
   not_ok 'new command completes'
 fi
 
-if env -C "$PRIMARY" "$PWT" list | grep -q 'feat/alpha'; then
+if env -C "$PRIMARY" "$PWT" list | grep -q 'fix/alpha'; then
   ok 'list shows managed worktrees'
 else
   not_ok 'list shows managed worktrees'
 fi
 
 : >"$LOG"
-if env -C "$PRIMARY" "$PWT" open alpha -- --thinking high && grep -Fq "$MANAGED/alpha|--thinking high " "$LOG"; then
+if env -C "$PRIMARY" "$PWT" open fix-alpha -- --thinking high && grep -Fq "$MANAGED/fix-alpha|--thinking high " "$LOG"; then
   ok 'open reuses managed worktree and launches Pi there'
 else
   not_ok 'open reuses managed worktree and launches Pi there'
 fi
 
-mv "$MANAGED/alpha" "$TMP/moved-alpha"
-ln -s "$TMP/moved-alpha" "$MANAGED/alpha"
-if env -C "$PRIMARY" "$PWT" open alpha >/dev/null 2>&1; then
+mv "$MANAGED/fix-alpha" "$TMP/moved-alpha"
+ln -s "$TMP/moved-alpha" "$MANAGED/fix-alpha"
+if env -C "$PRIMARY" "$PWT" open fix-alpha >/dev/null 2>&1; then
   not_ok 'open rejects a replaced worktree symlink'
 else
   ok 'open rejects a replaced worktree symlink'
 fi
-rm "$MANAGED/alpha"
-mv "$TMP/moved-alpha" "$MANAGED/alpha"
+rm "$MANAGED/fix-alpha"
+mv "$TMP/moved-alpha" "$MANAGED/fix-alpha"
 
 mkdir -p "$PRIMARY/tools"
 cat >"$PRIMARY/re.py" <<'EOF'
@@ -127,7 +133,7 @@ EOF
   chmod 700 "$PRIMARY/tools/$command"
 done
 : >"$LOG"
-if env -C "$PRIMARY" PATH="$PRIMARY/tools:$PATH" "$PWT" open alpha && ! grep -q UNTRUSTED "$LOG"; then
+if env -C "$PRIMARY" PATH="$PRIMARY/tools:$PATH" "$PWT" open fix-alpha && ! grep -q UNTRUSTED "$LOG"; then
   ok 'launcher rejects repository-provided bootstrap and Pi executables'
 else
   not_ok 'launcher rejects repository-provided bootstrap and Pi executables'
@@ -158,25 +164,25 @@ else
   not_ok 'branch reuses an existing checkout'
 fi
 
-printf 'dirty\n' >"$MANAGED/alpha/dirty.txt"
-if env -C "$PRIMARY" "$PWT" remove alpha >/dev/null 2>&1; then
+printf 'dirty\n' >"$MANAGED/fix-alpha/dirty.txt"
+if env -C "$PRIMARY" "$PWT" remove fix-alpha >/dev/null 2>&1; then
   not_ok 'remove refuses dirty worktree'
 else
   ok 'remove refuses dirty worktree'
 fi
-rm "$MANAGED/alpha/dirty.txt"
+rm "$MANAGED/fix-alpha/dirty.txt"
 printf 'ignored.txt\n' >"$TMP/global-ignore"
-git -C "$MANAGED/alpha" config core.excludesFile "$TMP/global-ignore"
-printf 'local data\n' >"$MANAGED/alpha/ignored.txt"
-if env -C "$PRIMARY" "$PWT" remove alpha >/dev/null 2>&1; then
+git -C "$MANAGED/fix-alpha" config core.excludesFile "$TMP/global-ignore"
+printf 'local data\n' >"$MANAGED/fix-alpha/ignored.txt"
+if env -C "$PRIMARY" "$PWT" remove fix-alpha >/dev/null 2>&1; then
   not_ok 'remove refuses ignored local data'
 else
   ok 'remove refuses ignored local data'
 fi
-rm "$MANAGED/alpha/ignored.txt"
-if env -C "$PRIMARY" "$PWT" remove alpha --delete-branch >/dev/null; then
-  check 'remove deletes clean worktree' test ! -e "$MANAGED/alpha"
-  if git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/alpha; then
+rm "$MANAGED/fix-alpha/ignored.txt"
+if env -C "$PRIMARY" "$PWT" remove fix-alpha --delete-branch >/dev/null; then
+  check 'remove deletes clean worktree' test ! -e "$MANAGED/fix-alpha"
+  if git -C "$PRIMARY" show-ref --verify --quiet refs/heads/fix/alpha; then
     not_ok 'remove safely deletes requested merged branch'
   else
     ok 'remove safely deletes requested merged branch'

@@ -80,17 +80,19 @@ your shell profile, restart the shell, and verify again.
 Then run:
 
 ```bash
-pwt new account-recovery                 # create feat/account-recovery
-pwt branch fix/login-timeout             # open an existing local/remote branch
-pwt open account-recovery                # reopen a managed worktree
+pwt new feat/account-recovery            # create a new feature branch
+pwt new fix/login-timeout                 # create a new fix branch
+pwt branch fix/existing-timeout           # open an existing local/remote branch
+pwt open feat-account-recovery            # reopen a managed worktree
 pwt list                                 # list this repository's managed worktrees
-pwt remove account-recovery              # remove a clean worktree, keep branch
-pwt remove account-recovery --delete-branch
+pwt remove feat-account-recovery         # remove a clean worktree, keep branch
+pwt remove feat-account-recovery --delete-branch
 pwt --help
 ```
 
+`new` requires the complete branch name so it never guesses the change type.
 Pass Pi CLI arguments after `--`, for example
-`pwt new account-recovery -- --name "account recovery"`. `remove` refuses tracked, untracked, and ignored
+`pwt new feat/account-recovery -- --name "account recovery"`. `remove` refuses tracked, untracked, and ignored
 local data and uses Git's safe branch deletion when requested. Stop editors,
 generators, and development servers before removal so they cannot create files
 concurrently. PR-review launching is intentionally deferred
