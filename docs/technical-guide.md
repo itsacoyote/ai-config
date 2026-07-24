@@ -66,16 +66,29 @@ as its actual working directory. Pi and its Bash tool can then use ordinary
 relative paths and bare Git commands.
 
 After installing the portable library, expose the versioned launcher on your
-`PATH` (the command refuses to replace an existing file):
+`PATH` with its dedicated installer:
 
 ```bash
-mkdir -p "$HOME/.local/bin"
-ln -s "$HOME/.agents/scripts/pwt" "$HOME/.local/bin/pwt"
+# Preview
+"$HOME/.agents/scripts/install-pwt.sh" --dry-run
+
+# Install or safely relink
+"$HOME/.agents/scripts/install-pwt.sh"
 command -v pwt
 ```
 
+The installer creates `~/.local/bin/pwt` as a stable symlink to the launcher in
+the installed library. Library upgrades therefore update `pwt` without another
+copy step. Repeated runs are safe, and an identical old copied launcher is
+migrated automatically after retaining a hidden recovery backup in the bin
+directory. A different regular file is never overwritten; a different symlink
+requires `--replace-link`. Use `--bin-dir DIR` when your preferred executable
+directory is elsewhere.
+
 If `command -v` prints nothing, add `export PATH="$HOME/.local/bin:$PATH"` to
-your shell profile, restart the shell, and verify again.
+your shell profile, restart the shell, and verify again. If it prints another
+path, remove that shadowing command only after confirming it is an obsolete
+`pwt` copy.
 
 Then run:
 
@@ -189,6 +202,7 @@ Run the portable checks from the repository root:
 python3 .agents/scripts/generate-catalog.py --check
 python3 .agents/scripts/validate-library.py
 bash .agents/scripts/tests/install-library-test.sh
+bash .agents/scripts/tests/install-pwt-test.sh
 ```
 
 The validator checks skill structure, resource links, portable paths, explicit-only policy, neutral roles, Codex adapters, source-parity declarations, manifest checksums, repository Markdown links, and generated catalog freshness.
