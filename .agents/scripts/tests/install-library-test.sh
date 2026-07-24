@@ -54,7 +54,8 @@ installs_complete_tree() {
   local source target="$TMP/install-target"; source=$(new_source source-install)
   "$INSTALLER" --source "$source" --target "$target" >/dev/null
   test -f "$target/skills/typescript-tips/SKILL.md" && test -f "$target/references/beads.md" &&
-    test -f "$target/agents/roles.json" && test -x "$target/scripts/run-pi-role.sh" && test -f "$target/catalog.md"
+    test -f "$target/agents/roles.json" && test -x "$target/scripts/run-pi-role.sh" &&
+    test -x "$target/scripts/install-pwt.sh" && test -f "$target/catalog.md"
 }
 preserves_unrelated() {
   local source target="$TMP/unrelated-target"; source=$(new_source source-unrelated)
@@ -174,7 +175,12 @@ manifest_covers_installer() {
   python3 - "$ROOT" <<'PY'
 import json,pathlib,sys
 root=pathlib.Path(sys.argv[1]); m=json.loads((root/'.agents/manifest.json').read_text()); owned=set(m['ownership']['files']); sums=set(m['ownership']['checksums'])
-need={'.agents/scripts/install-library.sh','.agents/scripts/tests/install-library-test.sh'}
+need={
+    '.agents/scripts/install-library.sh',
+    '.agents/scripts/install-pwt.sh',
+    '.agents/scripts/tests/install-library-test.sh',
+    '.agents/scripts/tests/install-pwt-test.sh',
+}
 raise SystemExit(0 if need <= owned and need <= sums else 1)
 PY
 }

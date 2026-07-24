@@ -58,6 +58,61 @@ Review the dry-run report before using `--replace`.
 
 For project-local use, copy the complete `.agents/` directory and root `AGENTS.md` into the project. Add `.codex/` if the project should expose Codex custom roles. Claude projects continue to copy `.claude/` as a complete unit.
 
+## Launch Pi in managed worktrees
+
+The `pwt` helper creates disposable worktrees under
+`~/github/.worktrees/<owner>/<repo>/<feature>/` and starts Pi with that worktree
+as its actual working directory. Pi and its Bash tool can then use ordinary
+relative paths and bare Git commands.
+
+After installing the portable library, expose the versioned launcher on your
+`PATH` with its dedicated installer:
+
+```bash
+# Preview
+"$HOME/.agents/scripts/install-pwt.sh" --dry-run
+
+# Install or safely relink
+"$HOME/.agents/scripts/install-pwt.sh"
+command -v pwt
+```
+
+The installer creates `~/.local/bin/pwt` as a stable symlink to the launcher in
+the installed library. Library upgrades therefore update `pwt` without another
+copy step. Repeated runs are safe, and an identical old copied launcher is
+migrated automatically after retaining a hidden recovery backup in the bin
+directory. A different regular file is never overwritten; a different symlink
+requires `--replace-link`. Use `--bin-dir DIR` when your preferred executable
+directory is elsewhere.
+
+If `command -v` prints nothing, add `export PATH="$HOME/.local/bin:$PATH"` to
+your shell profile, restart the shell, and verify again. If it prints another
+path, remove that shadowing command only after confirming it is an obsolete
+`pwt` copy.
+
+Then run:
+
+```bash
+pwt new feat/account-recovery            # create a new feature branch
+pwt new fix/login-timeout                 # create a new fix branch
+pwt branch fix/existing-timeout           # open an existing local/remote branch
+pwt open feat/account-recovery            # reopen a managed worktree
+pwt list                                  # list this repository's managed worktrees
+pwt remove feat/account-recovery          # remove a clean worktree, keep branch
+pwt remove feat/account-recovery --delete-branch
+pwt --help
+```
+
+`new`, `branch`, `open`, and `remove` consistently accept Git branch names;
+`pwt` handles its internal hyphenated directory names. `new` requires the
+complete branch name so it never guesses the change type. Pass Pi CLI arguments
+after `--`, for example
+`pwt new feat/account-recovery -- --name "account recovery"`. `remove` refuses tracked, untracked, and ignored
+local data and uses Git's safe branch deletion when requested. Stop editors,
+generators, and development servers before removal so they cannot create files
+concurrently. PR-review launching is intentionally deferred
+until Pi has a verified external sandbox for untrusted content.
+
 ## Invoke skills by harness
 
 | Harness | Skill invocation | Isolated roles |
@@ -147,6 +202,7 @@ Run the portable checks from the repository root:
 python3 .agents/scripts/generate-catalog.py --check
 python3 .agents/scripts/validate-library.py
 bash .agents/scripts/tests/install-library-test.sh
+bash .agents/scripts/tests/install-pwt-test.sh
 ```
 
 The validator checks skill structure, resource links, portable paths, explicit-only policy, neutral roles, Codex adapters, source-parity declarations, manifest checksums, repository Markdown links, and generated catalog freshness.
