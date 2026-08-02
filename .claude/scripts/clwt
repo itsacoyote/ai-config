@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# clwt — manage this repository's git worktrees and launch Claude Code inside them.
+#
+# The point of the tool: `claude` has no "start in directory" flag, it inherits its
+# working directory from whatever launched it. So every launching subcommand cd's to
+# the target and exec's `claude` there. That is what makes the session's cwd correct
+# by construction, and `git -C` unnecessary.
+#
+# Because of that, the launching subcommands can only be run by the developer from a
+# shell — Claude cannot relaunch itself into a new directory.
+
+set -euo pipefail
+
+PROGRAM=${0##*/}
+
+die() {
+  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  exit 2
+}
+
+note() { printf '%s: %s\n' "$PROGRAM" "$*"; }
+
+usage() {
+  cat <<'EOF'
+Usage:
+  clwt [list]                       list this repository's managed worktrees
+  clwt new <branch> [-- <args>]     branch from the origin default, then launch
+  clwt branch <branch> [-- <args>]  check out an existing branch, then launch
+  clwt open <branch> [-- <args>]    launch in an existing managed worktree
+  clwt pr <number> [-- <args>]      check out a pull request, then launch
+  clwt root [-- <args>]             launch in the primary checkout
+  clwt remove <branch> [--delete-branch]
+  clwt prune [--yes]                sweep worktrees whose branch has merged
+  clwt install                      symlink clwt onto your PATH
+  clwt help [command]
+
+Commands:
+  new       Create an explicitly named branch from the origin default and launch.
+  branch    Check out or reuse an existing local/remote branch and launch.
+  open      Launch in an existing managed worktree by branch name.
+  pr        Check a pull request out into a managed worktree and launch.
+  root      Launch in the primary (non-worktree) checkout.
+  list      List this repository's managed worktrees.
+  remove    Remove a clean managed worktree; keep its branch by default.
+  prune     Remove managed worktrees whose branch has an already-merged PR.
+  install   Symlink this script to ~/.local/bin/clwt.
+  help      Show general or command-specific help.
+
+Managed worktrees live in:
+  ~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/
+
+Arguments after `--` are passed through to `claude`.
+EOF
+}
+
+not_implemented() {
+  printf '%s: %s is not yet implemented\n' "$PROGRAM" "$1" >&2
+  exit 3
+}
+
+main() {
+  local command=${1:-list}
+  case $command in
+    -h | --help | help)
+      usage
+      ;;
+    list)
+      not_implemented list
+      ;;
+    new | branch | open | pr | root | remove | prune | install)
+      not_implemented "$command"
+      ;;
+    *)
+      die "unknown command: $command (run 'clwt help')"
+      ;;
+  esac
+}
+
+main "$@"
