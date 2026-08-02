@@ -228,6 +228,41 @@ check_fails 'clwt outside a git repository exits non-zero' \
 check_output 'clwt says it must be run inside a git repository' \
   'git repository' clwt_in "$TMP/not-a-repo" debug-roots
 
+# ----------------------------------------------------------------------- list
+
+section 'list'
+
+# A managed worktree (created by hand here — clwt new arrives in task 3) and an
+# unmanaged one outside the managed root.
+git -C "$PRIMARY" worktree add -q -b feat/listed "$MANAGED/feat-listed" 2>/dev/null
+UNMANAGED="$HOME/elsewhere/stray"
+mkdir -p "$HOME/elsewhere"
+git -C "$PRIMARY" worktree add -q -b feat/stray "$UNMANAGED" 2>/dev/null
+
+check_output 'list shows a managed worktree by branch name' 'feat/listed' clwt list
+check_output 'list shows the managed worktree path' "$MANAGED/feat-listed" clwt list
+check_output 'list marks a worktree outside the managed root as unmanaged' 'unmanaged' clwt list
+check_output 'list shows the unmanaged branch too' 'feat/stray' clwt list
+
+bare_out=$(clwt 2>&1)
+list_out=$(clwt list 2>&1)
+check_equals 'clwt with no arguments prints the worktree list' "$list_out" "$bare_out"
+
+check_fails 'list rejects extra arguments' clwt list nonsense
+
+# The primary checkout is a worktree in git's eyes; it must not be offered as
+# something clwt manages.
+if clwt list 2>&1 | grep -qF "$PRIMARY "; then
+  not_ok 'list does not present the primary checkout as a managed worktree'
+else
+  ok 'list does not present the primary checkout as a managed worktree'
+fi
+
+# Empty state, in a repo with no worktrees of its own.
+git clone -q "$REMOTE" "$HOME/github/owner/lonely"
+check_output 'list reports plainly when there are no managed worktrees' \
+  'No managed worktrees' clwt_in "$HOME/github/owner/lonely" list
+
 # -------------------------------------------------------------------- summary
 
 section "results: $pass passed, $fail failed"

@@ -116,6 +116,62 @@ valid_identity_part() {
   return 0
 }
 
+# ------------------------------------------------------------------- commands
+
+# Lists this repository's worktrees, marking any that live outside the managed
+# root. Those exist because Claude Code's own worktree feature is still available
+# and does not consult clwt — showing them, flagged, is more honest than hiding
+# worktrees the developer can plainly see in `git worktree list`.
+cmd_list() {
+  [[ $# -eq 0 ]] || die 'list takes no arguments'
+
+  local line path='' branch='' width=0
+  local -a listed_branches=() listed_paths=() listed_marks=()
+
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        branch='(detached)'
+        ;;
+      'branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        ;;
+      '')
+        # Blank line terminates a record. The primary checkout is a worktree as
+        # far as git is concerned, but it is not one clwt manages.
+        if [[ -n $path && $path != "$primary" ]]; then
+          listed_branches+=("$branch")
+          listed_paths+=("$path")
+          case $path in
+            "$managed_root"/*) listed_marks+=('') ;;
+            *) listed_marks+=('(unmanaged)') ;;
+          esac
+          if ((${#branch} > width)); then width=${#branch}; fi
+        fi
+        path=''
+        ;;
+    esac
+  done < <(
+    git worktree list --porcelain
+    printf '\n'
+  )
+
+  if ((${#listed_branches[@]} == 0)); then
+    printf 'No managed worktrees for %s/%s.\n' "$owner" "$repo"
+    return 0
+  fi
+
+  local i
+  for i in "${!listed_branches[@]}"; do
+    if [[ -n ${listed_marks[i]} ]]; then
+      printf '%-*s  %s  %s\n' "$width" "${listed_branches[i]}" "${listed_paths[i]}" "${listed_marks[i]}"
+    else
+      printf '%-*s  %s\n' "$width" "${listed_branches[i]}" "${listed_paths[i]}"
+    fi
+  done
+}
+
 # Undocumented diagnostic seam: prints the resolved foundation values so the test
 # suite (and a confused human) can see what clwt thinks it is working with.
 cmd_debug_roots() {
@@ -136,7 +192,9 @@ main() {
       cmd_debug_roots
       ;;
     list)
-      not_implemented list
+      shift || true
+      require_repo
+      cmd_list "$@"
       ;;
     new | branch | open | pr | root | remove | prune | install)
       not_implemented "$command"
