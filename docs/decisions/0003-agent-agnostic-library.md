@@ -2,7 +2,7 @@
 
 Date: 2026-07-23
 
-Status: Accepted
+Status: Superseded by [ADR 0004](0004-revert-agent-agnostic-library.md)
 
 Tracking: beads epic `ai-config-pfw`
 
