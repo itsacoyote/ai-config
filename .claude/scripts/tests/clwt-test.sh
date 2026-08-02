@@ -120,6 +120,20 @@ git --git-dir="$REMOTE" symbolic-ref HEAD refs/heads/main
 git clone -q "$REMOTE" "$PRIMARY"
 PRIMARY=$(cd "$PRIMARY" && pwd -P)
 
+# The remote's default branch moves to `stable` *after* the clone, leaving
+# origin/HEAD in the clone pointing at the old default. Task 3 needs exactly this:
+# `clwt new` must base on the branch origin considers default *now*, not the one
+# cached at clone time. Borrowed from the pwt suite, which had the same fixture.
+(
+  cd "$TMP/seed"
+  git checkout -q -b stable
+  printf 'stable\n' >stable.txt
+  git add stable.txt
+  git commit -qm 'add stable branch'
+  git push -q origin stable
+)
+git --git-dir="$REMOTE" symbolic-ref HEAD refs/heads/stable
+
 # `clwt` is invoked from inside the primary clone unless a test says otherwise.
 clwt_in() {
   local dir=$1
@@ -133,6 +147,13 @@ printf 'script:  %s\n' "$CLWT"
 printf 'sandbox: %s\n' "$TMP"
 
 # ------------------------------------------------------------------ existence
+
+section 'harness fixtures'
+# Guard the fixture itself: if this stops being stale, task 3's "bases on the
+# current origin default" test would pass for the wrong reason.
+check_equals 'the clone origin/HEAD is stale relative to the remote default' \
+  'refs/heads/main|stable' \
+  "$(git -C "$PRIMARY" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/|refs/heads/|')|$(git -C "$PRIMARY" ls-remote --symref origin HEAD 2>/dev/null | sed -n 's|^ref: refs/heads/\([^\t ]*\).*|\1|p')"
 
 section 'script'
 check 'the clwt script exists and is executable' test -x "$CLWT"
@@ -228,6 +249,48 @@ check_fails 'clwt outside a git repository exits non-zero' \
 check_output 'clwt says it must be run inside a git repository' \
   'git repository' clwt_in "$TMP/not-a-repo" debug-roots
 
+# ------------------------------------------------- hostile remote URLs
+
+section 'remote URL cannot escape the managed root'
+
+# owner/repo become path segments under ~/github/.worktrees, so a remote URL is
+# untrusted input on a filesystem path. Assert that nothing derived from one can
+# point outside the managed root.
+probe_remote() {
+  (cd "$PRIMARY" && git remote set-url origin "$1" && "$CLWT" debug-roots 2>&1)
+}
+
+for hostile in \
+  'https://host/../..' \
+  'https://host/owner/..' \
+  'git@host:../../etc' \
+  'https://host/ow ner/repo' \
+  'https://host/owner/re;po' \
+  'https://host/owner/$(touch pwned)'; do
+  out=$(probe_remote "$hostile" || true)
+  root=$(printf '%s\n' "$out" | sed -n 's/^managed_root=//p')
+  case $root in
+    '')
+      ok "a hostile remote is rejected: $hostile"
+      ;;
+    "$HOME/github/.worktrees/"*/*)
+      # Accepted, but it must still be confined and contain no traversal.
+      case $root in
+        *..*) not_ok "a hostile remote escapes the managed root: $hostile ($root)" ;;
+        *) ok "a hostile remote stays confined: $hostile" ;;
+      esac
+      ;;
+    *)
+      not_ok "a hostile remote escapes the managed root: $hostile ($root)"
+      ;;
+  esac
+done
+
+check 'no side effect ran from a command-substitution remote' \
+  test ! -e "$PRIMARY/pwned"
+
+(cd "$PRIMARY" && git remote set-url origin "$REMOTE")
+
 # ----------------------------------------------------------------------- list
 
 section 'list'
@@ -262,6 +325,65 @@ fi
 git clone -q "$REMOTE" "$HOME/github/owner/lonely"
 check_output 'list reports plainly when there are no managed worktrees' \
   'No managed worktrees' clwt_in "$HOME/github/owner/lonely" list
+
+# -------------------------------------------------------------------- install
+
+section 'install'
+
+LOCAL_BIN="$HOME/.local/bin"
+
+reset_install() { rm -rf "$LOCAL_BIN"; }
+
+# Fresh install into a directory that does not exist yet.
+reset_install
+export PATH="$LOCAL_BIN:$PATH"
+check 'install succeeds when ~/.local/bin does not exist' clwt install
+check 'install creates the ~/.local/bin directory' test -d "$LOCAL_BIN"
+check 'install creates a symlink at ~/.local/bin/clwt' test -L "$LOCAL_BIN/clwt"
+check_equals 'the installed symlink points at the repo script' \
+  "$CLWT" "$(readlink "$LOCAL_BIN/clwt" 2>/dev/null)"
+
+# Idempotence.
+check 'install is idempotent when the correct symlink already exists' clwt install
+check_output 'install says it is already installed on a repeat run' 'already' clwt install
+
+# Refuses to clobber a real file.
+reset_install
+mkdir -p "$LOCAL_BIN"
+printf 'not a symlink\n' >"$LOCAL_BIN/clwt"
+check_fails 'install refuses to clobber an existing non-symlink file' clwt install
+check_output 'install explains why it refused to clobber' 'not a symlink' clwt install
+check 'the pre-existing file survives a refused install' \
+  grep -q 'not a symlink' "$LOCAL_BIN/clwt"
+
+# Repoints a symlink that aims somewhere else.
+rm -f "$LOCAL_BIN/clwt"
+ln -s "$TMP/some-other-clwt" "$LOCAL_BIN/clwt"
+check 'install repoints a symlink that aims elsewhere' clwt install
+check_equals 'the repointed symlink now targets the repo script' \
+  "$CLWT" "$(readlink "$LOCAL_BIN/clwt" 2>/dev/null)"
+
+# Warns when the install directory is not on PATH.
+reset_install
+off_path_out=$(PATH="$BIN:/usr/bin:/bin" clwt install 2>&1)
+if printf '%s\n' "$off_path_out" | grep -qF 'PATH'; then
+  ok 'install warns when ~/.local/bin is not on PATH'
+else
+  not_ok 'install warns when ~/.local/bin is not on PATH'
+fi
+
+# Invoked *through* the installed symlink, install must resolve back to the repo
+# script rather than to itself.
+reset_install
+clwt install >/dev/null 2>&1
+via_symlink=$("$LOCAL_BIN/clwt" install 2>&1)
+check_equals 'install through the installed symlink still targets the repo script' \
+  "$CLWT" "$(readlink "$LOCAL_BIN/clwt" 2>/dev/null)"
+check 'install through the installed symlink succeeds' \
+  test -L "$LOCAL_BIN/clwt"
+
+# install must work outside a git repository — it has nothing to do with a repo.
+check 'install works outside a git repository' clwt_in "$TMP/not-a-repo" install
 
 # -------------------------------------------------------------------- summary
 
