@@ -13,30 +13,6 @@ For the catalog of skills/agents and the feature workflow they implement, see [R
 
 Decide by intent: a discoverable technique → **skill**; an always-on convention → **rule**; isolated/independent execution → **agent**; shared reference data → **reference**.
 
-## Side-by-side portable library
-
-The repository also ships an agent-agnostic library without replacing Claude:
-
-- `.agents/skills/<name>/SKILL.md` — 49 flat Agent Skills. Use `metadata.category`; do not add category subdirectories.
-- `.agents/references/` and `.agents/scripts/` — portable shared dependencies. Install the complete `.agents/` tree, not isolated skill folders.
-- `.agents/agents/roles.json` — canonical machine-readable neutral role policy input. Adapters interpret it; the JSON and adjacent prompts are not themselves security boundaries.
-- `.codex/agents/*.toml` — thin Codex adapters. Provider aliases and Codex dispatch/sandbox syntax stay here.
-- `.agents/scripts/run-pi-role.sh` — generic read-only/verification Pi workers. Those boundaries are behavioral because the generic runner is not an OS sandbox; untrusted repository/PR content requires an external sandbox or container. The runner must reject implementation; supervised Pi implementation uses `autorun`'s sandbox launcher.
-- `AGENTS.md` — portable project guidance for Codex and Pi.
-
-Neither `.claude/` nor `.agents/` is canonical across harnesses yet. Preserve `.claude/` behavior. When methodology changes, assess both trees explicitly and declare intentional differences in `.agents/manifest.json`; do not mechanically overwrite one from the other. See [ADR 0003](docs/decisions/0003-agent-agnostic-library.md).
-
-### Portable maintenance checks
-
-After changing portable payloads:
-
-1. Regenerate `.agents/catalog.md` when skill metadata or inventory changes: `python3 .agents/scripts/generate-catalog.py`.
-2. Refresh checksums with `python3 .agents/scripts/validate-library.py --refresh-manifest`. Add `--accept-inventory-changes` only after reviewing reported additions/removals.
-3. Run `python3 .agents/scripts/validate-library.py` and the relevant tests under `.agents/scripts/tests/`.
-4. Run the existing Claude skill checker and confirm `git diff -- .claude` contains only separately intended Claude changes.
-
-For a release that upgrades/removes files from an earlier installed version, add the exact released prior manifest SHA-256 to `installation.upgrade_from_manifest_sha256` before refreshing the new manifest. This source-authenticated allowlist is what permits safe prior-only removals. Never hand-edit ownership checksums to bypass validation.
-
 ## Authoring conventions
 
 When creating or editing skills, follow the `writing-skills` skill, and:
@@ -50,7 +26,7 @@ When creating or editing skills, follow the `writing-skills` skill, and:
 
 ## Portability
 
-The Claude implementation must remain self-contained in `.claude/`; the portable implementation must remain self-contained in the complete `.agents/` tree plus optional project adapters. This repo's `CLAUDE.md` is **not** copied — so don't put workflow guidance only here; it belongs in resources that travel. When a Claude skill depends on a `.claude/references/` file, copy that reference with it. Portable consumers install `.agents/` as one unit rather than resolving dependencies piecemeal.
+Everything must be self-contained in `.claude/` so it works after a copy-paste into another project. This repo's `CLAUDE.md` is **not** copied — so don't put workflow guidance only here; it belongs in the skills/agents/rules/references that travel. When a skill depends on a `.claude/references/` file, that file must be copied alongside it.
 
 ## Workflow state: beads is required
 

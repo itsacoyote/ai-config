@@ -63,16 +63,6 @@ the conversational findings and the beads epic.
   **"Risks & Gotchas"** section attached to the epic with the findings — never
   standalone issues, because they are awareness notes, not tracked work.
 
-## Cross-harness applicability
-
-The lens decision still applies, but dispatch follows each harness's isolation model:
-
-- **Claude Code:** the main session fans out through the existing thin `.claude/agents/` subagents.
-- **Codex:** the parent dispatches the corresponding read-only custom agents under `.codex/agents/`; the neutral role inventory remains `.agents/agents/roles.json`.
-- **Pi:** the default is a dedicated Research session whose synthesized artifact is persisted to the beads epic before implementation starts. Bounded lenses may run as fresh `.agents/scripts/run-pi-role.sh` processes. Pi does not require a subagent extension or tmux, and workers cannot recursively fan out.
-
-Unsupported clients run the portable lens methodologies inline and must still persist one synthesis. Across all harnesses, the parent owns beads mutation and synthesis; lens workers remain read-only.
-
 ## Consequences
 
 **Positive**
