@@ -63,6 +63,10 @@ export GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' \
   >"$GIT_CONFIG_GLOBAL"
 
+mkdir -p "$HOME"
+HOME=$(cd "$HOME" && pwd -P) # resolve symlinks once so path comparisons are stable
+export HOME
+
 REMOTE="$HOME/remotes/owner/project.git"
 PRIMARY="$HOME/github/owner/project"
 MANAGED="$HOME/github/.worktrees/owner/project"
@@ -159,6 +163,70 @@ check_output 'an unimplemented subcommand reports not yet implemented rather tha
 check_output 'an unknown subcommand is reported as unknown' \
   'unknown command' clwt definitely-not-a-command
 check_fails 'an unknown subcommand exits non-zero' clwt definitely-not-a-command
+
+# ------------------------------------------------------- identity and roots
+
+section 'repo identity and roots'
+
+# `clwt debug-roots` prints the resolved foundation values, one per line, so the
+# suite can assert them without reaching into the script's internals.
+roots() { clwt_in "$1" debug-roots 2>/dev/null; }
+field() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
+
+R=$(roots "$PRIMARY")
+check_equals 'clwt derives the owner from the origin remote' 'owner' "$(field "$R" owner)"
+check_equals 'clwt derives the repo from the origin remote' 'project' "$(field "$R" repo)"
+check_equals 'the managed root is under ~/github/.worktrees/<owner>/<repo>' \
+  "$MANAGED" "$(field "$R" managed_root)"
+check_equals 'the primary checkout resolves to the checkout and not to the git directory' \
+  "$PRIMARY" "$(field "$R" primary)"
+
+primary_value=$(field "$R" primary)
+case $primary_value in
+  *.git) not_ok 'the primary checkout does not end in .git' ;;
+  *) ok 'the primary checkout does not end in .git' ;;
+esac
+
+# From a subdirectory of the primary checkout.
+mkdir -p "$PRIMARY/nested/deeper"
+check_equals 'the primary checkout resolves correctly from a subdirectory' \
+  "$PRIMARY" "$(field "$(roots "$PRIMARY/nested/deeper")" primary)"
+
+# From inside a worktree — the case `git rev-parse --show-toplevel` gets wrong.
+WT="$MANAGED/probe-wt"
+mkdir -p "$MANAGED"
+git -c advice.detachedHead=false -C "$PRIMARY" worktree add -q -b probe/roots "$WT" HEAD 2>/dev/null
+check_equals 'the primary checkout resolves correctly from inside a worktree' \
+  "$PRIMARY" "$(field "$(roots "$WT")" primary)"
+check_equals 'the managed root resolves correctly from inside a worktree' \
+  "$MANAGED" "$(field "$(roots "$WT")" managed_root)"
+
+# ssh-form and https-form remotes both parse.
+ssh_probe=$(cd "$PRIMARY" && git remote set-url origin 'git@github.com:someone/thing.git' \
+  && "$CLWT" debug-roots 2>/dev/null)
+check_equals 'clwt derives owner and repo from an ssh origin remote' \
+  'someone/thing' "$(field "$ssh_probe" owner)/$(field "$ssh_probe" repo)"
+
+https_probe=$(cd "$PRIMARY" && git remote set-url origin 'https://github.com/someone/thing.git' \
+  && "$CLWT" debug-roots 2>/dev/null)
+check_equals 'clwt derives owner and repo from an https origin remote' \
+  'someone/thing' "$(field "$https_probe" owner)/$(field "$https_probe" repo)"
+
+(cd "$PRIMARY" && git remote set-url origin "$REMOTE")
+
+# No origin at all.
+git init -q "$TMP/no-remote"
+check_fails 'clwt exits non-zero when the origin remote is missing' \
+  clwt_in "$TMP/no-remote" debug-roots
+check_output 'clwt names the missing origin remote in its error' \
+  'origin' clwt_in "$TMP/no-remote" debug-roots
+
+# Not a repository at all.
+mkdir -p "$TMP/not-a-repo"
+check_fails 'clwt outside a git repository exits non-zero' \
+  clwt_in "$TMP/not-a-repo" debug-roots
+check_output 'clwt says it must be run inside a git repository' \
+  'git repository' clwt_in "$TMP/not-a-repo" debug-roots
 
 # -------------------------------------------------------------------- summary
 

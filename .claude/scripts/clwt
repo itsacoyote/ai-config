@@ -58,11 +58,82 @@ not_implemented() {
   exit 3
 }
 
+# --------------------------------------------------------------- foundations
+
+# Resolves, once, the four values every other subcommand builds on:
+#   owner, repo         — from the origin remote
+#   primary             — the primary (non-worktree) checkout
+#   managed_root        — ~/github/.worktrees/<owner>/<repo>
+#
+# `primary` deserves a note. It is NOT `git rev-parse --show-toplevel`, which
+# returns the *worktree* when clwt runs inside one — the common case here. Nor is
+# it `--git-common-dir`, which returns the `.git` directory itself. It is the
+# checkout containing that git dir, which is where .worktreeinclude lives, where
+# the copy sources from, and what CLWT_REPO_ROOT must point at so a tracker can
+# find its one central database.
+require_repo() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+    die 'run clwt from inside a git repository'
+
+  local remote_url
+  remote_url=$(git remote get-url origin 2>/dev/null) ||
+    die 'repository has no origin remote'
+
+  parse_remote_identity "$remote_url"
+
+  local common_dir
+  common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+    die 'cannot resolve the git common directory'
+  primary=$(cd "$common_dir/.." 2>/dev/null && pwd -P) ||
+    die "cannot resolve the primary checkout from: $common_dir"
+
+  managed_root="$HOME/github/.worktrees/$owner/$repo"
+}
+
+# Splits owner/repo out of any remote URL shape we care about, in pure shell:
+#   git@host:owner/repo.git      https://host/owner/repo.git
+#   ssh://git@host/owner/repo    /local/path/owner/repo.git
+# In every one of those the last two path segments are owner and repo, so strip
+# the .git suffix and take them from the end.
+parse_remote_identity() {
+  local url=$1 rest
+  url=${url%.git}
+  url=${url%/}
+
+  repo=${url##*/}
+  rest=${url%/*}
+  owner=${rest##*/}
+  owner=${owner##*:} # git@host:owner -> owner
+
+  valid_identity_part "$owner" || die "cannot derive owner from origin: $1"
+  valid_identity_part "$repo" || die "cannot derive repository from origin: $1"
+}
+
+valid_identity_part() {
+  case $1 in
+    '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# Undocumented diagnostic seam: prints the resolved foundation values so the test
+# suite (and a confused human) can see what clwt thinks it is working with.
+cmd_debug_roots() {
+  printf 'owner=%s\n' "$owner"
+  printf 'repo=%s\n' "$repo"
+  printf 'primary=%s\n' "$primary"
+  printf 'managed_root=%s\n' "$managed_root"
+}
+
 main() {
   local command=${1:-list}
   case $command in
     -h | --help | help)
       usage
+      ;;
+    debug-roots)
+      require_repo
+      cmd_debug_roots
       ;;
     list)
       not_implemented list
