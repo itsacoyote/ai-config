@@ -173,12 +173,104 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 
 ---
 
+## `clwt` — worktree CLI
+
+A small Bash CLI at `.claude/scripts/clwt` that manages this repository's git
+worktrees and launches Claude Code inside them. **You run it from your shell, not
+from inside Claude.**
+
+**Prerequisites:** `bash` 4+ and `git`. `gh` (authenticated) is needed only by `clwt pr`
+and `clwt prune` — both fail with a clear message rather than guessing if it is missing
+or logged out. The repository must have an `origin` remote, since the managed paths are
+derived from it.
+
+```bash
+.claude/scripts/clwt install     # symlinks clwt + its completion; run once
+```
+
+That links `~/.local/bin/clwt` and, for Tab completion,
+`~/.local/share/bash-completion/completions/clwt`. Both are symlinks into the
+repo, so edits take effect with no reinstall, and bash-completion autoloads the
+second by name — no `.bashrc` change needed.
+
+### Commands
+
+| Command | |
+|---------|--|
+| `clwt` / `clwt list` | list this repo's managed worktrees, flagging unmanaged ones |
+| `clwt new <type>/<slug>` | branch from the **current** origin default, create the worktree, launch |
+| `clwt branch <branch>` | check out an existing local or origin branch, launch |
+| `clwt open <branch>` | launch in an existing managed worktree |
+| `clwt pr <number>` | check a pull request out into a worktree, launch (warns on forks) |
+| `clwt root` | launch in the primary checkout |
+| `clwt remove <branch> [--delete-branch]` | remove a clean managed worktree |
+| `clwt prune [--yes]` | sweep worktrees whose branch has a merged PR — dry run without `--yes` |
+| `clwt install` | symlink onto `PATH` (+ completion) |
+| `clwt help` | usage |
+
+Worktrees live at `~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/`.
+`clwt` refuses to create, move, or remove anything outside that root — worktrees made
+by other means show up in `list` marked `(unmanaged)`.
+
+`--yolo` on any launching subcommand adds `--dangerously-skip-permissions`, which
+**bypasses every permission check for that session**. Arguments after `--` pass
+through to `claude` untouched:
+
+```bash
+clwt new feat/token-refresh --yolo -- --model opus
+```
+
+### Why it's a CLI and not a skill
+
+`claude` has no "start in directory" flag — it inherits its working directory from
+whatever launched it. So `clwt` works by `cd`-ing into the worktree and `exec`-ing
+`claude` there, which only a shell outside Claude can do: **Claude cannot relaunch
+itself into a new directory.** For `new`, `branch`, `open`, `pr`, and `root`, Claude's
+job is to recommend the command; you run it. `list`, `remove`, and `prune` don't
+launch anything, so Claude can run those.
+
+Because the session starts already rooted in the right worktree, `git -C` is never
+needed — `Bash(git -C *)` is in `permissions.deny`.
+
+### Untracked files and the issue database
+
+New worktrees receive the untracked files matching `.worktreeinclude` (your `.env`
+and friends), copied from the primary checkout so the project can actually run.
+
+**`.beads/` is never copied**, even if `.worktreeinclude` matches it. Worktrees share
+the primary checkout's single issue database through the git common dir; copying it
+forks them and loses writes ([PR #48](https://github.com/itsacoyote/ai-config/pull/48)).
+
+Every launched session gets `CLWT_REPO_ROOT` pointing at the primary checkout, so any
+tracker can find that one central database — `bd` resolves it on its own, but a future
+tracker won't have to reimplement git internals to do the same.
+
+### Tests
+
+No CI and no package manager here, so the suite is manual:
+
+```bash
+bash .claude/scripts/tests/clwt-test.sh
+```
+
+It builds a throwaway world under a fake `$HOME` — a bare remote, a clone, and stub
+`claude`/`gh` binaries that log how they were invoked — then asserts against it.
+Exits non-zero on any failure.
+
+---
+
 ## Using this in another project
 
 1. **Copy `.claude/` into the target project's root** — skills, agents, rules, and references all live there and travel together. (When copying an individual skill, bring any `.claude/references/` file it points to as well.)
 2. **The project's own `CLAUDE.md` does not come from here** — this repo's `CLAUDE.md` documents *this* repo. To orient Claude to the workflow in the target project, paste the snippet below into that project's `CLAUDE.md` and adapt it.
 3. **Optionally copy `.mcp.json`** (see [MCP servers](#mcp-servers)).
 4. Open Claude Code in the project and start with `/define` (or read `feature-workflow` first).
+
+> **Note:** `.claude/settings.json` carries `permissions.deny: ["Bash(git -C *)"]`, which
+> travels with the copy. It exists because a `clwt`-launched session is already rooted in
+> the right worktree — in a project without `clwt`, where `git -C` may be in legitimate
+> use, delete that one line. `clwt` itself is repo-agnostic and works in any project with
+> an `origin` remote.
 
 ### Example: paste into your project's `CLAUDE.md`
 
@@ -231,7 +323,10 @@ Both are optional — skills degrade gracefully when a server isn't present (e.g
 ├── skills/        # the skills above (one folder each, SKILL.md + optional files)
 ├── agents/        # the review/implementer agents above (one .md each)
 ├── rules/         # always-on conventions
-└── references/    # shared knowledge skills point to
+├── references/    # shared knowledge skills point to
+├── hooks/         # SessionStart hooks (beads gate, session orientation)
+├── scripts/       # clwt, worktree-status.sh, and their tests
+└── settings.json  # hooks, permission allow/deny, statusline
 archive/           # the previous automated pipeline, kept for reference
 CLAUDE.md          # how to work IN this repo (does not travel to other projects)
 ```

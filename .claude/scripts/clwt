@@ -1,0 +1,1054 @@
+#!/usr/bin/env bash
+# clwt — manage this repository's git worktrees and launch Claude Code inside them.
+#
+# The point of the tool: `claude` has no "start in directory" flag, it inherits its
+# working directory from whatever launched it. So every launching subcommand cd's to
+# the target and exec's `claude` there. That is what makes the session's cwd correct
+# by construction, and `git -C` unnecessary.
+#
+# Because of that, the launching subcommands can only be run by the developer from a
+# shell — Claude cannot relaunch itself into a new directory.
+
+set -euo pipefail
+
+PROGRAM=${0##*/}
+
+die() {
+  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  exit 2
+}
+
+note() { printf '%s: %s\n' "$PROGRAM" "$*"; }
+warn() { printf '%s: warning: %s\n' "$PROGRAM" "$*" >&2; }
+
+# copy_worktree_includes can bail mid-loop; this is how its scratch file gets
+# cleaned up regardless of which exit path is taken.
+CLWT_LIST_FILE=''
+trap 'rm -f "${CLWT_LIST_FILE:-}"' EXIT
+
+usage() {
+  cat <<'EOF'
+Usage:
+  clwt [list]                       list this repository's managed worktrees
+  clwt new <branch> [-- <args>]     branch from the origin default, then launch
+  clwt branch <branch> [-- <args>]  check out an existing branch, then launch
+  clwt open <branch> [-- <args>]    launch in an existing managed worktree
+  clwt pr <number> [-- <args>]      check out a pull request, then launch
+  clwt root [-- <args>]             launch in the primary checkout
+  clwt remove <branch> [--delete-branch]
+  clwt prune [--yes]                sweep worktrees whose branch has merged
+  clwt install                      symlink clwt onto your PATH
+  clwt help
+
+Commands:
+  new       Create an explicitly named branch from the origin default and launch.
+  branch    Check out or reuse an existing local/remote branch and launch.
+  open      Launch in an existing managed worktree by branch name.
+  pr        Check a pull request out into a managed worktree and launch.
+  root      Launch in the primary (non-worktree) checkout.
+  list      List this repository's managed worktrees.
+  remove    Remove a clean managed worktree; keep its branch by default.
+  prune     Remove managed worktrees whose branch has an already-merged PR.
+  install   Symlink this script to ~/.local/bin/clwt.
+  help      Show this usage.
+
+Managed worktrees live in:
+  ~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/
+
+`--yolo` on a launching subcommand adds --dangerously-skip-permissions, which
+bypasses every permission check for that session.
+
+Arguments after `--` are passed through to `claude`.
+EOF
+}
+
+# --------------------------------------------------------------- foundations
+
+# Physically resolves a path that need not exist yet: walk up to the deepest
+# existing ancestor, resolve that, re-append the missing tail.
+#
+# Resolving only $HOME is not enough. `git worktree list` reports fully resolved
+# paths, so if ~/github or ~/github/.worktrees is itself a symlink — relocating
+# worktrees to a bigger volume is an ordinary thing to do — every containment
+# check compares a resolved path against a partly-unresolved prefix, and clwt
+# disowns the worktrees it just created.
+resolve_path() {
+  local path=$1 tail='' base
+  while [[ ! -d $path && $path == */* ]]; do
+    tail="${path##*/}${tail:+/$tail}"
+    path=${path%/*}
+    [[ -n $path ]] || path=/
+  done
+  base=$(cd -P "$path" 2>/dev/null && pwd -P) || return 1
+  # When the walk reaches the filesystem root, `$base/` would double the
+  # separator, and a `//prefix` managed root fails its own containment check —
+  # the disown-your-own-worktree bug wearing a different hat.
+  [[ $base != / ]] || base=''
+  if [[ -n $tail ]]; then
+    printf '%s/%s\n' "$base" "$tail"
+  else
+    printf '%s\n' "${base:-/}"
+  fi
+}
+
+# Resolves, once, the four values every other subcommand builds on:
+#   owner, repo         — from the origin remote
+#   primary             — the primary (non-worktree) checkout
+#   managed_root        — ~/github/.worktrees/<owner>/<repo>
+#
+# `primary` deserves a note. It is NOT `git rev-parse --show-toplevel`, which
+# returns the *worktree* when clwt runs inside one — the common case here. Nor is
+# it `--git-common-dir`, which returns the `.git` directory itself. It is the
+# checkout containing that git dir, which is where .worktreeinclude lives, where
+# the copy sources from, and what CLWT_REPO_ROOT must point at so a tracker can
+# find its one central database.
+require_repo() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+    die 'run clwt from inside a git repository'
+
+  local remote_url
+  remote_url=$(git remote get-url origin 2>/dev/null) ||
+    die 'repository has no origin remote'
+
+  parse_remote_identity "$remote_url"
+
+  local common_dir
+  common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+    die 'cannot resolve the git common directory'
+  primary=$(cd "$common_dir/.." 2>/dev/null && pwd -P) ||
+    die "cannot resolve the primary checkout from: $common_dir"
+
+  # Fully resolved, because every path this is later compared against is `pwd -P`'d.
+  # Against an unresolved prefix clwt would create a worktree and then immediately
+  # disown it: `list` marks it unmanaged, `open` and `remove` refuse it, and
+  # `branch` reports it as checked out somewhere clwt does not manage — its own
+  # worktree.
+  managed_root=$(resolve_path "$HOME/github/.worktrees/$owner/$repo") ||
+    die "cannot resolve the managed worktree root under: $HOME"
+}
+
+# Splits owner/repo out of any remote URL shape we care about, in pure shell:
+#   git@host:owner/repo.git      https://host/owner/repo.git
+#   ssh://git@host/owner/repo    /local/path/owner/repo.git
+# In every one of those the last two path segments are owner and repo, so strip
+# the .git suffix and take them from the end.
+parse_remote_identity() {
+  local url=$1 rest
+  url=${url%.git}
+  url=${url%/}
+
+  repo=${url##*/}
+  rest=${url%/*}
+  owner=${rest##*/}
+  owner=${owner##*:} # git@host:owner -> owner
+
+  valid_identity_part "$owner" || die "cannot derive owner from origin: $1"
+  valid_identity_part "$repo" || die "cannot derive repository from origin: $1"
+}
+
+valid_identity_part() {
+  case $1 in
+    '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# --------------------------------------------------------------- launching
+
+# Splits a launching subcommand's arguments into three parts:
+#   LAUNCH_POSITIONAL — the subcommand's own operands (a branch, a PR number)
+#   LAUNCH_YOLO       — 1 when --yolo was given
+#   LAUNCH_ARGS       — everything after `--`, handed to claude untouched
+#
+# Everything before `--` belongs to clwt. An unrecognized clwt-side flag is an
+# error rather than being forwarded, so a typo like `--yolol` fails loudly
+# instead of silently reaching claude as an unknown argument.
+parse_launch_args() {
+  LAUNCH_YOLO=0
+  LAUNCH_ARGS=()
+  LAUNCH_POSITIONAL=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --)
+        shift
+        LAUNCH_ARGS=("$@")
+        return 0
+        ;;
+      --yolo)
+        LAUNCH_YOLO=1
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*)
+        die "unknown option: $1 (run 'clwt help')"
+        ;;
+      *)
+        LAUNCH_POSITIONAL+=("$1")
+        ;;
+    esac
+    shift
+  done
+}
+
+# The whole point of the tool. `claude` has no "start in directory" flag — it
+# inherits its working directory from whoever launched it. So: cd into the
+# target, then exec. The session's cwd is then correct by construction, which is
+# what makes `git -C` unnecessary rather than merely discouraged.
+#
+# CLWT_REPO_ROOT rides along so any issue tracker in that session can find the
+# one central database in the primary checkout. `bd` resolves it through the git
+# common dir on its own; this is the tool-agnostic form of the same guarantee.
+launch() {
+  local target=$1
+  local -a argv=()
+
+  command -v claude >/dev/null 2>&1 || die 'claude not found on PATH'
+
+  if ((LAUNCH_YOLO)); then
+    argv+=(--dangerously-skip-permissions)
+  fi
+  if ((${#LAUNCH_ARGS[@]})); then
+    argv+=("${LAUNCH_ARGS[@]}")
+  fi
+
+  cd -P "$target" || die "cannot enter directory: $target"
+  export CLWT_REPO_ROOT="$primary"
+
+  note "launching claude in $target"
+  if ((${#argv[@]})); then
+    exec claude "${argv[@]}"
+  fi
+  exec claude
+}
+
+# ------------------------------------------------------------------- commands
+
+validate_branch() {
+  git check-ref-format --branch "$1" >/dev/null 2>&1 || die "invalid branch name: $1"
+}
+
+# Path of the worktree holding <branch>, if any. Prints nothing and returns 1
+# when the branch is not checked out anywhere.
+branch_worktree() {
+  local wanted=$1 line path=''
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        ;;
+      "branch refs/heads/$wanted")
+        printf '%s\n' "$path"
+        return 0
+        ;;
+    esac
+  done < <(git worktree list --porcelain)
+  return 1
+}
+
+# Refuses anything clwt did not put where it expects. The symlink check comes
+# first and is not redundant: without it, a symlink sitting inside the managed
+# root could point anywhere, and the containment check below — which compares the
+# *resolved* path — would be satisfied by a directory clwt never created.
+require_managed_worktree() {
+  local path=$1 physical
+  [[ ! -L $path ]] || die "managed worktree path must not be a symlink: $path"
+  physical=$(cd -P "$path" 2>/dev/null && pwd -P) ||
+    die "cannot resolve worktree directory: $path"
+  case $physical in
+    "$managed_root"/*) ;;
+    *) die "worktree is not under the managed root, so clwt does not manage it: $path" ;;
+  esac
+}
+
+# Asks the remote what its default branch is *now*. Deliberately not
+# origin/HEAD, which is cached at clone time and goes stale the moment the
+# repository's default branch changes — branching from a stale default is a
+# quiet way to build on the wrong base.
+default_remote_branch() {
+  local ref
+  ref=$(git ls-remote --symref origin HEAD 2>/dev/null |
+    sed -n 's|^ref: refs/heads/\([^[:space:]]*\).*|\1|p' | head -1)
+  [[ -n $ref ]] || die 'cannot determine the current origin default branch'
+  printf '%s\n' "$ref"
+}
+
+worktree_name_for_branch() {
+  printf '%s\n' "${1//\//-}"
+}
+
+# The branch name has already passed check-ref-format, but it is about to become
+# a directory name, so it gets a second, narrower check against the character set
+# actually safe in a path segment.
+validate_worktree_name() {
+  case $1 in
+    '' | . | .. | *..* | */* | *[!A-Za-z0-9._-]*)
+      die "branch name does not produce a safe directory name: $1"
+      ;;
+  esac
+}
+
+registered_at() {
+  local wanted=$1 line
+  while IFS= read -r line; do
+    if [[ $line == "worktree $wanted" ]]; then
+      return 0
+    fi
+  done < <(git worktree list --porcelain)
+  return 1
+}
+
+# A stale directory squatting on the target path makes `git worktree add` fail
+# with a message about the path being unusable, which sends you looking in the
+# wrong place. Catch it here and say what is actually wrong.
+ensure_available_path() {
+  local path=$1
+  [[ ! -L $path ]] || die "target path must not be a symlink: $path"
+  if [[ -e $path ]]; then
+    registered_at "$path" ||
+      die "target path exists but is not a registered worktree: $path"
+  fi
+}
+
+# Copies the untracked files a fresh worktree needs to actually run the project —
+# .env and friends — matching Claude Code's own .worktreeinclude behavior.
+#
+# Two things here are load-bearing:
+#
+# 1. Both the pattern file and the copy source come from the PRIMARY checkout.
+#    `--exclude-from` resolves relative to the current directory, and clwt is
+#    routinely run from inside a worktree, where neither would be found.
+#
+# 2. .beads/ is refused unconditionally, even when the patterns match it.
+#    `git ls-files --others --ignored --exclude-from` does return gitignored
+#    paths, so a `.beads/` entry here would be copied — giving the worktree its
+#    own forked issue database whose writes diverge and are lost. That is exactly
+#    the regression PR #48 fixed by removing the pattern; this refuses to
+#    reintroduce it no matter what the pattern file says. Worktrees share the
+#    primary checkout's single database through the git common dir.
+# Removes a worktree that was created but could not be finished, so a retry does
+# not trip over a path that exists and holds nothing useful — and, worse, so the
+# next `clwt branch <same>` does not silently *reuse* a worktree that is missing
+# the .env this function exists to provide.
+abandon_worktree() {
+  git worktree remove --force "$1" 2>/dev/null || true
+}
+
+copy_worktree_includes() {
+  local target=$1
+  local pattern_file="$primary/.worktreeinclude"
+  [[ -f $pattern_file ]] || return 0
+
+  # The list goes through a temp file rather than a variable: NUL-delimited output
+  # cannot round-trip through $( ), which strips null bytes, and NUL-delimiting is
+  # what keeps filenames containing spaces or newlines intact. A file also lets us
+  # check git's exit status, so a failure is not read as "nothing matched".
+  # Every failure below RETURNS rather than dies. Being called as `copy … || {…}`
+  # disables errexit for this whole body, so each fallible step is checked by hand;
+  # and a `die` here would exit clwt outright, so the caller's cleanup handler
+  # would never run.
+  # Templated, not bare: BSD/macOS `mktemp` requires a template or -t, so a bare
+  # call is a usage error there — which would break every worktree-creating
+  # command on macOS in any repo that has a .worktreeinclude. Same reason this
+  # script hand-rolls symlink resolution instead of using GNU `readlink -f`.
+  local list_file
+  list_file=$(mktemp "${TMPDIR:-/tmp}/clwt.XXXXXX") || {
+    warn 'cannot create a temporary file'
+    return 1
+  }
+  CLWT_LIST_FILE=$list_file
+
+  if ! (cd "$primary" &&
+    git ls-files --others --ignored --exclude-from="$pattern_file" -z) >"$list_file"; then
+    warn 'cannot list .worktreeinclude matches'
+    return 1
+  fi
+
+  local resolved_target
+  resolved_target=$(cd -P "$target" 2>/dev/null && pwd -P) || {
+    warn "cannot resolve the worktree directory: $target"
+    return 1
+  }
+
+  local rel src dst dst_dir resolved_dir copied=0 refused_beads=0
+  while IFS= read -r -d '' rel; do
+    case $rel in
+      .beads | .beads/*)
+        refused_beads=1
+        continue
+        ;;
+    esac
+
+    # Assertion, not a defense against a known vector: `git ls-files` emits
+    # normalized repo-relative paths, so neither case should ever fire. It is
+    # here because $rel is about to become a path we write to, and an invariant
+    # that cheap is worth stating out loud rather than assuming.
+    case $rel in
+      /* | *..*)
+        warn "refusing to copy a path that escapes the worktree: $rel"
+        return 1
+        ;;
+    esac
+
+    src="$primary/$rel"
+    [[ -f $src ]] || continue
+    dst="$target/$rel"
+
+    # The destination is inside a tree whose *contents* came from a branch, which
+    # on a fork PR means from someone else. A hostile branch can commit the
+    # matched path as a tracked symlink pointing anywhere — git materializes it,
+    # and `cp` then writes THROUGH it, straight out of the managed root. (cp's
+    # -P/--no-dereference does not help; those govern the source.) Verified
+    # writing to ~/.bashrc this way before the guard existed.
+    if [[ -L $dst ]]; then
+      warn "refusing to copy onto a symlink inside the worktree: $rel"
+      return 1
+    fi
+
+    # A directory at the destination is the third shape, and it slips past both
+    # the symlink check above and the parent-containment check below: given an
+    # existing directory, `cp` copies *into* it as $dst/$(basename $src) — and
+    # src and dst share a basename here, so a branch that commits `.env/` as a
+    # directory holding a symlink named `.env` lands the write on that symlink.
+    # Verified escaping to an arbitrary absolute path. Git can only materialise
+    # regular files, symlinks, directories, and gitlinks (directories too), so
+    # "nonexistent or a regular file" is the complete allowlist. Order matters:
+    # -L must be tested first, because -f follows symlinks. `cp -pT` would also
+    # fix it but -T is GNU-only, which the mktemp comment above exists to avoid.
+    if [[ -e $dst && ! -f $dst ]]; then
+      warn "refusing to copy onto a non-regular destination inside the worktree: $rel"
+      return 1
+    fi
+
+    # Validate the parent BEFORE creating it. `mkdir -p` follows a committed
+    # symlink at an intermediate component and creates the missing tail on the far
+    # side, so checking afterwards still hands a hostile branch an
+    # arbitrary-empty-directory primitive anywhere the developer can write.
+    # resolve_path exists precisely to resolve a path that need not exist yet.
+    dst_dir=${dst%/*}
+    resolved_dir=$(resolve_path "$dst_dir") || {
+      warn "cannot resolve the destination directory for $rel"
+      return 1
+    }
+    case "$resolved_dir/" in
+      "$resolved_target"/*) ;;
+      *)
+        warn "refusing to copy $rel — its destination resolves outside the worktree"
+        return 1
+        ;;
+    esac
+
+    mkdir -p "$dst_dir" || {
+      warn "cannot create the directory for $rel"
+      return 1
+    }
+
+    # Re-check after creating: an ancestor could have been created earlier in this
+    # same loop, and the pre-check only saw the state before that.
+    resolved_dir=$(cd -P "$dst_dir" 2>/dev/null && pwd -P) || {
+      warn "cannot resolve the destination directory for $rel"
+      return 1
+    }
+    case "$resolved_dir/" in
+      "$resolved_target"/*) ;;
+      *)
+        warn "refusing to copy $rel — its destination resolves outside the worktree"
+        return 1
+        ;;
+    esac
+
+    cp -p "$src" "$dst" || {
+      warn "cannot copy $rel into the worktree"
+      return 1
+    }
+    copied=$((copied + 1))
+  done <"$list_file"
+  rm -f "$list_file"
+  CLWT_LIST_FILE=''
+
+  if ((refused_beads)); then
+    warn "refusing to copy .beads/ — worktrees share the primary checkout's single issue database, and copying it forks them (see PR #48)"
+  fi
+  # Reported unconditionally: "copied 0" and a silent return would otherwise be
+  # indistinguishable from the copy never having run.
+  note "copied $copied file(s) matching .worktreeinclude"
+}
+
+# Git allows a branch in exactly one worktree, so "it is already checked out" has
+# three quite different meanings and three different right answers. Git's own
+# message names none of them usefully, which leaves you hunting for where the
+# branch actually is.
+reuse_or_refuse() {
+  local branch=$1 existing=$2
+
+  if [[ $existing == "$primary" ]]; then
+    die "$branch is checked out in the primary checkout ($primary); use 'clwt root' to work there"
+  fi
+
+  case $existing in
+    "$managed_root"/*) ;;
+    *) die "$branch is checked out at $existing, which clwt does not manage" ;;
+  esac
+
+  require_managed_worktree "$existing"
+  note "reusing existing worktree for $branch"
+  launch "$existing"
+}
+
+# "Dirty" deliberately means `--untracked-files=all` WITHOUT `--ignored`, and
+# neither obvious alternative works:
+#
+#   plain --porcelain     a worktree holding a .worktreeinclude-copied .env reads
+#                         as clean (the project's .gitignore covers it), so
+#                         removal would silently destroy it
+#   ... --ignored         every worktree clwt creates reads as dirty, so removal
+#                         would always refuse
+#
+# So: genuine uncommitted or untracked work blocks removal, and ignored files do
+# not — but since `git worktree remove` deletes them without comment, they get
+# named first. The report is the only thing standing between you and a lost .env.
+# Both capture git's exit status explicitly. `set -e` does not help: errexit is
+# disabled inside command substitution `$( )`, which is exactly why `rc=$?` is
+# reachable here at all. Without the check, a git failure — index lock
+# contention, a partially-pruned gitdir, a permission problem — yields empty
+# output, which reads as "clean" and as "nothing will be destroyed". Both
+# mistakes delete things.
+#
+# Note for future callers: these must be invoked from a command-substitution or
+# an `if` condition. A process substitution `< <(...)` would NOT work — unlike
+# `$( )`, it inherits errexit, so the assignment aborts the subshell before the
+# status check runs, and a `die` there would only exit the subshell while the
+# parent carried on deleting. That was a real bug here, not a hypothetical.
+worktree_is_dirty() {
+  local out rc
+  out=$(cd "$1" && git status --porcelain --untracked-files=all)
+  rc=$?
+  ((rc == 0)) ||
+    die "cannot determine whether $1 is clean (git exited $rc); refusing to remove"
+  [[ -n $out ]]
+}
+
+worktree_ignored_files() {
+  local out rc
+  out=$(cd "$1" && git ls-files --others --ignored --exclude-standard)
+  rc=$?
+  ((rc == 0)) || return 1
+  printf '%s' "$out"
+}
+
+# Removing the directory you are standing in leaves the shell in a path that no
+# longer exists. Realistic, since you open a terminal in a worktree and then tidy
+# up from it.
+refuse_if_caller_inside() {
+  local target=$1 here
+  here=$(pwd -P)
+  if [[ $here == "$target" || $here == "$target"/* ]]; then
+    die "refusing to remove the worktree you are standing in: $target"
+  fi
+}
+
+# Resolves <branch> to a managed worktree, applying every guard that must hold
+# before anything destructive happens. Sets `resolved_worktree`.
+resolve_removable() {
+  local branch=$1 target
+  validate_branch "$branch"
+  target=$(branch_worktree "$branch") ||
+    die "no worktree checked out for branch: $branch"
+  require_managed_worktree "$target"
+  target=$(cd -P "$target" && pwd -P)
+  refuse_if_caller_inside "$target"
+  resolved_worktree=$target
+}
+
+# Reports what removal will destroy, then removes. Shared by remove and prune.
+remove_worktree() {
+  local target=$1 branch=$2 delete_branch=$3
+  local -a doomed=()
+  local f
+
+  local ignored
+  ignored=$(worktree_ignored_files "$target") ||
+    die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
+  while IFS= read -r f; do
+    if [[ -n $f ]]; then doomed+=("$f"); fi
+  done <<<"$ignored"
+
+  if ((${#doomed[@]})); then
+    note "removing will destroy ${#doomed[@]} ignored file(s):"
+    printf '  %s\n' "${doomed[@]}"
+  fi
+
+  git worktree remove "$target"
+  note "removed $target"
+
+  if ((delete_branch)); then
+    # -d, not -D: an unmerged branch should fail loudly rather than vanish.
+    git branch -d "$branch"
+    note "deleted branch $branch"
+  fi
+}
+
+cmd_root() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
+  launch "$primary"
+}
+
+# Probed once, up front — never inferred from a failing per-branch query. A branch
+# with no PR and a closed-but-unmerged PR both make `gh pr view` exit non-zero,
+# which is the same signal an unauthenticated gh gives. Conflating them either
+# turns a broken gh into a silent "nothing to prune", or turns every PR-less
+# branch into a deletion candidate. Neither is acceptable for a bulk delete.
+require_gh() {
+  local what=$1
+  command -v gh >/dev/null 2>&1 ||
+    die "$what needs gh to reach GitHub, but gh is not on PATH"
+  gh auth status >/dev/null 2>&1 ||
+    die "$what needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)"
+}
+
+# MERGED / OPEN / CLOSED, or NONE when the branch has no pull request. Safe to
+# read a non-zero exit as "no PR" only because require_gh already established
+# that gh itself works.
+branch_pr_state() {
+  gh pr view "$1" --json state --jq '.state' 2>/dev/null || printf 'NONE\n'
+}
+
+cmd_prune() {
+  local apply=0
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --yes) apply=1 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*) die "unknown option: $1 (run 'clwt help')" ;;
+      *) die 'prune takes no positional arguments' ;;
+    esac
+    shift
+  done
+
+  require_gh prune
+
+  local line path='' branch='' physical state here i
+  local -a ripe_branches=() ripe_paths=() skipped=()
+  here=$(pwd -P)
+
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        branch=''
+        ;;
+      'branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        ;;
+      '')
+        # The `!= "$primary"` term is deliberately redundant with the managed-root
+        # check below — the primary checkout does not live under the managed root,
+        # so containment already excludes it. Kept as defense in depth on the only
+        # bulk-delete path in the tool. Do not remove it as dead code.
+        if [[ -n $path && -n $branch && $path != "$primary" && ! -L $path ]]; then
+          case $path in
+            "$managed_root"/*)
+              physical=$(cd -P "$path" 2>/dev/null && pwd -P) || physical=''
+              if [[ -n $physical ]]; then
+                if [[ $here == "$physical" || $here == "$physical"/* ]]; then
+                  skipped+=("$branch — you are standing in it")
+                elif worktree_is_dirty "$physical"; then
+                  skipped+=("$branch — uncommitted or untracked work")
+                else
+                  state=$(branch_pr_state "$branch")
+                  if [[ $state == MERGED ]]; then
+                    ripe_branches+=("$branch")
+                    ripe_paths+=("$physical")
+                  else
+                    skipped+=("$branch — pull request is $state")
+                  fi
+                fi
+              fi
+              ;;
+          esac
+        fi
+        path=''
+        ;;
+    esac
+  done < <(
+    git worktree list --porcelain
+    printf '\n'
+  )
+
+  if ((${#skipped[@]})); then
+    note "left alone (${#skipped[@]}):"
+    printf '  %s\n' "${skipped[@]}"
+  fi
+
+  if ((${#ripe_branches[@]} == 0)); then
+    note 'nothing to prune'
+    return 0
+  fi
+
+  if ((apply == 0)); then
+    note "would remove ${#ripe_branches[@]} worktree(s) — re-run with --yes to apply:"
+    for i in "${!ripe_branches[@]}"; do
+      printf '  %s  %s\n' "${ripe_branches[i]}" "${ripe_paths[i]}"
+    done
+    return 0
+  fi
+
+  # Branches are kept: the worktree is disposable, the branch is history.
+  for i in "${!ripe_branches[@]}"; do
+    remove_worktree "${ripe_paths[i]}" "${ripe_branches[i]}" 0
+  done
+}
+
+# The ordering here is forced, not stylistic. `gh pr checkout` operates on the
+# *current* working tree, so the worktree must exist before it runs — but the
+# directory name derives from the pull request's head ref, which is not known
+# until the PR is queried. Hence: query, derive, create (detached), check out
+# inside it, copy, warn, launch.
+cmd_pr() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'pr requires exactly one pull request number'
+
+  local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross name target
+  case $number in
+    '' | *[!0-9]*) die "pull request must be a number: $number" ;;
+  esac
+
+  require_gh pr
+
+  meta=$(gh pr view "$number" --json headRefName,isCrossRepository \
+    --jq '.headRefName, .isCrossRepository' 2>/dev/null) ||
+    die "cannot resolve pull request #$number"
+  head_ref=$(printf '%s\n' "$meta" | sed -n 1p)
+  cross=$(printf '%s\n' "$meta" | sed -n 2p)
+  [[ -n $head_ref ]] || die "pull request #$number has no head branch"
+
+  local existing
+  if existing=$(branch_worktree "$head_ref"); then
+    reuse_or_refuse "$head_ref" "$existing"
+  fi
+
+  name=$(worktree_name_for_branch "$head_ref")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+  mkdir -p "$managed_root"
+
+  # Detached, because `gh pr checkout` is what decides the branch — for a fork it
+  # may pick a local name of its own.
+  git worktree add --detach --quiet "$target" HEAD
+  if ! (cd "$target" && gh pr checkout "$number"); then
+    # Clean up rather than leaving a half-made worktree. This is not theoretical:
+    # `clwt pr` against a merged pull request whose head branch has since been
+    # deleted fails exactly here, and an orphaned worktree makes the retry fail
+    # for a second, unrelated-looking reason.
+    git worktree remove --force "$target" 2>/dev/null || true
+    die "gh could not check out pull request #$number"
+  fi
+
+  copy_worktree_includes "$target" || {
+    abandon_worktree "$target"
+    die "could not prepare the worktree for pull request #$number"
+  }
+
+  if [[ $cross == true ]]; then
+    printf '%s: WARNING: pull request #%s comes from a fork — this is code you did not write, and opening it here runs it on your machine\n' \
+      "$PROGRAM" "$number" >&2
+  fi
+
+  launch "$target"
+}
+
+cmd_remove() {
+  local branch='' delete_branch=0
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --delete-branch) delete_branch=1 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*) die "unknown option: $1 (run 'clwt help')" ;;
+      *)
+        [[ -z $branch ]] || die 'remove takes exactly one branch name'
+        branch=$1
+        ;;
+    esac
+    shift
+  done
+  [[ -n $branch ]] || die 'remove requires a branch name'
+
+  resolve_removable "$branch"
+  if worktree_is_dirty "$resolved_worktree"; then
+    die "worktree has uncommitted or untracked work, refusing to remove: $resolved_worktree"
+  fi
+  remove_worktree "$resolved_worktree" "$branch" "$delete_branch"
+}
+
+cmd_branch() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'branch requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} existing name target
+  validate_branch "$branch"
+
+  if existing=$(branch_worktree "$branch"); then
+    reuse_or_refuse "$branch" "$existing"
+  fi
+
+  name=$(worktree_name_for_branch "$branch")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+  mkdir -p "$managed_root"
+
+  if git show-ref --verify --quiet "refs/heads/$branch"; then
+    git worktree add "$target" "$branch"
+  else
+    note "fetching origin/$branch"
+    git fetch --quiet origin "refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null ||
+      die "no such branch locally or on origin: $branch"
+    git worktree add -b "$branch" "$target" "origin/$branch"
+  fi
+
+  copy_worktree_includes "$target" || {
+    abandon_worktree "$target"
+    die "could not prepare the worktree for $branch"
+  }
+  launch "$target"
+}
+
+cmd_new() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'new requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} existing base name target
+  validate_branch "$branch"
+  [[ $branch == */* ]] ||
+    die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
+
+  if existing=$(branch_worktree "$branch"); then
+    reuse_or_refuse "$branch" "$existing"
+  fi
+
+  if git show-ref --verify --quiet "refs/heads/$branch"; then
+    die "local branch already exists but is not checked out: $branch (use 'clwt branch $branch')"
+  fi
+
+  name=$(worktree_name_for_branch "$branch")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+
+  base=$(default_remote_branch)
+  note "fetching origin/$base"
+  git fetch --quiet origin "refs/heads/$base:refs/remotes/origin/$base"
+
+  mkdir -p "$managed_root"
+  git worktree add -b "$branch" "$target" "origin/$base"
+  copy_worktree_includes "$target" || {
+    abandon_worktree "$target"
+    die "could not prepare the worktree for $branch"
+  }
+  launch "$target"
+}
+
+cmd_open() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'open requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} target
+  validate_branch "$branch"
+  target=$(branch_worktree "$branch") ||
+    die "no worktree checked out for branch: $branch"
+  require_managed_worktree "$target"
+  launch "$target"
+}
+
+# Lists this repository's worktrees, marking any that live outside the managed
+# root. Those exist because Claude Code's own worktree feature is still available
+# and does not consult clwt — showing them, flagged, is more honest than hiding
+# worktrees the developer can plainly see in `git worktree list`.
+cmd_list() {
+  [[ $# -eq 0 ]] || die 'list takes no arguments'
+
+  local line path='' branch='' width=0
+  local -a listed_branches=() listed_paths=() listed_marks=()
+
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        branch='(detached)'
+        ;;
+      'branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        ;;
+      '')
+        # Blank line terminates a record. The primary checkout is a worktree as
+        # far as git is concerned, but it is not one clwt manages.
+        if [[ -n $path && $path != "$primary" ]]; then
+          listed_branches+=("$branch")
+          listed_paths+=("$path")
+          case $path in
+            "$managed_root"/*) listed_marks+=('') ;;
+            *) listed_marks+=('(unmanaged)') ;;
+          esac
+          if ((${#branch} > width)); then width=${#branch}; fi
+        fi
+        path=''
+        ;;
+    esac
+  done < <(
+    git worktree list --porcelain
+    printf '\n'
+  )
+
+  if ((${#listed_branches[@]} == 0)); then
+    printf 'No managed worktrees for %s/%s.\n' "$owner" "$repo"
+    return 0
+  fi
+
+  local i
+  for i in "${!listed_branches[@]}"; do
+    if [[ -n ${listed_marks[i]} ]]; then
+      printf '%-*s  %s  %s\n' "$width" "${listed_branches[i]}" "${listed_paths[i]}" "${listed_marks[i]}"
+    else
+      printf '%-*s  %s\n' "$width" "${listed_branches[i]}" "${listed_paths[i]}"
+    fi
+  done
+}
+
+# Resolves this script's real path, following symlinks by hand. `readlink -f` would
+# do it in one call but is GNU-only, and this library is copied onto machines we do
+# not control. Matters because `clwt install` is normally run *through* the symlink
+# it installed — without this it would happily point the symlink at itself.
+resolve_self() {
+  local src=$0 dir
+  case $src in
+    */*) ;;
+    *) src=$(command -v -- "$src" 2>/dev/null) || src=$0 ;;
+  esac
+  while [ -L "$src" ]; do
+    dir=$(cd -P "$(dirname "$src")" && pwd -P)
+    src=$(readlink "$src")
+    case $src in
+      /*) ;;
+      *) src="$dir/$src" ;;
+    esac
+  done
+  dir=$(cd -P "$(dirname "$src")" && pwd -P)
+  printf '%s/%s\n' "$dir" "$(basename "$src")"
+}
+
+path_contains() {
+  case ":${PATH-}:" in
+    *":$1:"*) return 0 ;;
+  esac
+  return 1
+}
+
+# Symlinks — deliberately, not copies. A symlink tracks every later edit to the
+# repo script, so the tool stays current as the library is updated, and there is
+# never a stale duplicate to wonder about.
+# Points <target> at <source>, creating the parent directory, repointing a
+# symlink that aims elsewhere, and refusing to clobber anything that is not a
+# symlink — a real file there belongs to someone else.
+link_into_place() {
+  local source=$1 target=$2 current
+
+  mkdir -p "${target%/*}" || die "cannot create ${target%/*}"
+
+  if [[ -L $target ]]; then
+    current=$(readlink "$target")
+    if [[ $current == "$source" ]]; then
+      note "already installed: $target -> $source"
+      return 0
+    fi
+    ln -sfn "$source" "$target" || die "cannot update symlink: $target"
+    note "repointed $target -> $source"
+    return 0
+  fi
+
+  [[ ! -e $target ]] ||
+    die "$target exists and is not a symlink; move it aside and retry"
+
+  ln -s "$source" "$target" || die "cannot create symlink: $target"
+  note "installed $target -> $source"
+}
+
+cmd_install() {
+  [[ $# -eq 0 ]] || die 'install takes no arguments'
+
+  local bin_dir="$HOME/.local/bin"
+  local source completion_source completion_dir
+  source=$(resolve_self)
+  completion_source="${source%/*}/clwt-completion.bash"
+
+  link_into_place "$source" "$bin_dir/clwt"
+
+  # bash-completion 2.x autoloads a file named after the command from here, so
+  # Tab works in a new shell with no rc edit. A symlink rather than a copy, for
+  # the same reason as the binary: it tracks later edits.
+  completion_dir="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+  if [[ -f $completion_source ]]; then
+    link_into_place "$completion_source" "$completion_dir/clwt"
+  else
+    note "no completion script beside clwt, skipping: $completion_source"
+  fi
+
+  install_path_warning "$bin_dir"
+}
+
+install_path_warning() {
+  path_contains "$1" && return 0
+  printf '%s: warning: %s is not on your PATH; add it to use `clwt` directly\n' \
+    "$PROGRAM" "$1" >&2
+}
+
+# Undocumented diagnostic seam: prints the resolved foundation values so the test
+# suite (and a confused human) can see what clwt thinks it is working with.
+cmd_debug_roots() {
+  printf 'owner=%s\n' "$owner"
+  printf 'repo=%s\n' "$repo"
+  printf 'primary=%s\n' "$primary"
+  printf 'managed_root=%s\n' "$managed_root"
+}
+
+main() {
+  local command=${1:-list}
+  case $command in
+    -h | --help | help)
+      usage
+      ;;
+    debug-roots)
+      require_repo
+      cmd_debug_roots
+      ;;
+    list)
+      shift || true
+      require_repo
+      cmd_list "$@"
+      ;;
+    install)
+      shift || true
+      cmd_install "$@" # deliberately no require_repo; install is repo-independent
+      ;;
+    root | open | new | branch | remove | prune | pr)
+      shift || true
+      require_repo
+      "cmd_$command" "$@"
+      ;;
+    *)
+      die "unknown command: $command (run 'clwt help')"
+      ;;
+  esac
+}
+
+main "$@"

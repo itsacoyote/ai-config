@@ -38,6 +38,9 @@
       "Bash(bd blocked *)",
       "Bash(bd update *)",
       "Bash(bd close *)"
+    ],
+    "deny": [
+      "Bash(git -C *)"
     ]
   },
   "statusLine": {
