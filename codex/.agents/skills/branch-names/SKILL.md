@@ -1,6 +1,6 @@
 ---
 name: branch-names
-description: Use when creating, naming, or renaming a git branch — before starting any new work on a new branch.
+description: Use when creating, naming, or renaming a git branch — before running git checkout -b / git switch -c to start any new work.
 ---
 
 # Branch Names

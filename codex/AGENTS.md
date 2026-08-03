@@ -55,6 +55,6 @@ would understand the code without the comment, delete the comment.
 ## Skills
 
 Three git skills accompany these conventions: `git-commit`, `branch-names`, and
-`create-pr`. They are installed as Agent Skills (either in this repository's
-`.agents/skills/` or in your personal `~/.agents/skills`) and load automatically when the
-task matches; `$git-commit` (and friends) invokes one explicitly.
+`create-pr`. If they are installed as Agent Skills (either in this repository's
+`.agents/skills/` or in your personal `~/.agents/skills`), they load automatically when
+the task matches; `$git-commit` (and friends) invokes one explicitly.
