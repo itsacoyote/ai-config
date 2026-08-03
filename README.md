@@ -179,6 +179,11 @@ A small Bash CLI at `.claude/scripts/clwt` that manages this repository's git
 worktrees and launches Claude Code inside them. **You run it from your shell, not
 from inside Claude.**
 
+**Prerequisites:** `bash` 4+ and `git`. `gh` (authenticated) is needed only by `clwt pr`
+and `clwt prune` — both fail with a clear message rather than guessing if it is missing
+or logged out. The repository must have an `origin` remote, since the managed paths are
+derived from it.
+
 ```bash
 .claude/scripts/clwt install     # symlinks clwt + its completion; run once
 ```
@@ -260,6 +265,12 @@ Exits non-zero on any failure.
 2. **The project's own `CLAUDE.md` does not come from here** — this repo's `CLAUDE.md` documents *this* repo. To orient Claude to the workflow in the target project, paste the snippet below into that project's `CLAUDE.md` and adapt it.
 3. **Optionally copy `.mcp.json`** (see [MCP servers](#mcp-servers)).
 4. Open Claude Code in the project and start with `/define` (or read `feature-workflow` first).
+
+> **Note:** `.claude/settings.json` carries `permissions.deny: ["Bash(git -C *)"]`, which
+> travels with the copy. It exists because a `clwt`-launched session is already rooted in
+> the right worktree — in a project without `clwt`, where `git -C` may be in legitimate
+> use, delete that one line. `clwt` itself is repo-agnostic and works in any project with
+> an `origin` remote.
 
 ### Example: paste into your project's `CLAUDE.md`
 
