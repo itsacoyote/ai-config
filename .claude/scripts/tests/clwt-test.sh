@@ -974,6 +974,149 @@ check_output 'pr says it needs gh' 'gh' clwt pr 101
 rm -f "$CLWT_GH_UNAVAILABLE"
 rm -f "$PRIMARY/.worktreeinclude"
 
+section 'bash completion'
+
+COMPLETION="$REPO_ROOT/.claude/scripts/clwt-completion.bash"
+
+check 'the completion script exists' test -f "$COMPLETION"
+check 'the completion script parses as valid bash' bash -n "$COMPLETION"
+
+# A completion that reaches the network freezes the terminal on Tab. Hard rule.
+# Comments are stripped first — the file explains at length *why* it avoids `gh`,
+# and matching that prose would fail the check for saying the right thing.
+if sed 's/#.*//' "$COMPLETION" | grep -qE '\b(gh|curl|wget|nc)\b'; then
+  not_ok 'the completion script makes no network calls'
+else
+  ok 'the completion script makes no network calls'
+fi
+
+if [ -f "$COMPLETION" ]; then
+  # Drive the completion function the way bash would: set COMP_WORDS/COMP_CWORD,
+  # call it, read COMPREPLY back.
+  # shellcheck disable=SC1090
+  . "$COMPLETION"
+
+  # COMPREPLY is set by _clwt in the current shell, so the call cannot be
+  # subshelled — the caller cd's to the directory it wants completions from.
+  complete_for() {
+    COMP_WORDS=("$@")
+    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
+    COMPREPLY=()
+    _clwt >/dev/null 2>&1 || true
+    printf '%s\n' "${COMPREPLY[@]-}"
+  }
+
+  # Run completions from inside the sandbox repo so branch lookups have something
+  # to find.
+  cd "$PRIMARY" || exit 1
+
+  subs=$(complete_for clwt '')
+  missing=''
+  for sub in new branch open pr root list remove prune install help; do
+    printf '%s\n' "$subs" | grep -qx "$sub" || missing="$missing $sub"
+  done
+  if [ -z "$missing" ]; then
+    ok 'completion offers all ten subcommands for a bare clwt'
+  else
+    not_ok "completion offers all ten subcommands for a bare clwt (missing:$missing)"
+  fi
+
+  filtered=$(complete_for clwt 'pr')
+  if printf '%s\n' "$filtered" | grep -qx 'prune' && printf '%s\n' "$filtered" | grep -qx 'pr' &&
+    ! printf '%s\n' "$filtered" | grep -qx 'new'; then
+    ok 'completion filters subcommands by typed prefix'
+  else
+    not_ok 'completion filters subcommands by typed prefix'
+  fi
+
+  # new offers type prefixes, never branch names — it creates a branch that does
+  # not exist yet, and offering an existing one completes into new's own error.
+  types=$(complete_for clwt new '')
+  if printf '%s\n' "$types" | grep -qx 'feat/' && printf '%s\n' "$types" | grep -qx 'fix/'; then
+    ok 'completion offers conventional-commit type prefixes for new'
+  else
+    not_ok 'completion offers conventional-commit type prefixes for new'
+  fi
+  if printf '%s\n' "$types" | grep -q 'feat/alpha'; then
+    not_ok 'completion offers no existing branch names for new'
+  else
+    ok 'completion offers no existing branch names for new'
+  fi
+
+  branches=$(complete_for clwt branch '')
+  if printf '%s\n' "$branches" | grep -qx 'feat/alpha'; then
+    ok 'completion offers local branches for branch'
+  else
+    not_ok 'completion offers local branches for branch'
+  fi
+  if printf '%s\n' "$branches" | grep -qx 'feat/remote-only'; then
+    ok 'completion offers origin branches for branch'
+  else
+    not_ok 'completion offers origin branches for branch'
+  fi
+
+  opens=$(complete_for clwt open '')
+  if printf '%s\n' "$opens" | grep -qx 'feat/alpha'; then
+    ok 'completion offers managed worktree branches for open'
+  else
+    not_ok 'completion offers managed worktree branches for open'
+  fi
+  if printf '%s\n' "$opens" | grep -qx 'feat/stray'; then
+    not_ok 'completion does not offer an unmanaged worktree branch for open'
+  else
+    ok 'completion does not offer an unmanaged worktree branch for open'
+  fi
+
+  removes=$(complete_for clwt remove '')
+  if printf '%s\n' "$removes" | grep -qx 'feat/alpha'; then
+    ok 'completion offers managed worktree branches for remove'
+  else
+    not_ok 'completion offers managed worktree branches for remove'
+  fi
+
+  prs=$(complete_for clwt pr '')
+  if [ -z "$(printf '%s' "$prs" | tr -d '[:space:]')" ]; then
+    ok 'completion offers nothing for pr'
+  else
+    not_ok 'completion offers nothing for pr'
+  fi
+
+  yolo=$(complete_for clwt new feat/x '--')
+  if printf '%s\n' "$yolo" | grep -qx -- '--yolo'; then
+    ok 'completion offers --yolo for a launching subcommand'
+  else
+    not_ok 'completion offers --yolo for a launching subcommand'
+  fi
+  del=$(complete_for clwt remove feat/alpha '--')
+  if printf '%s\n' "$del" | grep -qx -- '--delete-branch'; then
+    ok 'completion offers --delete-branch for remove'
+  else
+    not_ok 'completion offers --delete-branch for remove'
+  fi
+  yes=$(complete_for clwt prune '--')
+  if printf '%s\n' "$yes" | grep -qx -- '--yes'; then
+    ok 'completion offers --yes for prune'
+  else
+    not_ok 'completion offers --yes for prune'
+  fi
+
+  # Outside a repo: subcommands still complete, branch lookups just come back empty.
+  cd "$TMP/not-a-repo" || exit 1
+  outside=$(complete_for clwt '')
+  if printf '%s\n' "$outside" | grep -qx 'new'; then
+    ok 'completion does not error outside a git repository'
+  else
+    not_ok 'completion does not error outside a git repository'
+  fi
+  outside_branches=$(complete_for clwt open '')
+  if [ -z "$(printf '%s' "$outside_branches" | tr -d '[:space:]')" ]; then
+    ok 'completion returns no branches outside a git repository'
+  else
+    not_ok 'completion returns no branches outside a git repository'
+  fi
+  cd "$TMP" || exit 1
+fi
+
 # ------------------------------------------------- claude integration
 
 # These assert against the real repository, not the sandbox: the skill, the
