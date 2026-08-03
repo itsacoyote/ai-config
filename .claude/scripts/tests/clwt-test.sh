@@ -63,15 +63,24 @@ export GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' \
   >"$GIT_CONFIG_GLOBAL"
 
-mkdir -p "$HOME"
-HOME=$(cd "$HOME" && pwd -P) # resolve symlinks once so path comparisons are stable
+# HOME is deliberately left UNRESOLVED here. Pre-resolving it hid a real bug:
+# managed_root was built from a raw $HOME while every path compared against it was
+# pwd -P'd, so on a symlinked home clwt disowned the worktrees it had just made.
+# The sandbox home is reached through a symlink below to keep that exposed.
+mkdir -p "$TMP/real-home"
+ln -s "$TMP/real-home" "$HOME"
 export HOME
 
 REMOTE="$HOME/remotes/owner/project.git"
 PRIMARY="$HOME/github/owner/project"
 MANAGED="$HOME/github/.worktrees/owner/project"
 BIN="$HOME/bin"
-mkdir -p "$REMOTE" "$HOME/github/owner" "$BIN"
+mkdir -p "$REMOTE" "$HOME/github/owner" "$BIN" "$MANAGED"
+
+# Assertions compare against the *resolved* managed root while $HOME stays a
+# symlink. That asymmetry is the regression test for the managed_root bug: clwt
+# only agrees with these paths if it resolves $HOME itself. Leave it this way.
+MANAGED=$(cd "$MANAGED" && pwd -P)
 
 export CLWT_TEST_LOG="$TMP/launch.log"
 : >"$CLWT_TEST_LOG"
@@ -356,6 +365,7 @@ git -C "$PRIMARY" worktree add -q -b feat/listed "$MANAGED/feat-listed" 2>/dev/n
 UNMANAGED="$HOME/elsewhere/stray"
 mkdir -p "$HOME/elsewhere"
 git -C "$PRIMARY" worktree add -q -b feat/stray "$UNMANAGED" 2>/dev/null
+UNMANAGED=$(cd "$UNMANAGED" && pwd -P) # resolved, like every path clwt reports
 
 check_output 'list shows a managed worktree by branch name' 'feat/listed' clwt list
 check_output 'list shows the managed worktree path' "$MANAGED/feat-listed" clwt list
@@ -473,13 +483,15 @@ check_fails 'open rejects an invalid branch name' clwt open 'not a branch'
 
 # A symlink pointing into the managed root must not be accepted as a managed
 # worktree — otherwise the containment check can be walked around.
-SYMLINKED="$MANAGED/symlinked"
-ln -s "$UNMANAGED" "$SYMLINKED"
+# The link target is a sibling *inside* the managed root: if it pointed outside,
+# the containment check would reject it on its own and the symlink guard would
+# never decide anything — the test would pass for the wrong reason.
 git -C "$PRIMARY" worktree add -q -b feat/symlinked "$MANAGED/feat-symlinked" 2>/dev/null
 rm -rf "$MANAGED/feat-symlinked"
-ln -s "$UNMANAGED" "$MANAGED/feat-symlinked"
-check_fails 'open refuses a symlinked worktree path' clwt open feat/symlinked
-rm -f "$SYMLINKED" "$MANAGED/feat-symlinked"
+ln -s "$MANAGED/feat-listed" "$MANAGED/feat-symlinked"
+check_fails 'open refuses a symlinked worktree path inside the managed root' \
+  clwt open feat/symlinked
+rm -f "$MANAGED/feat-symlinked"
 
 section 'new'
 
@@ -837,13 +849,43 @@ launch_reset
 clwt new feat/merged-b >/dev/null 2>&1
 pr_state feat/merged-b MERGED
 check_fails 'prune exits non-zero when gh is unavailable' clwt prune
-check_output 'prune says why it cannot determine merge state' 'gh' clwt prune
+check_output 'prune says why it cannot determine merge state' 'prune needs gh' clwt prune
 check_fails 'prune --yes also exits non-zero when gh is unavailable' clwt prune --yes
 check 'prune removed nothing while gh was unavailable' test -d "$MANAGED/feat-merged-b"
 rm -f "$CLWT_GH_UNAVAILABLE"
 
 check_fails 'prune rejects a positional argument' clwt prune something
 check_fails 'prune rejects an unknown flag' clwt prune --force
+
+# prune's containment, primary-checkout, and symlink guards were previously
+# unreachable: candidacy needs a MERGED state, and only feat/merged-* ever had a
+# state file, so every guarded case was filtered out by the *state* check long
+# before the guard mattered. Deleting any of the three left the suite green.
+# These put each guarded case into the merged-and-clean state — the only state
+# from which prune would actually delete — and assert survival.
+pr_state feat/stray MERGED
+primary_branch_now=$(cd "$PRIMARY" && git symbolic-ref --short HEAD)
+pr_state "$primary_branch_now" MERGED
+
+git -C "$PRIMARY" worktree add -q -b feat/link-target "$MANAGED/feat-link-target" 2>/dev/null
+git -C "$PRIMARY" worktree add -q -b feat/symlink-prune "$MANAGED/feat-symlink-prune" 2>/dev/null
+rm -rf "$MANAGED/feat-symlink-prune"
+ln -s "$MANAGED/feat-link-target" "$MANAGED/feat-symlink-prune"
+pr_state feat/symlink-prune MERGED
+
+clwt prune --yes >/dev/null 2>&1
+
+check 'prune never removes an unmanaged worktree even when its PR is merged' \
+  test -d "$UNMANAGED"
+check 'prune never removes the primary checkout even when its branch is merged' \
+  test -d "$PRIMARY"
+check 'prune never removes a symlinked worktree path even when its PR is merged' \
+  test -L "$MANAGED/feat-symlink-prune"
+check 'the symlink target survives too' test -d "$MANAGED/feat-link-target"
+
+rm -f "$MANAGED/feat-symlink-prune"
+rm -f "$CLWT_GH_STATES/feat-stray" "$CLWT_GH_STATES/feat-symlink-prune" \
+  "$CLWT_GH_STATES/$(printf '%s' "$primary_branch_now" | tr '/' '-')"
 
 # -------------------------------------------------------------------- install
 
@@ -1005,7 +1047,7 @@ check_fails 'pr rejects a non-numeric argument' clwt pr not-a-number
 
 touch "$CLWT_GH_UNAVAILABLE"
 check_fails 'pr exits non-zero when gh is unavailable' clwt pr 101
-check_output 'pr says it needs gh' 'gh' clwt pr 101
+check_output 'pr says it needs gh' 'pr needs gh' clwt pr 101
 rm -f "$CLWT_GH_UNAVAILABLE"
 rm -f "$PRIMARY/.worktreeinclude"
 
@@ -1220,6 +1262,32 @@ fi
 
 README="$REPO_ROOT/README.md"
 check 'the README has a clwt section' grep -qiE '^#+ .*clwt' "$README"
+
+# The clwt section was originally inserted *inside* an existing ```markdown fence,
+# so it rendered as a code sample and unbalanced every fence after it — while all
+# the line-based greps below passed happily. Count fences, and confirm the section
+# heading is not swallowed by one.
+fences=$(grep -c '^```' "$README")
+if [ $((fences % 2)) -eq 0 ]; then
+  ok 'the README code fences are balanced'
+else
+  not_ok "the README code fences are balanced (found $fences)"
+fi
+if python3 - "$README" <<'PY'
+import sys
+inside = False
+for line in open(sys.argv[1]):
+    if line.startswith('```'):
+        inside = not inside
+    elif line.startswith('## `clwt`') and inside:
+        sys.exit(1)
+sys.exit(0)
+PY
+then
+  ok 'the clwt section is a real heading, not inside a code fence'
+else
+  not_ok 'the clwt section is a real heading, not inside a code fence'
+fi
 
 readme_missing=''
 for sub in new branch open pr root list remove prune install help; do

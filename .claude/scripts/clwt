@@ -32,7 +32,7 @@ Usage:
   clwt remove <branch> [--delete-branch]
   clwt prune [--yes]                sweep worktrees whose branch has merged
   clwt install                      symlink clwt onto your PATH
-  clwt help [command]
+  clwt help
 
 Commands:
   new       Create an explicitly named branch from the origin default and launch.
@@ -44,10 +44,13 @@ Commands:
   remove    Remove a clean managed worktree; keep its branch by default.
   prune     Remove managed worktrees whose branch has an already-merged PR.
   install   Symlink this script to ~/.local/bin/clwt.
-  help      Show general or command-specific help.
+  help      Show this usage.
 
 Managed worktrees live in:
   ~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/
+
+`--yolo` on a launching subcommand adds --dangerously-skip-permissions, which
+bypasses every permission check for that session.
 
 Arguments after `--` are passed through to `claude`.
 EOF
@@ -82,7 +85,14 @@ require_repo() {
   primary=$(cd "$common_dir/.." 2>/dev/null && pwd -P) ||
     die "cannot resolve the primary checkout from: $common_dir"
 
-  managed_root="$HOME/github/.worktrees/$owner/$repo"
+  # Resolved, because every path this is later compared against is `pwd -P`'d.
+  # With an unresolved $HOME (a symlinked or cross-mount home), clwt would create
+  # a worktree and then immediately disown it: `list` marks it unmanaged, `open`
+  # and `remove` refuse it, and `branch` reports it as checked out somewhere clwt
+  # does not manage — its own worktree.
+  local home
+  home=$(cd "$HOME" 2>/dev/null && pwd -P) || die "cannot resolve HOME: $HOME"
+  managed_root="$home/github/.worktrees/$owner/$repo"
 }
 
 # Splits owner/repo out of any remote URL shape we care about, in pure shell:
@@ -285,10 +295,31 @@ ensure_available_path() {
 #    the regression PR #48 fixed by removing the pattern; this refuses to
 #    reintroduce it no matter what the pattern file says. Worktrees share the
 #    primary checkout's single database through the git common dir.
+# Removes a worktree that was created but could not be finished, so a retry does
+# not trip over a path that exists and holds nothing useful — and, worse, so the
+# next `clwt branch <same>` does not silently *reuse* a worktree that is missing
+# the .env this function exists to provide.
+abandon_worktree() {
+  git worktree remove --force "$1" 2>/dev/null || true
+}
+
 copy_worktree_includes() {
   local target=$1
   local pattern_file="$primary/.worktreeinclude"
   [[ -f $pattern_file ]] || return 0
+
+  # The list goes through a temp file rather than a variable: NUL-delimited output
+  # cannot round-trip through $( ), which strips null bytes, and NUL-delimiting is
+  # what keeps filenames containing spaces or newlines intact. A file also lets us
+  # check git's exit status, so a failure is not read as "nothing matched".
+  local list_file
+  list_file=$(mktemp) || die 'cannot create a temporary file'
+
+  if ! (cd "$primary" &&
+    git ls-files --others --ignored --exclude-from="$pattern_file" -z) >"$list_file"; then
+    rm -f "$list_file"
+    die 'cannot list .worktreeinclude matches'
+  fi
 
   local rel src dst copied=0 refused_beads=0
   while IFS= read -r -d '' rel; do
@@ -313,18 +344,16 @@ copy_worktree_includes() {
     mkdir -p "${dst%/*}"
     cp -p "$src" "$dst"
     copied=$((copied + 1))
-  done < <(
-    cd "$primary" &&
-      git ls-files --others --ignored --exclude-from="$pattern_file" -z
-  )
+  done <"$list_file"
+  rm -f "$list_file"
 
   if ((refused_beads)); then
     printf '%s: warning: refusing to copy .beads/ — worktrees share the primary checkout'\''s single issue database, and copying it forks them (see PR #48)\n' \
       "$PROGRAM" >&2
   fi
-  if ((copied > 0)); then
-    note "copied $copied file(s) matching .worktreeinclude"
-  fi
+  # Reported unconditionally: "copied 0" and a silent return would otherwise be
+  # indistinguishable from the copy never having run.
+  note "copied $copied file(s) matching .worktreeinclude"
 }
 
 # Git allows a branch in exactly one worktree, so "it is already checked out" has
@@ -360,12 +389,29 @@ reuse_or_refuse() {
 # So: genuine uncommitted or untracked work blocks removal, and ignored files do
 # not — but since `git worktree remove` deletes them without comment, they get
 # named first. The report is the only thing standing between you and a lost .env.
+# Both capture git's exit status explicitly. `set -e` does not help here: errexit
+# is disabled inside $( ) and ( ) without `shopt -s inherit_errexit`. Without the
+# check, a git failure — index lock contention, a partially-pruned gitdir, a
+# permission problem — yields empty output, which reads as "clean" and as
+# "nothing will be destroyed". Both mistakes delete things.
 worktree_is_dirty() {
-  [[ -n $(cd "$1" && git status --porcelain --untracked-files=all) ]]
+  local out rc
+  out=$(cd "$1" && git status --porcelain --untracked-files=all)
+  rc=$?
+  ((rc == 0)) ||
+    die "cannot determine whether $1 is clean (git exited $rc); refusing to remove"
+  [[ -n $out ]]
 }
 
 worktree_ignored_files() {
-  (cd "$1" && git ls-files --others --ignored --exclude-standard)
+  local out rc
+  out=$(cd "$1" && git ls-files --others --ignored --exclude-standard)
+  rc=$?
+  ((rc == 0)) ||
+    die "cannot list ignored files in $1 (git exited $rc); refusing to remove without knowing what would be destroyed"
+  # Trailing newline matters: `while read` drops a final line that has none, which
+  # would silently hide the last file about to be destroyed.
+  [[ -z $out ]] || printf '%s\n' "$out"
 }
 
 # Removing the directory you are standing in leaves the shell in a path that no
@@ -399,7 +445,7 @@ remove_worktree() {
   local f
 
   while IFS= read -r f; do
-    [[ -n $f ]] && doomed+=("$f")
+    if [[ -n $f ]]; then doomed+=("$f"); fi
   done < <(worktree_ignored_files "$target")
 
   if ((${#doomed[@]})); then
@@ -429,10 +475,11 @@ cmd_root() {
 # turns a broken gh into a silent "nothing to prune", or turns every PR-less
 # branch into a deletion candidate. Neither is acceptable for a bulk delete.
 require_gh() {
+  local what=$1
   command -v gh >/dev/null 2>&1 ||
-    die 'prune needs gh to determine merge state, but gh is not on PATH'
+    die "$what needs gh to reach GitHub, but gh is not on PATH"
   gh auth status >/dev/null 2>&1 ||
-    die 'prune needs gh to determine merge state, but gh is not authenticated (run: gh auth login)'
+    die "$what needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)"
 }
 
 # MERGED / OPEN / CLOSED, or NONE when the branch has no pull request. Safe to
@@ -458,7 +505,7 @@ cmd_prune() {
     shift
   done
 
-  require_gh
+  require_gh prune
 
   local line path='' branch='' physical state here i
   local -a ripe_branches=() ripe_paths=() skipped=()
@@ -474,6 +521,10 @@ cmd_prune() {
         branch=${line#branch refs/heads/}
         ;;
       '')
+        # The `!= "$primary"` term is deliberately redundant with the managed-root
+        # check below — the primary checkout does not live under the managed root,
+        # so containment already excludes it. Kept as defense in depth on the only
+        # bulk-delete path in the tool. Do not remove it as dead code.
         if [[ -n $path && -n $branch && $path != "$primary" && ! -L $path ]]; then
           case $path in
             "$managed_root"/*)
@@ -542,7 +593,7 @@ cmd_pr() {
     '' | *[!0-9]*) die "pull request must be a number: $number" ;;
   esac
 
-  require_gh
+  require_gh pr
 
   meta=$(gh pr view "$number" --json headRefName,isCrossRepository \
     --jq '.headRefName, .isCrossRepository' 2>/dev/null) ||
@@ -637,7 +688,7 @@ cmd_branch() {
     git worktree add -b "$branch" "$target" "origin/$branch"
   fi
 
-  copy_worktree_includes "$target"
+  copy_worktree_includes "$target" || { abandon_worktree "$target"; exit 2; }
   launch "$target"
 }
 
@@ -669,7 +720,7 @@ cmd_new() {
 
   mkdir -p "$managed_root"
   git worktree add -b "$branch" "$target" "origin/$base"
-  copy_worktree_includes "$target"
+  copy_worktree_includes "$target" || { abandon_worktree "$target"; exit 2; }
   launch "$target"
 }
 

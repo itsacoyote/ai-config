@@ -75,14 +75,19 @@ Add `clwt`, a Bash CLI at `.claude/scripts/clwt`, run by the developer from thei
   write access to the machine — not the threat model for a CLI the developer runs from their
   own interactive shell. The guards that prevent *mistakes* are kept: managed-root
   containment, `git check-ref-format` on branch names, symlink refusal, and dirty-tree
-  refusal on removal. This drops the `python3` dependency and takes the script from ~470 to
-  under 300 lines.
+  refusal on removal. This drops the `python3` dependency entirely. It is defined by *what is
+  removed*, not by a line count — `clwt` adds four subcommands `pwt` never had, so it lands
+  larger than `pwt` would be with its scaffolding stripped.
 - **A thin `.claude/skills/clwt/SKILL.md`** teaches Claude when to recommend `clwt` and states
   that it is already in the target worktree and must use plain git. The skill does not launch
   anything — it cannot.
 
-`worktree-status.sh` and the `reground` skill are unchanged. They report across all worktrees
-with plain git and keep working regardless of how a worktree was created.
+`worktree-status.sh` is unchanged — it reports across all worktrees with plain git and keeps
+working regardless of how a worktree was created. The `reground` skill **is** updated: its
+verdict previously recommended `git worktree add` and `git worktree remove`, which steered the
+developer into creating exactly the unmanaged worktrees `clwt` declines to manage. It now names
+`clwt new` / `clwt remove` / `clwt prune`, with plain-git fallbacks for repositories where
+`clwt` is not installed.
 
 ## Consequences
 
@@ -108,6 +113,10 @@ with plain git and keep working regardless of how a worktree was created.
 - **The `Bash(git -C *)` deny is repo-wide.** A future legitimate cross-worktree read from a
   Bash tool call would be blocked and need the rule revisited. Scripts are unaffected, since
   `bash .claude/scripts/foo.sh` is a single tool call whose contents the matcher never sees.
+- **It also travels.** `.claude/` is copied wholesale into other projects, so the deny lands
+  there too — in a project where `git -C` may be in legitimate use and where no `clwt` is
+  installed to make it unnecessary. The rule is one line to delete, but it is worth knowing it
+  arrives with the library rather than being opted into.
 
 ## Alternatives considered
 

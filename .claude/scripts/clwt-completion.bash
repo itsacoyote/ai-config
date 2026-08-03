@@ -13,8 +13,12 @@
 # repository living under ~/github/.worktrees is by definition one clwt manages,
 # so the owner/repo path does not need re-deriving here.
 _clwt_managed_branches() {
+  # $HOME resolved, because `git worktree list` reports resolved paths — the same
+  # mismatch that made clwt disown its own worktrees on a symlinked home.
+  local home
+  home=$(cd "$HOME" 2>/dev/null && pwd -P) || return 0
   git worktree list --porcelain 2>/dev/null |
-    awk -v root="$HOME/github/.worktrees/" '
+    awk -v root="$home/github/.worktrees/" '
       /^worktree / { path = substr($0, 10) }
       /^branch refs\/heads\// {
         if (index(path, root) == 1) print substr($0, 19)

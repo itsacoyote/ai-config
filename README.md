@@ -173,16 +173,6 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 
 ---
 
-## Using this in another project
-
-1. **Copy `.claude/` into the target project's root** — skills, agents, rules, and references all live there and travel together. (When copying an individual skill, bring any `.claude/references/` file it points to as well.)
-2. **The project's own `CLAUDE.md` does not come from here** — this repo's `CLAUDE.md` documents *this* repo. To orient Claude to the workflow in the target project, paste the snippet below into that project's `CLAUDE.md` and adapt it.
-3. **Optionally copy `.mcp.json`** (see [MCP servers](#mcp-servers)).
-4. Open Claude Code in the project and start with `/define` (or read `feature-workflow` first).
-
-### Example: paste into your project's `CLAUDE.md`
-
-```markdown
 ## `clwt` — worktree CLI
 
 A small Bash CLI at `.claude/scripts/clwt` that manages this repository's git
@@ -264,6 +254,16 @@ Exits non-zero on any failure.
 
 ---
 
+## Using this in another project
+
+1. **Copy `.claude/` into the target project's root** — skills, agents, rules, and references all live there and travel together. (When copying an individual skill, bring any `.claude/references/` file it points to as well.)
+2. **The project's own `CLAUDE.md` does not come from here** — this repo's `CLAUDE.md` documents *this* repo. To orient Claude to the workflow in the target project, paste the snippet below into that project's `CLAUDE.md` and adapt it.
+3. **Optionally copy `.mcp.json`** (see [MCP servers](#mcp-servers)).
+4. Open Claude Code in the project and start with `/define` (or read `feature-workflow` first).
+
+### Example: paste into your project's `CLAUDE.md`
+
+```markdown
 ## Development workflow
 
 This project uses a manual feature workflow: **Define → Research → Plan →
