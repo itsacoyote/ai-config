@@ -54,7 +54,7 @@ section() { printf '\n%s\n' "$1"; }
 
 # ---------------------------------------------------------------- world setup
 
-TMP=$(mktemp -d)
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/clwt-test.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
 export HOME="$TMP/home"
@@ -860,10 +860,10 @@ check_fails 'remove exits non-zero when git cannot list ignored files' \
   env PATH="$FAILGIT:$PATH" "$CLWT" remove feat/failing-git
 
 make_failing_git 'status'
-check 'remove refuses when git cannot report status' \
-  test -d "$MANAGED/feat-failing-git"
 check_fails 'remove exits non-zero when git status fails' \
   env PATH="$FAILGIT:$PATH" "$CLWT" remove feat/failing-git
+check 'remove refuses when git cannot report status' \
+  test -d "$MANAGED/feat-failing-git"
 rm -f "$FAILGIT/git"
 
 check 'the worktree survives every simulated git failure' \

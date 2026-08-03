@@ -80,10 +80,14 @@ resolve_path() {
     [[ -n $path ]] || path=/
   done
   base=$(cd -P "$path" 2>/dev/null && pwd -P) || return 1
+  # When the walk reaches the filesystem root, `$base/` would double the
+  # separator, and a `//prefix` managed root fails its own containment check —
+  # the disown-your-own-worktree bug wearing a different hat.
+  [[ $base != / ]] || base=''
   if [[ -n $tail ]]; then
     printf '%s/%s\n' "$base" "$tail"
   else
-    printf '%s\n' "$base"
+    printf '%s\n' "${base:-/}"
   fi
 }
 
@@ -344,8 +348,12 @@ copy_worktree_includes() {
   # disables errexit for this whole body, so each fallible step is checked by hand;
   # and a `die` here would exit clwt outright, so the caller's cleanup handler
   # would never run.
+  # Templated, not bare: BSD/macOS `mktemp` requires a template or -t, so a bare
+  # call is a usage error there — which would break every worktree-creating
+  # command on macOS in any repo that has a .worktreeinclude. Same reason this
+  # script hand-rolls symlink resolution instead of using GNU `readlink -f`.
   local list_file
-  list_file=$(mktemp) || {
+  list_file=$(mktemp "${TMPDIR:-/tmp}/clwt.XXXXXX") || {
     warn 'cannot create a temporary file'
     return 1
   }
@@ -394,8 +402,7 @@ copy_worktree_includes() {
   CLWT_LIST_FILE=''
 
   if ((refused_beads)); then
-    printf '%s: warning: refusing to copy .beads/ — worktrees share the primary checkout'\''s single issue database, and copying it forks them (see PR #48)\n' \
-      "$PROGRAM" >&2
+    warn "refusing to copy .beads/ — worktrees share the primary checkout's single issue database, and copying it forks them (see PR #48)"
   fi
   # Reported unconditionally: "copied 0" and a silent return would otherwise be
   # indistinguishable from the copy never having run.
