@@ -19,6 +19,12 @@ die() {
 }
 
 note() { printf '%s: %s\n' "$PROGRAM" "$*"; }
+warn() { printf '%s: warning: %s\n' "$PROGRAM" "$*" >&2; }
+
+# copy_worktree_includes can bail mid-loop; this is how its scratch file gets
+# cleaned up regardless of which exit path is taken.
+CLWT_LIST_FILE=''
+trap 'rm -f "${CLWT_LIST_FILE:-}"' EXIT
 
 usage() {
   cat <<'EOF'
@@ -58,6 +64,29 @@ EOF
 
 # --------------------------------------------------------------- foundations
 
+# Physically resolves a path that need not exist yet: walk up to the deepest
+# existing ancestor, resolve that, re-append the missing tail.
+#
+# Resolving only $HOME is not enough. `git worktree list` reports fully resolved
+# paths, so if ~/github or ~/github/.worktrees is itself a symlink — relocating
+# worktrees to a bigger volume is an ordinary thing to do — every containment
+# check compares a resolved path against a partly-unresolved prefix, and clwt
+# disowns the worktrees it just created.
+resolve_path() {
+  local path=$1 tail='' base
+  while [[ ! -d $path && $path == */* ]]; do
+    tail="${path##*/}${tail:+/$tail}"
+    path=${path%/*}
+    [[ -n $path ]] || path=/
+  done
+  base=$(cd -P "$path" 2>/dev/null && pwd -P) || return 1
+  if [[ -n $tail ]]; then
+    printf '%s/%s\n' "$base" "$tail"
+  else
+    printf '%s\n' "$base"
+  fi
+}
+
 # Resolves, once, the four values every other subcommand builds on:
 #   owner, repo         — from the origin remote
 #   primary             — the primary (non-worktree) checkout
@@ -85,14 +114,13 @@ require_repo() {
   primary=$(cd "$common_dir/.." 2>/dev/null && pwd -P) ||
     die "cannot resolve the primary checkout from: $common_dir"
 
-  # Resolved, because every path this is later compared against is `pwd -P`'d.
-  # With an unresolved $HOME (a symlinked or cross-mount home), clwt would create
-  # a worktree and then immediately disown it: `list` marks it unmanaged, `open`
-  # and `remove` refuse it, and `branch` reports it as checked out somewhere clwt
-  # does not manage — its own worktree.
-  local home
-  home=$(cd "$HOME" 2>/dev/null && pwd -P) || die "cannot resolve HOME: $HOME"
-  managed_root="$home/github/.worktrees/$owner/$repo"
+  # Fully resolved, because every path this is later compared against is `pwd -P`'d.
+  # Against an unresolved prefix clwt would create a worktree and then immediately
+  # disown it: `list` marks it unmanaged, `open` and `remove` refuse it, and
+  # `branch` reports it as checked out somewhere clwt does not manage — its own
+  # worktree.
+  managed_root=$(resolve_path "$HOME/github/.worktrees/$owner/$repo") ||
+    die "cannot resolve the managed worktree root under: $HOME"
 }
 
 # Splits owner/repo out of any remote URL shape we care about, in pure shell:
@@ -312,13 +340,21 @@ copy_worktree_includes() {
   # cannot round-trip through $( ), which strips null bytes, and NUL-delimiting is
   # what keeps filenames containing spaces or newlines intact. A file also lets us
   # check git's exit status, so a failure is not read as "nothing matched".
+  # Every failure below RETURNS rather than dies. Being called as `copy … || {…}`
+  # disables errexit for this whole body, so each fallible step is checked by hand;
+  # and a `die` here would exit clwt outright, so the caller's cleanup handler
+  # would never run.
   local list_file
-  list_file=$(mktemp) || die 'cannot create a temporary file'
+  list_file=$(mktemp) || {
+    warn 'cannot create a temporary file'
+    return 1
+  }
+  CLWT_LIST_FILE=$list_file
 
   if ! (cd "$primary" &&
     git ls-files --others --ignored --exclude-from="$pattern_file" -z) >"$list_file"; then
-    rm -f "$list_file"
-    die 'cannot list .worktreeinclude matches'
+    warn 'cannot list .worktreeinclude matches'
+    return 1
   fi
 
   local rel src dst copied=0 refused_beads=0
@@ -335,17 +371,27 @@ copy_worktree_includes() {
     # here because $rel is about to become a path we write to, and an invariant
     # that cheap is worth stating out loud rather than assuming.
     case $rel in
-      /* | *..*) die "refusing to copy a path that escapes the worktree: $rel" ;;
+      /* | *..*)
+        warn "refusing to copy a path that escapes the worktree: $rel"
+        return 1
+        ;;
     esac
 
     src="$primary/$rel"
     [[ -f $src ]] || continue
     dst="$target/$rel"
-    mkdir -p "${dst%/*}"
-    cp -p "$src" "$dst"
+    mkdir -p "${dst%/*}" || {
+      warn "cannot create the directory for $rel"
+      return 1
+    }
+    cp -p "$src" "$dst" || {
+      warn "cannot copy $rel into the worktree"
+      return 1
+    }
     copied=$((copied + 1))
   done <"$list_file"
   rm -f "$list_file"
+  CLWT_LIST_FILE=''
 
   if ((refused_beads)); then
     printf '%s: warning: refusing to copy .beads/ — worktrees share the primary checkout'\''s single issue database, and copying it forks them (see PR #48)\n' \
@@ -389,11 +435,18 @@ reuse_or_refuse() {
 # So: genuine uncommitted or untracked work blocks removal, and ignored files do
 # not — but since `git worktree remove` deletes them without comment, they get
 # named first. The report is the only thing standing between you and a lost .env.
-# Both capture git's exit status explicitly. `set -e` does not help here: errexit
-# is disabled inside $( ) and ( ) without `shopt -s inherit_errexit`. Without the
-# check, a git failure — index lock contention, a partially-pruned gitdir, a
-# permission problem — yields empty output, which reads as "clean" and as
-# "nothing will be destroyed". Both mistakes delete things.
+# Both capture git's exit status explicitly. `set -e` does not help: errexit is
+# disabled inside command substitution `$( )`, which is exactly why `rc=$?` is
+# reachable here at all. Without the check, a git failure — index lock
+# contention, a partially-pruned gitdir, a permission problem — yields empty
+# output, which reads as "clean" and as "nothing will be destroyed". Both
+# mistakes delete things.
+#
+# Note for future callers: these must be invoked from a command-substitution or
+# an `if` condition. A process substitution `< <(...)` would NOT work — unlike
+# `$( )`, it inherits errexit, so the assignment aborts the subshell before the
+# status check runs, and a `die` there would only exit the subshell while the
+# parent carried on deleting. That was a real bug here, not a hypothetical.
 worktree_is_dirty() {
   local out rc
   out=$(cd "$1" && git status --porcelain --untracked-files=all)
@@ -407,11 +460,8 @@ worktree_ignored_files() {
   local out rc
   out=$(cd "$1" && git ls-files --others --ignored --exclude-standard)
   rc=$?
-  ((rc == 0)) ||
-    die "cannot list ignored files in $1 (git exited $rc); refusing to remove without knowing what would be destroyed"
-  # Trailing newline matters: `while read` drops a final line that has none, which
-  # would silently hide the last file about to be destroyed.
-  [[ -z $out ]] || printf '%s\n' "$out"
+  ((rc == 0)) || return 1
+  printf '%s' "$out"
 }
 
 # Removing the directory you are standing in leaves the shell in a path that no
@@ -444,9 +494,12 @@ remove_worktree() {
   local -a doomed=()
   local f
 
+  local ignored
+  ignored=$(worktree_ignored_files "$target") ||
+    die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
   while IFS= read -r f; do
     if [[ -n $f ]]; then doomed+=("$f"); fi
-  done < <(worktree_ignored_files "$target")
+  done <<<"$ignored"
 
   if ((${#doomed[@]})); then
     note "removing will destroy ${#doomed[@]} ignored file(s):"
@@ -625,7 +678,10 @@ cmd_pr() {
     die "gh could not check out pull request #$number"
   fi
 
-  copy_worktree_includes "$target"
+  copy_worktree_includes "$target" || {
+    abandon_worktree "$target"
+    die "could not prepare the worktree for pull request #$number"
+  }
 
   if [[ $cross == true ]]; then
     printf '%s: WARNING: pull request #%s comes from a fork — this is code you did not write, and opening it here runs it on your machine\n' \
@@ -688,7 +744,10 @@ cmd_branch() {
     git worktree add -b "$branch" "$target" "origin/$branch"
   fi
 
-  copy_worktree_includes "$target" || { abandon_worktree "$target"; exit 2; }
+  copy_worktree_includes "$target" || {
+    abandon_worktree "$target"
+    die "could not prepare the worktree for $branch"
+  }
   launch "$target"
 }
 
@@ -720,7 +779,10 @@ cmd_new() {
 
   mkdir -p "$managed_root"
   git worktree add -b "$branch" "$target" "origin/$base"
-  copy_worktree_includes "$target" || { abandon_worktree "$target"; exit 2; }
+  copy_worktree_includes "$target" || {
+    abandon_worktree "$target"
+    die "could not prepare the worktree for $branch"
+  }
   launch "$target"
 }
 

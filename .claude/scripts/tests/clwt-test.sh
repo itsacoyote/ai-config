@@ -75,11 +75,16 @@ REMOTE="$HOME/remotes/owner/project.git"
 PRIMARY="$HOME/github/owner/project"
 MANAGED="$HOME/github/.worktrees/owner/project"
 BIN="$HOME/bin"
-mkdir -p "$REMOTE" "$HOME/github/owner" "$BIN" "$MANAGED"
+mkdir -p "$REMOTE" "$HOME/github/owner" "$BIN"
 
-# Assertions compare against the *resolved* managed root while $HOME stays a
-# symlink. That asymmetry is the regression test for the managed_root bug: clwt
-# only agrees with these paths if it resolves $HOME itself. Leave it this way.
+# ~/github/.worktrees is itself a symlink to somewhere else entirely — relocating
+# worktrees to another volume is an ordinary thing to do. Combined with the
+# symlinked $HOME above, this means clwt must resolve the *whole* managed-root
+# path, not just its first component. Assertions compare against the resolved
+# path; that asymmetry is the regression test. Leave it this way.
+mkdir -p "$TMP/other-volume/worktrees/owner/project"
+mkdir -p "$HOME/github"
+ln -s "$TMP/other-volume/worktrees" "$HOME/github/.worktrees"
 MANAGED=$(cd "$MANAGED" && pwd -P)
 
 export CLWT_TEST_LOG="$TMP/launch.log"
@@ -703,6 +708,44 @@ clwt branch feat/copy-on-branch >/dev/null 2>&1
 check 'branch also copies worktreeinclude matches' \
   test -f "$MANAGED/feat-copy-on-branch/.env"
 
+# A failing copy must abort and clean up, not report success with a count that
+# includes the file it never copied. An unreadable source is the simplest way to
+# make `cp` fail; root ignores the mode, so skip there rather than assert falsely.
+if [ "$(id -u)" -ne 0 ]; then
+  printf 'nope\n' >"$PRIMARY/unreadable.txt"
+  chmod 000 "$PRIMARY/unreadable.txt"
+  cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+.env
+unreadable.txt
+PATTERNS
+
+  launch_reset
+  copyfail_out=$(clwt new feat/copy-fails 2>&1 || true)
+
+  check_equals 'a failed copy does not launch claude' '' "$(launched pwd)"
+  check 'a failed copy leaves no worktree behind' test ! -e "$MANAGED/feat-copy-fails"
+  if git -C "$PRIMARY" worktree list --porcelain | grep -qF 'feat-copy-fails'; then
+    not_ok 'a failed copy unregisters the worktree it made'
+  else
+    ok 'a failed copy unregisters the worktree it made'
+  fi
+  if printf '%s\n' "$copyfail_out" | grep -qiF 'cannot copy'; then
+    ok 'a failed copy says which file it could not copy'
+  else
+    not_ok "a failed copy says which file it could not copy (got: $(printf '%s' "$copyfail_out" | tr '\n' '|'))"
+  fi
+  if printf '%s\n' "$copyfail_out" | grep -qE 'copied [0-9]+ file'; then
+    not_ok 'a failed copy does not report a success count'
+  else
+    ok 'a failed copy does not report a success count'
+  fi
+
+  chmod 644 "$PRIMARY/unreadable.txt"
+  rm -f "$PRIMARY/unreadable.txt"
+else
+  ok 'copy-failure assertions skipped (running as root; mode bits do not apply)'
+fi
+
 rm -f "$PRIMARY/.worktreeinclude"
 
 section 'remove'
@@ -777,6 +820,55 @@ check 'the unmanaged worktree survives' test -d "$UNMANAGED"
 check_fails 'remove fails for a branch with no worktree' clwt remove feat/never-existed
 check_fails 'remove requires a branch name' clwt remove
 check_fails 'remove rejects an unknown flag' clwt remove feat/listed --nope
+
+# A failing git must never be read as "clean" or as "nothing will be destroyed" —
+# both mistakes delete things. There was previously no coverage here at all, which
+# is how a guard that could never fire shipped with the suite fully green.
+#
+# The stub git forwards everything except the one subcommand under test, so only
+# that call fails and the rest of clwt still works.
+FAILGIT="$TMP/failgit"
+mkdir -p "$FAILGIT"
+make_failing_git() {
+  cat >"$FAILGIT/git" <<STUB
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = "$1" ]; then
+    echo "fatal: simulated git failure" >&2
+    exit 128
+  fi
+done
+exec $(command -v git) "\$@"
+STUB
+  chmod +x "$FAILGIT/git"
+}
+
+launch_reset
+clwt new feat/failing-git >/dev/null 2>&1
+printf 'SECRET=1\n' >"$MANAGED/feat-failing-git/.env"
+
+make_failing_git 'ls-files'
+out=$(PATH="$FAILGIT:$PATH" clwt remove feat/failing-git 2>&1 || true)
+check 'remove refuses when git cannot list ignored files' \
+  test -d "$MANAGED/feat-failing-git"
+if printf '%s\n' "$out" | grep -qiF 'refusing to remove'; then
+  ok 'remove says why it refused when git failed'
+else
+  not_ok "remove says why it refused when git failed (got: $(printf '%s' "$out" | tr '\n' '|'))"
+fi
+check_fails 'remove exits non-zero when git cannot list ignored files' \
+  env PATH="$FAILGIT:$PATH" "$CLWT" remove feat/failing-git
+
+make_failing_git 'status'
+check 'remove refuses when git cannot report status' \
+  test -d "$MANAGED/feat-failing-git"
+check_fails 'remove exits non-zero when git status fails' \
+  env PATH="$FAILGIT:$PATH" "$CLWT" remove feat/failing-git
+rm -f "$FAILGIT/git"
+
+check 'the worktree survives every simulated git failure' \
+  test -f "$MANAGED/feat-failing-git/.env"
+clwt remove feat/failing-git >/dev/null 2>&1
 
 section 'prune'
 
