@@ -6,6 +6,9 @@ Status: Accepted
 
 Supersedes: [ADR 0003](0003-agent-agnostic-library.md)
 
+Amended by: [ADR 0006](0006-per-harness-config-trees.md) — reintroduces per-harness trees
+as unsynced duplicates; the rejection of sync machinery stands.
+
 Tracking: beads epic `ai-config-vzg`
 
 ## Context
