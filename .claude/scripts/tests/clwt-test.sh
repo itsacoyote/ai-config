@@ -104,12 +104,44 @@ if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  state_file="$CLWT_GH_STATES/$(printf '%s' "$3" | tr '/' '-')"
-  if [ ! -f "$state_file" ]; then
-    echo "no pull requests found for branch \"$3\"" >&2
+  case "$*" in
+    *headRefName*)
+      # `clwt pr` asking for a pull request's metadata by number.
+      meta="$CLWT_GH_PRS/$3"
+      if [ ! -f "$meta" ]; then
+        echo "could not resolve to a pull request with the number of $3" >&2
+        exit 1
+      fi
+      sed -n 's/^headRefName=//p' "$meta"
+      sed -n 's/^isCrossRepository=//p' "$meta"
+      exit 0
+      ;;
+    *)
+      # `clwt prune` asking for a branch's merge state.
+      state_file="$CLWT_GH_STATES/$(printf '%s' "$3" | tr '/' '-')"
+      if [ ! -f "$state_file" ]; then
+        echo "no pull requests found for branch \"$3\"" >&2
+        exit 1
+      fi
+      cat "$state_file"
+      exit 0
+      ;;
+  esac
+fi
+if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
+  meta="$CLWT_GH_PRS/$3"
+  if [ ! -f "$meta" ]; then
+    echo "could not resolve to a pull request with the number of $3" >&2
     exit 1
   fi
-  cat "$state_file"
+  if grep -q '^checkoutFails=true$' "$meta"; then
+    # What really happens when a merged PR's head branch has been deleted.
+    echo "fatal: couldn't find remote ref" >&2
+    exit 1
+  fi
+  head_ref=$(sed -n 's/^headRefName=//p' "$meta")
+  # Real gh checks the PR out into the current working tree; so does this.
+  git checkout -q -b "$head_ref" 2>/dev/null || git checkout -q "$head_ref"
   exit 0
 fi
 exit 0
@@ -117,8 +149,12 @@ STUB
 chmod +x "$BIN/gh"
 export CLWT_GH_UNAVAILABLE="$TMP/gh-unavailable"
 export CLWT_GH_STATES="$TMP/gh-states"
-mkdir -p "$CLWT_GH_STATES"
+export CLWT_GH_PRS="$TMP/gh-prs"
+mkdir -p "$CLWT_GH_STATES" "$CLWT_GH_PRS"
 pr_state() { printf '%s\n' "$2" >"$CLWT_GH_STATES/$(printf '%s' "$1" | tr '/' '-')"; }
+pr_meta() {
+  printf 'headRefName=%s\nisCrossRepository=%s\n' "$2" "$3" >"$CLWT_GH_PRS/$1"
+}
 
 export PATH="$BIN:$PATH"
 
@@ -200,10 +236,6 @@ else
   not_ok "clwt help lists all ten subcommands (missing:$missing)"
 fi
 
-# Uses whichever subcommand is still unbuilt. When the last one lands this
-# assertion has nothing left to check and should be deleted, not retargeted.
-check_output 'an unimplemented subcommand reports not yet implemented rather than unknown command' \
-  'not yet implemented' clwt pr
 check_output 'an unknown subcommand is reported as unknown' \
   'unknown command' clwt definitely-not-a-command
 check_fails 'an unknown subcommand exits non-zero' clwt definitely-not-a-command
@@ -871,6 +903,76 @@ check 'install through the installed symlink succeeds' \
 
 # install must work outside a git repository — it has nothing to do with a repo.
 check 'install works outside a git repository' clwt_in "$TMP/not-a-repo" install
+
+section 'pr'
+
+pr_meta 101 feat/from-pr false
+pr_meta 202 feat/forked true
+
+# The copy hook must run for pr too, or a PR worktree cannot run the project.
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+.env
+PATTERNS
+printf 'SECRET=1\n' >"$PRIMARY/.env"
+
+launch_reset
+pr_out=$(clwt pr 101 2>&1)
+check 'pr checks out the pull request into a managed worktree' \
+  test -d "$MANAGED/feat-from-pr"
+check_equals 'pr names the worktree from the pull request head ref' \
+  "$MANAGED/feat-from-pr" "$(launched pwd)"
+check 'pr launches claude in that worktree' test -n "$(launched pwd)"
+check 'pr runs the worktreeinclude copy in the new worktree' \
+  test -f "$MANAGED/feat-from-pr/.env"
+check_equals 'the pr worktree is on the head ref branch' \
+  'feat/from-pr' "$(cd "$MANAGED/feat-from-pr" && git symbolic-ref --short HEAD 2>/dev/null)"
+if printf '%s\n' "$pr_out" | grep -qi 'fork'; then
+  not_ok 'pr does not warn for a same-repo pull request'
+else
+  ok 'pr does not warn for a same-repo pull request'
+fi
+
+launch_reset
+fork_out=$(clwt pr 202 2>&1)
+check 'pr checks out a fork pull request too' test -d "$MANAGED/feat-forked"
+if printf '%s\n' "$fork_out" | grep -qi 'fork'; then
+  ok 'pr warns before launching when the pull request head is a fork'
+else
+  not_ok 'pr warns before launching when the pull request head is a fork'
+fi
+check_equals 'pr still launches after warning about a fork' \
+  "$MANAGED/feat-forked" "$(launched pwd)"
+
+launch_reset
+clwt pr 101 --yolo >/dev/null 2>&1
+check_equals '--yolo works on pr as well' \
+  '--dangerously-skip-permissions' "$(launched args)"
+
+# A merged pull request whose head branch has since been deleted — `gh pr
+# checkout` fails after the worktree already exists. Found by running `clwt pr`
+# against a real merged PR, which left an orphaned worktree behind.
+pr_meta 303 feat/deleted-head false
+printf 'checkoutFails=true\n' >>"$CLWT_GH_PRS/303"
+check_fails 'pr exits non-zero when gh cannot check the pull request out' clwt pr 303
+check 'pr leaves no worktree behind when checkout fails' \
+  test ! -e "$MANAGED/feat-deleted-head"
+if git -C "$PRIMARY" worktree list --porcelain | grep -qF 'feat-deleted-head'; then
+  not_ok 'pr unregisters the worktree it made when checkout fails'
+else
+  ok 'pr unregisters the worktree it made when checkout fails'
+fi
+check_fails 'a retry after a failed checkout still fails cleanly' clwt pr 303
+
+check_fails 'pr exits non-zero when the pull request number does not exist' clwt pr 999
+check_output 'pr names the number it could not resolve' '999' clwt pr 999
+check_fails 'pr requires a pull request number' clwt pr
+check_fails 'pr rejects a non-numeric argument' clwt pr not-a-number
+
+touch "$CLWT_GH_UNAVAILABLE"
+check_fails 'pr exits non-zero when gh is unavailable' clwt pr 101
+check_output 'pr says it needs gh' 'gh' clwt pr 101
+rm -f "$CLWT_GH_UNAVAILABLE"
+rm -f "$PRIMARY/.worktreeinclude"
 
 # ------------------------------------------------- claude integration
 

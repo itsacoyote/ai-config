@@ -53,11 +53,6 @@ Arguments after `--` are passed through to `claude`.
 EOF
 }
 
-not_implemented() {
-  printf '%s: %s is not yet implemented\n' "$PROGRAM" "$1" >&2
-  exit 3
-}
-
 # --------------------------------------------------------------- foundations
 
 # Resolves, once, the four values every other subcommand builds on:
@@ -533,6 +528,62 @@ cmd_prune() {
   done
 }
 
+# The ordering here is forced, not stylistic. `gh pr checkout` operates on the
+# *current* working tree, so the worktree must exist before it runs — but the
+# directory name derives from the pull request's head ref, which is not known
+# until the PR is queried. Hence: query, derive, create (detached), check out
+# inside it, copy, warn, launch.
+cmd_pr() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'pr requires exactly one pull request number'
+
+  local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross name target
+  case $number in
+    '' | *[!0-9]*) die "pull request must be a number: $number" ;;
+  esac
+
+  require_gh
+
+  meta=$(gh pr view "$number" --json headRefName,isCrossRepository \
+    --jq '.headRefName, .isCrossRepository' 2>/dev/null) ||
+    die "cannot resolve pull request #$number"
+  head_ref=$(printf '%s\n' "$meta" | sed -n 1p)
+  cross=$(printf '%s\n' "$meta" | sed -n 2p)
+  [[ -n $head_ref ]] || die "pull request #$number has no head branch"
+
+  local existing
+  if existing=$(branch_worktree "$head_ref"); then
+    reuse_or_refuse "$head_ref" "$existing"
+  fi
+
+  name=$(worktree_name_for_branch "$head_ref")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+  mkdir -p "$managed_root"
+
+  # Detached, because `gh pr checkout` is what decides the branch — for a fork it
+  # may pick a local name of its own.
+  git worktree add --detach --quiet "$target" HEAD
+  if ! (cd "$target" && gh pr checkout "$number"); then
+    # Clean up rather than leaving a half-made worktree. This is not theoretical:
+    # `clwt pr` against a merged pull request whose head branch has since been
+    # deleted fails exactly here, and an orphaned worktree makes the retry fail
+    # for a second, unrelated-looking reason.
+    git worktree remove --force "$target" 2>/dev/null || true
+    die "gh could not check out pull request #$number"
+  fi
+
+  copy_worktree_includes "$target"
+
+  if [[ $cross == true ]]; then
+    printf '%s: WARNING: pull request #%s comes from a fork — this is code you did not write, and opening it here runs it on your machine\n' \
+      "$PROGRAM" "$number" >&2
+  fi
+
+  launch "$target"
+}
+
 cmd_remove() {
   local branch='' delete_branch=0
 
@@ -783,13 +834,10 @@ main() {
       shift || true
       cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
-    root | open | new | branch | remove | prune)
+    root | open | new | branch | remove | prune | pr)
       shift || true
       require_repo
       "cmd_$command" "$@"
-      ;;
-    pr)
-      not_implemented "$command"
       ;;
     *)
       die "unknown command: $command (run 'clwt help')"
