@@ -872,6 +872,79 @@ check 'install through the installed symlink succeeds' \
 # install must work outside a git repository — it has nothing to do with a repo.
 check 'install works outside a git repository' clwt_in "$TMP/not-a-repo" install
 
+# ------------------------------------------------- claude integration
+
+# These assert against the real repository, not the sandbox: the skill, the
+# permission rule, and the reground update are repo artifacts, not runtime
+# behavior.
+section 'claude integration'
+
+SKILL="$REPO_ROOT/.claude/skills/clwt/SKILL.md"
+SETTINGS="$REPO_ROOT/.claude/settings.json"
+REGROUND="$REPO_ROOT/.claude/skills/reground/SKILL.md"
+
+check 'the clwt skill exists' test -f "$SKILL"
+check 'the clwt skill instructs against git -C' grep -qF 'git -C' "$SKILL"
+check 'the clwt skill cross-links reground' grep -qF 'reground' "$SKILL"
+check 'the clwt skill cross-links the beads reference' grep -qF 'references/beads.md' "$SKILL"
+check 'the clwt skill states Claude cannot run the launching subcommands' \
+  grep -qiE 'cannot (relaunch|run)' "$SKILL"
+check 'the clwt skill has a When NOT to use section' grep -qi 'when not to use' "$SKILL"
+check 'the clwt skill description is triggers-led' \
+  grep -qE '^description: Use when' "$SKILL"
+
+# Every relative markdown link in the skill must resolve.
+dead=''
+while IFS= read -r target; do
+  case $target in
+    http*) continue ;;
+  esac
+  resolved="$REPO_ROOT/.claude/skills/clwt/${target%%#*}"
+  [ -e "$resolved" ] || dead="$dead $target"
+done < <(sed -n 's/.*](\([^)]*\)).*/\1/p' "$SKILL" 2>/dev/null)
+if [ -z "$dead" ]; then
+  ok 'every file the clwt skill links to exists'
+else
+  not_ok "every file the clwt skill links to exists (dead:$dead)"
+fi
+
+check 'settings.json is valid json' python3 -c "import json,sys;json.load(open(sys.argv[1]))" "$SETTINGS"
+if python3 -c "
+import json,sys
+d = json.load(open(sys.argv[1]))
+sys.exit(0 if 'Bash(git -C *)' in d.get('permissions', {}).get('deny', []) else 1)
+" "$SETTINGS" 2>/dev/null; then
+  ok 'settings.json deny contains Bash(git -C *)'
+else
+  not_ok 'settings.json deny contains Bash(git -C *)'
+fi
+if python3 -c "
+import json,sys
+d = json.load(open(sys.argv[1]))
+allow = d.get('permissions', {}).get('allow', [])
+sys.exit(0 if 'Bash(git add *)' in allow and len(allow) >= 20 else 1)
+" "$SETTINGS" 2>/dev/null; then
+  ok 'settings.json keeps its existing allow list intact'
+else
+  not_ok 'settings.json keeps its existing allow list intact'
+fi
+if python3 -c "
+import json,sys
+d = json.load(open(sys.argv[1]))
+sys.exit(0 if d.get('hooks', {}).get('SessionStart') and d.get('statusLine') else 1)
+" "$SETTINGS" 2>/dev/null; then
+  ok 'settings.json keeps its hooks and statusLine intact'
+else
+  not_ok 'settings.json keeps its hooks and statusLine intact'
+fi
+
+check 'the reground skill recommends clwt' grep -qF 'clwt' "$REGROUND"
+if grep -qE '^\s*-.*`git worktree add <path>' "$REGROUND"; then
+  not_ok 'the reground skill no longer recommends raw git worktree add as the default'
+else
+  ok 'the reground skill no longer recommends raw git worktree add as the default'
+fi
+
 # -------------------------------------------------------------------- summary
 
 section "results: $pass passed, $fail failed"
