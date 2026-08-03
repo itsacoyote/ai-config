@@ -428,6 +428,111 @@ cmd_root() {
   launch "$primary"
 }
 
+# Probed once, up front — never inferred from a failing per-branch query. A branch
+# with no PR and a closed-but-unmerged PR both make `gh pr view` exit non-zero,
+# which is the same signal an unauthenticated gh gives. Conflating them either
+# turns a broken gh into a silent "nothing to prune", or turns every PR-less
+# branch into a deletion candidate. Neither is acceptable for a bulk delete.
+require_gh() {
+  command -v gh >/dev/null 2>&1 ||
+    die 'prune needs gh to determine merge state, but gh is not on PATH'
+  gh auth status >/dev/null 2>&1 ||
+    die 'prune needs gh to determine merge state, but gh is not authenticated (run: gh auth login)'
+}
+
+# MERGED / OPEN / CLOSED, or NONE when the branch has no pull request. Safe to
+# read a non-zero exit as "no PR" only because require_gh already established
+# that gh itself works.
+branch_pr_state() {
+  gh pr view "$1" --json state --jq '.state' 2>/dev/null || printf 'NONE\n'
+}
+
+cmd_prune() {
+  local apply=0
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --yes) apply=1 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*) die "unknown option: $1 (run 'clwt help')" ;;
+      *) die 'prune takes no positional arguments' ;;
+    esac
+    shift
+  done
+
+  require_gh
+
+  local line path='' branch='' physical state here i
+  local -a ripe_branches=() ripe_paths=() skipped=()
+  here=$(pwd -P)
+
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        branch=''
+        ;;
+      'branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        ;;
+      '')
+        if [[ -n $path && -n $branch && $path != "$primary" && ! -L $path ]]; then
+          case $path in
+            "$managed_root"/*)
+              physical=$(cd -P "$path" 2>/dev/null && pwd -P) || physical=''
+              if [[ -n $physical ]]; then
+                if [[ $here == "$physical" || $here == "$physical"/* ]]; then
+                  skipped+=("$branch — you are standing in it")
+                elif worktree_is_dirty "$physical"; then
+                  skipped+=("$branch — uncommitted or untracked work")
+                else
+                  state=$(branch_pr_state "$branch")
+                  if [[ $state == MERGED ]]; then
+                    ripe_branches+=("$branch")
+                    ripe_paths+=("$physical")
+                  else
+                    skipped+=("$branch — pull request is $state")
+                  fi
+                fi
+              fi
+              ;;
+          esac
+        fi
+        path=''
+        ;;
+    esac
+  done < <(
+    git worktree list --porcelain
+    printf '\n'
+  )
+
+  if ((${#skipped[@]})); then
+    note "left alone (${#skipped[@]}):"
+    printf '  %s\n' "${skipped[@]}"
+  fi
+
+  if ((${#ripe_branches[@]} == 0)); then
+    note 'nothing to prune'
+    return 0
+  fi
+
+  if ((apply == 0)); then
+    note "would remove ${#ripe_branches[@]} worktree(s) — re-run with --yes to apply:"
+    for i in "${!ripe_branches[@]}"; do
+      printf '  %s  %s\n' "${ripe_branches[i]}" "${ripe_paths[i]}"
+    done
+    return 0
+  fi
+
+  # Branches are kept: the worktree is disposable, the branch is history.
+  for i in "${!ripe_branches[@]}"; do
+    remove_worktree "${ripe_paths[i]}" "${ripe_branches[i]}" 0
+  done
+}
+
 cmd_remove() {
   local branch='' delete_branch=0
 
@@ -678,12 +783,12 @@ main() {
       shift || true
       cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
-    root | open | new | branch | remove)
+    root | open | new | branch | remove | prune)
       shift || true
       require_repo
       "cmd_$command" "$@"
       ;;
-    pr | prune)
+    pr)
       not_implemented "$command"
       ;;
     *)

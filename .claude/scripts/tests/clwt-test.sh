@@ -89,19 +89,36 @@ STUB
 chmod +x "$BIN/claude"
 
 # Stub `gh`: canned responses driven by files the tests write.
+#
+# PR state per branch comes from $CLWT_GH_STATES/<branch with / as ->. A missing
+# file means "no pull request for this branch", which `gh` signals with a non-zero
+# exit — the *same* signal as "gh is broken". Keeping that ambiguity faithful is
+# the point: it is what the implementation has to disambiguate.
 cat >"$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 if [ -f "$CLWT_GH_UNAVAILABLE" ]; then
-  echo "gh: not authenticated" >&2
+  echo "gh: could not authenticate" >&2
   exit 1
 fi
-case "$1 ${2-}" in
-  "auth status") exit 0 ;;
-esac
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  state_file="$CLWT_GH_STATES/$(printf '%s' "$3" | tr '/' '-')"
+  if [ ! -f "$state_file" ]; then
+    echo "no pull requests found for branch \"$3\"" >&2
+    exit 1
+  fi
+  cat "$state_file"
+  exit 0
+fi
 exit 0
 STUB
 chmod +x "$BIN/gh"
 export CLWT_GH_UNAVAILABLE="$TMP/gh-unavailable"
+export CLWT_GH_STATES="$TMP/gh-states"
+mkdir -p "$CLWT_GH_STATES"
+pr_state() { printf '%s\n' "$2" >"$CLWT_GH_STATES/$(printf '%s' "$1" | tr '/' '-')"; }
 
 export PATH="$BIN:$PATH"
 
@@ -183,8 +200,10 @@ else
   not_ok "clwt help lists all ten subcommands (missing:$missing)"
 fi
 
+# Uses whichever subcommand is still unbuilt. When the last one lands this
+# assertion has nothing left to check and should be deleted, not retargeted.
 check_output 'an unimplemented subcommand reports not yet implemented rather than unknown command' \
-  'not yet implemented' clwt prune
+  'not yet implemented' clwt pr
 check_output 'an unknown subcommand is reported as unknown' \
   'unknown command' clwt definitely-not-a-command
 check_fails 'an unknown subcommand exits non-zero' clwt definitely-not-a-command
@@ -714,6 +733,85 @@ check 'the unmanaged worktree survives' test -d "$UNMANAGED"
 check_fails 'remove fails for a branch with no worktree' clwt remove feat/never-existed
 check_fails 'remove requires a branch name' clwt remove
 check_fails 'remove rejects an unknown flag' clwt remove feat/listed --nope
+
+section 'prune'
+
+# Four worktrees covering every state that decides candidacy, plus one that is
+# merged-but-dirty.
+launch_reset
+for b in merged-a still-open no-pr closed-unmerged merged-dirty; do
+  clwt new "feat/$b" >/dev/null 2>&1
+done
+pr_state feat/merged-a MERGED
+pr_state feat/still-open OPEN
+pr_state feat/closed-unmerged CLOSED
+pr_state feat/merged-dirty MERGED
+# feat/no-pr deliberately has no state file at all.
+printf 'wip\n' >"$MANAGED/feat-merged-dirty/wip.txt"
+
+dry=$(clwt prune 2>&1)
+
+check 'prune without --yes removes nothing' test -d "$MANAGED/feat-merged-a"
+if printf '%s\n' "$dry" | grep -qF 'feat/merged-a'; then
+  ok 'prune without --yes lists the merged candidate'
+else
+  not_ok 'prune without --yes lists the merged candidate'
+fi
+
+# Only the block after "would remove" is the candidate list; everything before it
+# is the left-alone report, which prints in the same shape. Scoping matters — a
+# naive grep over the whole output matches the explanation and reads as a failure.
+candidates=$(printf '%s\n' "$dry" | sed -n '/would remove/,$p')
+left_alone=$(printf '%s\n' "$dry" | sed -n '1,/would remove/p')
+
+for pair in "still-open:still open" "no-pr:no pull request" "closed-unmerged:closed but unmerged" "merged-dirty:merged but dirty"; do
+  b=${pair%%:*}
+  why=${pair#*:}
+  if printf '%s\n' "$candidates" | grep -qF "feat/$b"; then
+    not_ok "prune never lists a worktree that is $why (feat/$b)"
+  else
+    ok "prune never lists a worktree that is $why (feat/$b)"
+  fi
+  if printf '%s\n' "$left_alone" | grep -qF "feat/$b"; then
+    ok "prune explains why it left feat/$b alone"
+  else
+    not_ok "prune explains why it left feat/$b alone"
+  fi
+done
+
+# Applying removes exactly the candidate, and nothing else.
+clwt prune --yes >/dev/null 2>&1
+check 'prune --yes removes the merged and clean worktree' test ! -d "$MANAGED/feat-merged-a"
+check 'prune --yes leaves the still-open worktree' test -d "$MANAGED/feat-still-open"
+check 'prune --yes leaves the worktree with no pull request' test -d "$MANAGED/feat-no-pr"
+check 'prune --yes leaves the closed-but-unmerged worktree' test -d "$MANAGED/feat-closed-unmerged"
+check 'prune --yes leaves the merged-but-dirty worktree' test -d "$MANAGED/feat-merged-dirty"
+check 'prune --yes keeps the branch of what it removed' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/merged-a
+
+# Standing inside a worktree that would otherwise be a candidate.
+launch_reset
+clwt new feat/merged-self >/dev/null 2>&1
+pr_state feat/merged-self MERGED
+clwt_in "$MANAGED/feat-merged-self" prune --yes >/dev/null 2>&1
+check 'prune never removes the worktree containing the caller working directory' \
+  test -d "$MANAGED/feat-merged-self"
+check 'prune removes it once the caller is elsewhere' clwt prune --yes
+check 'the self-standing worktree is gone afterwards' test ! -d "$MANAGED/feat-merged-self"
+
+# gh unavailable must be loud, not a silent "nothing to prune".
+touch "$CLWT_GH_UNAVAILABLE"
+launch_reset
+clwt new feat/merged-b >/dev/null 2>&1
+pr_state feat/merged-b MERGED
+check_fails 'prune exits non-zero when gh is unavailable' clwt prune
+check_output 'prune says why it cannot determine merge state' 'gh' clwt prune
+check_fails 'prune --yes also exits non-zero when gh is unavailable' clwt prune --yes
+check 'prune removed nothing while gh was unavailable' test -d "$MANAGED/feat-merged-b"
+rm -f "$CLWT_GH_UNAVAILABLE"
+
+check_fails 'prune rejects a positional argument' clwt prune something
+check_fails 'prune rejects an unknown flag' clwt prune --force
 
 # -------------------------------------------------------------------- install
 
