@@ -421,13 +421,31 @@ copy_worktree_includes() {
       return 1
     fi
 
+    # Validate the parent BEFORE creating it. `mkdir -p` follows a committed
+    # symlink at an intermediate component and creates the missing tail on the far
+    # side, so checking afterwards still hands a hostile branch an
+    # arbitrary-empty-directory primitive anywhere the developer can write.
+    # resolve_path exists precisely to resolve a path that need not exist yet.
     dst_dir=${dst%/*}
+    resolved_dir=$(resolve_path "$dst_dir") || {
+      warn "cannot resolve the destination directory for $rel"
+      return 1
+    }
+    case "$resolved_dir/" in
+      "$resolved_target"/*) ;;
+      *)
+        warn "refusing to copy $rel — its destination resolves outside the worktree"
+        return 1
+        ;;
+    esac
+
     mkdir -p "$dst_dir" || {
       warn "cannot create the directory for $rel"
       return 1
     }
-    # An intermediate component can be a committed symlink too, so check where
-    # the parent actually lands rather than trusting the path text.
+
+    # Re-check after creating: an ancestor could have been created earlier in this
+    # same loop, and the pre-check only saw the state before that.
     resolved_dir=$(cd -P "$dst_dir" 2>/dev/null && pwd -P) || {
       warn "cannot resolve the destination directory for $rel"
       return 1

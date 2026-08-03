@@ -764,8 +764,8 @@ fi
 printf 'ORIGINAL\n' >"$TMP/victim-file"
 mkdir -p "$TMP/victim-dir"
 printf 'SECRET=1\n' >"$PRIMARY/evil-link"
-mkdir -p "$PRIMARY/nested-link"
-printf 'SECRET=1\n' >"$PRIMARY/nested-link/config"
+mkdir -p "$PRIMARY/nested-link/sub"
+printf 'SECRET=1\n' >"$PRIMARY/nested-link/sub/config"
 printf 'SECRET=1\n' >"$PRIMARY/dir-dst"
 
 # Shape 1 — the destination itself is a committed symlink.
@@ -789,13 +789,16 @@ fi
 # untested: the suite passed with the parent-containment guard deleted, while a
 # PoC still escaped through it.
 cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
-nested-link/config
+nested-link/sub/config
 PATTERNS
 launch_reset
 nested_out=$(clwt new feat/nested-escape 2>&1 || true)
 check_equals 'a symlinked intermediate directory does not launch claude' '' "$(launched pwd)"
 check 'nothing was written through the symlinked intermediate directory' \
-  test ! -e "$TMP/victim-dir/config"
+  test ! -e "$TMP/victim-dir/sub/config"
+# The parent must be validated BEFORE mkdir -p, or a hostile branch gets an
+# arbitrary empty-directory-creation primitive on the far side of the symlink.
+check 'no directory is created outside the worktree' test ! -e "$TMP/victim-dir/sub"
 check 'the worktree is abandoned when the destination parent escapes' \
   test ! -e "$MANAGED/feat-nested-escape"
 if printf '%s\n' "$nested_out" | grep -qiF 'resolves outside the worktree'; then
@@ -1234,6 +1237,28 @@ if sed 's/#.*//' "$COMPLETION" | grep -qE '\b(gh|curl|wget|nc)\b'; then
   not_ok 'the completion script makes no network calls'
 else
   ok 'the completion script makes no network calls'
+fi
+
+# Source-level assertions, because these two mitigations cannot be exercised
+# through the COMP_WORDS harness — `compopt` errors outside a real completion,
+# and `compgen -W` re-expansion is a generation-time property. Without them the
+# suite stays green with either mitigation deleted, which is exactly the
+# untested-guard failure this suite has already been bitten by.
+if sed 's/#.*//' "$COMPLETION" | grep -q 'compgen -W "\$('; then
+  not_ok 'no untrusted command output is passed to compgen -W'
+else
+  ok 'no untrusted command output is passed to compgen -W'
+fi
+
+# readline inserts an accepted match unquoted, so on a unique match Tab rewrites
+# the line and Enter expands it. `-o filenames` makes the insertion literal.
+untrusted_arms=$(sed 's/#.*//' "$COMPLETION" |
+  grep -c '_clwt_add_matches "\$cur"')
+quoted_arms=$(sed 's/#.*//' "$COMPLETION" | grep -c 'compopt -o filenames')
+if [ "$untrusted_arms" -gt 0 ] && [ "$quoted_arms" -ge "$untrusted_arms" ]; then
+  ok 'every untrusted completion arm quotes its insertion with -o filenames'
+else
+  not_ok "every untrusted completion arm quotes its insertion with -o filenames ($quoted_arms quoted / $untrusted_arms untrusted)"
 fi
 
 if [ -f "$COMPLETION" ]; then
