@@ -250,6 +250,13 @@ else
   not_ok "clwt help lists all ten subcommands (missing:$missing)"
 fi
 
+help_text=$(clwt help)
+check_equals 'clwt --help prints the same usage as clwt help' "$help_text" "$(clwt --help)"
+check_equals 'clwt -h prints the same usage as clwt help' "$help_text" "$(clwt -h)"
+check_equals 'clwt new --help prints the usage' "$help_text" "$(clwt new --help)"
+check_equals 'clwt remove --help prints the usage' "$help_text" "$(clwt remove --help)"
+check_equals 'clwt prune --help prints the usage' "$help_text" "$(clwt prune --help)"
+
 check_output 'an unknown subcommand is reported as unknown' \
   'unknown command' clwt definitely-not-a-command
 check_fails 'an unknown subcommand exits non-zero' clwt definitely-not-a-command
@@ -534,6 +541,15 @@ check_fails 'new rejects a branch name failing git check-ref-format' clwt new 'f
 check_fails 'new rejects a path-traversing branch name' clwt new '../evil'
 check_fails 'new rejects a deeper path-traversing branch name' clwt new 'feat/../../evil'
 check_fails 'new rejects a branch name containing whitespace' clwt new 'feat/a b'
+# These pass `git check-ref-format --branch` but must still be refused, because
+# they become a path segment. Without one of these, validate_worktree_name's own
+# character-class guard is never the thing that fires and can be deleted silently.
+check 'the semicolon branch name is accepted by git itself' \
+  git -C "$PRIMARY" check-ref-format --branch 'feat/a;b'
+check_fails 'new rejects a ref-valid name that is unsafe as a path segment' \
+  clwt new 'feat/a;b'
+check_fails 'new rejects a ref-valid name containing a shell metacharacter' \
+  clwt new 'feat/a$b'
 check_fails 'new requires a branch argument' clwt new
 
 check 'no traversal escaped the managed root' test ! -e "$HOME/github/.worktrees/owner/evil"
@@ -923,6 +939,13 @@ STUB
   chmod +x "$FAILGIT/git"
 }
 
+# Must be a function, not `env …`: env execs a binary and cannot invoke a shell
+# function, so `env PATH=… clwt_in …` fails for that reason alone and any
+# check_fails around it passes vacuously.
+clwt_with_failing_git() {
+  PATH="$FAILGIT:$PATH" clwt_in "$PRIMARY" "$@"
+}
+
 launch_reset
 clwt new feat/failing-git >/dev/null 2>&1
 printf 'SECRET=1\n' >"$MANAGED/feat-failing-git/.env"
@@ -937,11 +960,14 @@ else
   not_ok "remove says why it refused when git failed (got: $(printf '%s' "$out" | tr '\n' '|'))"
 fi
 check_fails 'remove exits non-zero when git cannot list ignored files' \
-  env PATH="$FAILGIT:$PATH" "$CLWT" remove feat/failing-git
+  clwt_with_failing_git remove feat/failing-git
 
 make_failing_git 'status'
 check_fails 'remove exits non-zero when git status fails' \
-  env PATH="$FAILGIT:$PATH" "$CLWT" remove feat/failing-git
+  clwt_with_failing_git remove feat/failing-git
+check_output 'remove says it cannot determine cleanliness when git status fails' \
+  'cannot determine whether' \
+  clwt_with_failing_git remove feat/failing-git
 check 'remove refuses when git cannot report status' \
   test -d "$MANAGED/feat-failing-git"
 rm -f "$FAILGIT/git"
@@ -1025,6 +1051,22 @@ check_output 'prune says why it cannot determine merge state' 'prune needs gh' c
 check_fails 'prune --yes also exits non-zero when gh is unavailable' clwt prune --yes
 check 'prune removed nothing while gh was unavailable' test -d "$MANAGED/feat-merged-b"
 rm -f "$CLWT_GH_UNAVAILABLE"
+
+# gh genuinely absent from PATH, not merely unauthenticated. The spec requires
+# these be distinguishable rather than misreported.
+NOGH="$TMP/nogh"
+mkdir -p "$NOGH"
+for b in git bash sed awk grep cat cp rm mkdir mktemp ln readlink dirname basename env; do
+  [ -e "$NOGH/$b" ] || ln -s "$(command -v "$b")" "$NOGH/$b" 2>/dev/null
+done
+clwt_without_gh() { PATH="$NOGH" clwt_in "$PRIMARY" "$@"; }
+
+check_fails 'prune exits non-zero when gh is not on PATH at all' \
+  clwt_without_gh prune
+check_output 'prune distinguishes gh missing from gh unauthenticated' \
+  'not on PATH' clwt_without_gh prune
+check_output 'pr also reports gh missing from PATH' \
+  'not on PATH' clwt_without_gh pr 101
 
 check_fails 'prune rejects a positional argument' clwt prune something
 check_fails 'prune rejects an unknown flag' clwt prune --force
