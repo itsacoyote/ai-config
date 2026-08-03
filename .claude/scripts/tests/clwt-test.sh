@@ -388,6 +388,44 @@ check_fails 'an unknown clwt-side flag is rejected rather than silently forwarde
 check_output 'an unknown clwt-side flag is named in the error' 'yolol' clwt root --yolol
 check_fails 'root rejects a positional argument' clwt root somebranch
 
+section 'open'
+
+# feat/listed already has a managed worktree at $MANAGED/feat-listed, and
+# feat/stray has an unmanaged one at $UNMANAGED (both created in the list section).
+launch_reset
+clwt open feat/listed >/dev/null 2>&1
+check_equals 'open launches claude with the worktree as its working directory' \
+  "$MANAGED/feat-listed" "$(launched pwd)"
+check_equals 'open exports CLWT_REPO_ROOT set to the primary checkout' \
+  "$PRIMARY" "$(launched CLWT_REPO_ROOT)"
+
+launch_reset
+clwt open feat/listed --yolo >/dev/null 2>&1
+check_equals '--yolo works on open as well as root' \
+  '--dangerously-skip-permissions' "$(launched args)"
+
+check_fails 'open refuses a worktree outside the managed root' clwt open feat/stray
+check_output 'open explains that the worktree is outside the managed root' \
+  'managed' clwt open feat/stray
+
+check_fails 'open exits non-zero when the branch has no managed worktree' \
+  clwt open feat/never-existed
+check_output 'open names the branch it could not find' \
+  'feat/never-existed' clwt open feat/never-existed
+
+check_fails 'open requires a branch argument' clwt open
+check_fails 'open rejects an invalid branch name' clwt open 'not a branch'
+
+# A symlink pointing into the managed root must not be accepted as a managed
+# worktree — otherwise the containment check can be walked around.
+SYMLINKED="$MANAGED/symlinked"
+ln -s "$UNMANAGED" "$SYMLINKED"
+git -C "$PRIMARY" worktree add -q -b feat/symlinked "$MANAGED/feat-symlinked" 2>/dev/null
+rm -rf "$MANAGED/feat-symlinked"
+ln -s "$UNMANAGED" "$MANAGED/feat-symlinked"
+check_fails 'open refuses a symlinked worktree path' clwt open feat/symlinked
+rm -f "$SYMLINKED" "$MANAGED/feat-symlinked"
+
 # -------------------------------------------------------------------- install
 
 section 'install'

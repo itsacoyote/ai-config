@@ -188,10 +188,59 @@ launch() {
 
 # ------------------------------------------------------------------- commands
 
+validate_branch() {
+  git check-ref-format --branch "$1" >/dev/null 2>&1 || die "invalid branch name: $1"
+}
+
+# Path of the worktree holding <branch>, if any. Prints nothing and returns 1
+# when the branch is not checked out anywhere.
+branch_worktree() {
+  local wanted=$1 line path=''
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        ;;
+      "branch refs/heads/$wanted")
+        printf '%s\n' "$path"
+        return 0
+        ;;
+    esac
+  done < <(git worktree list --porcelain)
+  return 1
+}
+
+# Refuses anything clwt did not put where it expects. The symlink check comes
+# first and is not redundant: without it, a symlink sitting inside the managed
+# root could point anywhere, and the containment check below — which compares the
+# *resolved* path — would be satisfied by a directory clwt never created.
+require_managed_worktree() {
+  local path=$1 physical
+  [[ ! -L $path ]] || die "managed worktree path must not be a symlink: $path"
+  physical=$(cd -P "$path" 2>/dev/null && pwd -P) ||
+    die "cannot resolve worktree directory: $path"
+  case $physical in
+    "$managed_root"/*) ;;
+    *) die "worktree is not under the managed root, so clwt does not manage it: $path" ;;
+  esac
+}
+
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
   launch "$primary"
+}
+
+cmd_open() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'open requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} target
+  validate_branch "$branch"
+  target=$(branch_worktree "$branch") ||
+    die "no worktree checked out for branch: $branch"
+  require_managed_worktree "$target"
+  launch "$target"
 }
 
 # Lists this repository's worktrees, marking any that live outside the managed
@@ -343,12 +392,12 @@ main() {
       shift || true
       cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
-    root)
+    root | open)
       shift || true
       require_repo
-      cmd_root "$@"
+      "cmd_$command" "$@"
       ;;
-    new | branch | open | pr | remove | prune)
+    new | branch | pr | remove | prune)
       not_implemented "$command"
       ;;
     *)
