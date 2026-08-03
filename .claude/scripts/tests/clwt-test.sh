@@ -483,6 +483,75 @@ check_fails 'new fails when the local branch already exists but is unchecked out
 check_output 'new points at clwt branch when the local branch already exists' \
   'clwt branch' clwt new feat/dormant
 
+section 'branch'
+
+# An existing local branch with no worktree (created in the `new` section).
+launch_reset
+clwt branch feat/dormant >/dev/null 2>&1
+check 'branch creates a managed worktree for an existing local branch' \
+  test -d "$MANAGED/feat-dormant"
+check_equals 'branch launches claude in that worktree' \
+  "$MANAGED/feat-dormant" "$(launched pwd)"
+
+# A branch that exists only on the remote.
+(
+  cd "$TMP/seed"
+  git checkout -q -b feat/remote-only
+  printf 'remote only\n' >remote-only.txt
+  git add remote-only.txt
+  git commit -qm 'remote only branch'
+  git push -q origin feat/remote-only
+)
+launch_reset
+clwt branch feat/remote-only >/dev/null 2>&1
+check 'branch checks out a branch that exists only on origin' \
+  test -f "$MANAGED/feat-remote-only/remote-only.txt"
+check_equals 'branch launches claude in the origin-only worktree' \
+  "$MANAGED/feat-remote-only" "$(launched pwd)"
+
+check_fails 'branch fails for a branch that exists nowhere' clwt branch feat/nonexistent
+check_output 'branch names the branch it could not find' \
+  'feat/nonexistent' clwt branch feat/nonexistent
+check_fails 'branch requires a branch argument' clwt branch
+check_fails 'branch rejects an invalid branch name' clwt branch 'feat/a b'
+
+section 'already checked out elsewhere'
+
+# Case (a): already in a managed worktree — reuse it and launch.
+launch_reset
+clwt branch feat/alpha >/dev/null 2>&1
+check_equals 'branch reuses an existing managed worktree rather than failing' \
+  "$MANAGED/feat-alpha" "$(launched pwd)"
+launch_reset
+clwt new feat/alpha >/dev/null 2>&1
+check_equals 'new also reuses an existing managed worktree' \
+  "$MANAGED/feat-alpha" "$(launched pwd)"
+
+# Case (b): checked out in the primary checkout. `git worktree add` would refuse
+# with "already checked out"; clwt should say something more useful.
+primary_branch=$(git -C "$PRIMARY" symbolic-ref --short HEAD)
+check_fails 'branch refuses when the branch is checked out in the primary checkout' \
+  clwt branch "$primary_branch"
+check_output 'that refusal names the primary checkout' \
+  "$PRIMARY" clwt branch "$primary_branch"
+check_output 'that refusal suggests clwt root' \
+  'clwt root' clwt branch "$primary_branch"
+
+# Case (c): checked out in an unmanaged worktree.
+check_fails 'branch refuses when the branch is checked out in an unmanaged worktree' \
+  clwt branch feat/stray
+check_output 'that refusal names the unmanaged path' "$UNMANAGED" clwt branch feat/stray
+check_output 'that refusal says clwt does not manage it' 'manage' clwt branch feat/stray
+
+# The three cases must be distinguishable, not one generic message.
+msg_primary=$(clwt branch "$primary_branch" 2>&1 || true)
+msg_unmanaged=$(clwt branch feat/stray 2>&1 || true)
+if [ "$msg_primary" != "$msg_unmanaged" ]; then
+  ok 'the primary-checkout and unmanaged refusals are distinct messages'
+else
+  not_ok 'the primary-checkout and unmanaged refusals are distinct messages'
+fi
+
 # -------------------------------------------------------------------- install
 
 section 'install'

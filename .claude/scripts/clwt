@@ -274,10 +274,60 @@ ensure_available_path() {
   fi
 }
 
+# Git allows a branch in exactly one worktree, so "it is already checked out" has
+# three quite different meanings and three different right answers. Git's own
+# message names none of them usefully, which leaves you hunting for where the
+# branch actually is.
+reuse_or_refuse() {
+  local branch=$1 existing=$2
+
+  if [[ $existing == "$primary" ]]; then
+    die "$branch is checked out in the primary checkout ($primary); use 'clwt root' to work there"
+  fi
+
+  case $existing in
+    "$managed_root"/*) ;;
+    *) die "$branch is checked out at $existing, which clwt does not manage" ;;
+  esac
+
+  require_managed_worktree "$existing"
+  note "reusing existing worktree for $branch"
+  launch "$existing"
+}
+
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
   launch "$primary"
+}
+
+cmd_branch() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'branch requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} existing name target
+  validate_branch "$branch"
+
+  if existing=$(branch_worktree "$branch"); then
+    reuse_or_refuse "$branch" "$existing"
+  fi
+
+  name=$(worktree_name_for_branch "$branch")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+  mkdir -p "$managed_root"
+
+  if git show-ref --verify --quiet "refs/heads/$branch"; then
+    git worktree add "$target" "$branch"
+  else
+    note "fetching origin/$branch"
+    git fetch --quiet origin "refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null ||
+      die "no such branch locally or on origin: $branch"
+    git worktree add -b "$branch" "$target" "origin/$branch"
+  fi
+
+  launch "$target"
 }
 
 cmd_new() {
@@ -290,9 +340,7 @@ cmd_new() {
     die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
 
   if existing=$(branch_worktree "$branch"); then
-    require_managed_worktree "$existing"
-    note "reusing existing worktree for $branch"
-    launch "$existing"
+    reuse_or_refuse "$branch" "$existing"
   fi
 
   if git show-ref --verify --quiet "refs/heads/$branch"; then
@@ -474,12 +522,12 @@ main() {
       shift || true
       cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
-    root | open | new)
+    root | open | new | branch)
       shift || true
       require_repo
       "cmd_$command" "$@"
       ;;
-    branch | pr | remove | prune)
+    pr | remove | prune)
       not_implemented "$command"
       ;;
     *)
