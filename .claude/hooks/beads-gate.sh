@@ -29,7 +29,8 @@ fi
 
 if [ "$beads_ok" = 1 ]; then
   # Beads present — inject reminder + bd ready output
-  bd_output="$(bd ready 2>&1)"
+  # -n 3 keeps SessionStart context small; the "Ready: N issues" footer still shows the true total
+  bd_output="$(bd ready -n 3 2>&1)"
   context="$(printf 'This project uses beads (bd) as the system of record.\n\n%s' "$bd_output" | jq -Rs .)"
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":%s}}\n' "$context"
 else
