@@ -552,6 +552,92 @@ else
   not_ok 'the primary-checkout and unmanaged refusals are distinct messages'
 fi
 
+section 'worktreeinclude copy'
+
+# Nothing configured yet: creation must be a no-op, not an error.
+launch_reset
+clwt new feat/no-include >/dev/null 2>&1
+check 'creation succeeds when worktreeinclude is absent' test -d "$MANAGED/feat-no-include"
+
+printf '# nothing matches this\nnever-matches-anything\n' >"$PRIMARY/.worktreeinclude"
+launch_reset
+clwt new feat/empty-include >/dev/null 2>&1
+check 'creation succeeds when worktreeinclude matches nothing' \
+  test -d "$MANAGED/feat-empty-include"
+
+# Now with real patterns and real untracked files.
+mkdir -p "$PRIMARY/config"
+printf 'SECRET=1\n' >"$PRIMARY/.env"
+printf '{"local":true}\n' >"$PRIMARY/config/local.json"
+printf 'spaced\n' >"$PRIMARY/with space.txt"
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+.env
+config/local.json
+with space.txt
+PATTERNS
+
+launch_reset
+copy_out=$(clwt new feat/copied 2>&1)
+check 'a worktreeinclude match is copied into the new worktree' \
+  test -f "$MANAGED/feat-copied/.env"
+check 'a nested worktreeinclude match keeps its relative path' \
+  test -f "$MANAGED/feat-copied/config/local.json"
+check 'a worktreeinclude match whose filename contains a space is copied' \
+  test -f "$MANAGED/feat-copied/with space.txt"
+if printf '%s\n' "$copy_out" | grep -qE 'copied 3'; then
+  ok 'copying reports the number of files copied'
+else
+  not_ok "copying reports the number of files copied (got: $(printf '%s' "$copy_out" | tr '\n' '|'))"
+fi
+check_equals 'the copied file has the same contents as the original' \
+  'SECRET=1' "$(cat "$MANAGED/feat-copied/.env" 2>/dev/null)"
+
+# The guard this whole task exists for. `git ls-files --others --ignored
+# --exclude-from` DOES return gitignored paths — verified — so a .beads entry
+# here would otherwise be copied, forking the issue database exactly as it did
+# before PR #48.
+mkdir -p "$PRIMARY/.beads/backup"
+printf '{"id":"x"}\n' >"$PRIMARY/.beads/issues.jsonl"
+printf 'blob\n' >"$PRIMARY/.beads/backup/snap.darc"
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+.env
+.beads/
+PATTERNS
+
+launch_reset
+beads_out=$(clwt new feat/beads-guard 2>&1)
+check 'the beads directory is never copied even when worktreeinclude matches it' \
+  test ! -e "$MANAGED/feat-beads-guard/.beads"
+check 'no file under the beads directory is copied either' \
+  test ! -e "$MANAGED/feat-beads-guard/.beads/issues.jsonl"
+check 'the non-beads match is still copied alongside the refusal' \
+  test -f "$MANAGED/feat-beads-guard/.env"
+if printf '%s\n' "$beads_out" | grep -qF '#48'; then
+  ok 'skipping the beads directory prints a warning naming PR 48'
+else
+  not_ok 'skipping the beads directory prints a warning naming PR 48'
+fi
+
+# --exclude-from resolves relative to the current directory, and clwt is often
+# run from inside a worktree. The pattern file and the copy source must both come
+# from the primary checkout regardless of where clwt was invoked.
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+.env
+PATTERNS
+launch_reset
+clwt_in "$MANAGED/feat-alpha" new feat/from-inside >/dev/null 2>&1
+check 'worktreeinclude is read from the primary checkout when clwt runs inside a worktree' \
+  test -f "$MANAGED/feat-from-inside/.env"
+
+# branch must run the copy too, not just new.
+git -C "$PRIMARY" branch feat/copy-on-branch >/dev/null 2>&1
+launch_reset
+clwt branch feat/copy-on-branch >/dev/null 2>&1
+check 'branch also copies worktreeinclude matches' \
+  test -f "$MANAGED/feat-copy-on-branch/.env"
+
+rm -f "$PRIMARY/.worktreeinclude"
+
 # -------------------------------------------------------------------- install
 
 section 'install'
