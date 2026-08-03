@@ -771,33 +771,53 @@ path_contains() {
 # Symlinks — deliberately, not copies. A symlink tracks every later edit to the
 # repo script, so the tool stays current as the library is updated, and there is
 # never a stale duplicate to wonder about.
-cmd_install() {
-  [[ $# -eq 0 ]] || die 'install takes no arguments'
+# Points <target> at <source>, creating the parent directory, repointing a
+# symlink that aims elsewhere, and refusing to clobber anything that is not a
+# symlink — a real file there belongs to someone else.
+link_into_place() {
+  local source=$1 target=$2 current
 
-  local target_dir="$HOME/.local/bin"
-  local target="$target_dir/clwt"
-  local source current
-  source=$(resolve_self)
-
-  mkdir -p "$target_dir" || die "cannot create $target_dir"
+  mkdir -p "${target%/*}" || die "cannot create ${target%/*}"
 
   if [[ -L $target ]]; then
     current=$(readlink "$target")
     if [[ $current == "$source" ]]; then
       note "already installed: $target -> $source"
-      install_path_warning "$target_dir"
       return 0
     fi
     ln -sfn "$source" "$target" || die "cannot update symlink: $target"
     note "repointed $target -> $source"
-  elif [[ -e $target ]]; then
-    die "$target exists and is not a symlink; move it aside and retry"
-  else
-    ln -s "$source" "$target" || die "cannot create symlink: $target"
-    note "installed $target -> $source"
+    return 0
   fi
 
-  install_path_warning "$target_dir"
+  [[ ! -e $target ]] ||
+    die "$target exists and is not a symlink; move it aside and retry"
+
+  ln -s "$source" "$target" || die "cannot create symlink: $target"
+  note "installed $target -> $source"
+}
+
+cmd_install() {
+  [[ $# -eq 0 ]] || die 'install takes no arguments'
+
+  local bin_dir="$HOME/.local/bin"
+  local source completion_source completion_dir
+  source=$(resolve_self)
+  completion_source="${source%/*}/clwt-completion.bash"
+
+  link_into_place "$source" "$bin_dir/clwt"
+
+  # bash-completion 2.x autoloads a file named after the command from here, so
+  # Tab works in a new shell with no rc edit. A symlink rather than a copy, for
+  # the same reason as the binary: it tracks later edits.
+  completion_dir="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+  if [[ -f $completion_source ]]; then
+    link_into_place "$completion_source" "$completion_dir/clwt"
+  else
+    note "no completion script beside clwt, skipping: $completion_source"
+  fi
+
+  install_path_warning "$bin_dir"
 }
 
 install_path_warning() {

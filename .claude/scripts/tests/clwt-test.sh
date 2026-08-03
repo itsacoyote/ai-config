@@ -904,6 +904,41 @@ check 'install through the installed symlink succeeds' \
 # install must work outside a git repository — it has nothing to do with a repo.
 check 'install works outside a git repository' clwt_in "$TMP/not-a-repo" install
 
+# --- completion install ---
+
+COMP_DIR="$HOME/.local/share/bash-completion/completions"
+COMP_LINK="$COMP_DIR/clwt"
+EXPECTED_COMPLETION="$REPO_ROOT/.claude/scripts/clwt-completion.bash"
+
+reset_install
+rm -rf "$HOME/.local/share/bash-completion"
+install_out=$(clwt install 2>&1)
+
+check 'install creates the per-user bash-completion directory' test -d "$COMP_DIR"
+check 'install symlinks the completion into the per-user completions directory' \
+  test -L "$COMP_LINK"
+check_equals 'the completion symlink points at the repo completion script' \
+  "$EXPECTED_COMPLETION" "$(readlink "$COMP_LINK" 2>/dev/null)"
+check_equals 'the completion symlink is named after the command so bash autoloads it' \
+  'clwt' "$(basename "$COMP_LINK")"
+
+if printf '%s\n' "$install_out" | grep -qF "$COMP_LINK" &&
+  printf '%s\n' "$install_out" | grep -qF "$LOCAL_BIN/clwt"; then
+  ok 'install reports both the binary and completion symlinks'
+else
+  not_ok 'install reports both the binary and completion symlinks'
+fi
+
+check 'installing again is idempotent for the completion too' clwt install
+
+# A real file there is someone else's; do not clobber it.
+rm -f "$COMP_LINK"
+printf 'someone elses completion\n' >"$COMP_LINK"
+check_fails 'install refuses to clobber a non-symlink completion file' clwt install
+check 'the pre-existing completion file survives' \
+  grep -q 'someone elses' "$COMP_LINK"
+rm -f "$COMP_LINK"
+
 section 'pr'
 
 pr_meta 101 feat/from-pr false
