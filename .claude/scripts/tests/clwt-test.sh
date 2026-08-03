@@ -753,24 +753,27 @@ fi
 (
   cd "$TMP/seed"
   git checkout -q stable
-  mkdir -p nested
   ln -s "$TMP/victim-file" evil-link
   ln -s "$TMP/victim-dir" nested-link
-  git add evil-link nested-link
+  mkdir -p dir-dst
+  ln -s "$TMP/victim-dir/dir-dst" dir-dst/dir-dst
+  git add evil-link nested-link dir-dst
   git commit -qm 'branch carrying symlinks where copied files would land'
   git push -q origin stable
 )
 printf 'ORIGINAL\n' >"$TMP/victim-file"
 mkdir -p "$TMP/victim-dir"
 printf 'SECRET=1\n' >"$PRIMARY/evil-link"
-printf 'SECRET=1\n' >"$PRIMARY/nested-link"
+mkdir -p "$PRIMARY/nested-link"
+printf 'SECRET=1\n' >"$PRIMARY/nested-link/config"
+printf 'SECRET=1\n' >"$PRIMARY/dir-dst"
+
+# Shape 1 — the destination itself is a committed symlink.
 cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
 evil-link
 PATTERNS
-
 launch_reset
 symlink_out=$(clwt new feat/symlink-escape 2>&1 || true)
-
 check_equals 'a symlinked copy destination does not launch claude' '' "$(launched pwd)"
 check_equals 'the file outside the worktree is untouched' \
   'ORIGINAL' "$(cat "$TMP/victim-file" 2>/dev/null)"
@@ -782,7 +785,45 @@ else
   not_ok "the refusal says the destination was a symlink (got: $(printf '%s' "$symlink_out" | tr '\n' '|'))"
 fi
 
-rm -f "$PRIMARY/evil-link" "$PRIMARY/nested-link" "$PRIMARY/.worktreeinclude"
+# Shape 2 — an *intermediate* directory is a committed symlink. Previously
+# untested: the suite passed with the parent-containment guard deleted, while a
+# PoC still escaped through it.
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+nested-link/config
+PATTERNS
+launch_reset
+nested_out=$(clwt new feat/nested-escape 2>&1 || true)
+check_equals 'a symlinked intermediate directory does not launch claude' '' "$(launched pwd)"
+check 'nothing was written through the symlinked intermediate directory' \
+  test ! -e "$TMP/victim-dir/config"
+check 'the worktree is abandoned when the destination parent escapes' \
+  test ! -e "$MANAGED/feat-nested-escape"
+if printf '%s\n' "$nested_out" | grep -qiF 'resolves outside the worktree'; then
+  ok 'the refusal says the destination resolved outside the worktree'
+else
+  not_ok "the refusal says the destination resolved outside the worktree (got: $(printf '%s' "$nested_out" | tr '\n' '|'))"
+fi
+
+# Shape 3 — the destination is a *directory* holding a symlink of the same name.
+# `cp` copies into a directory as $dst/$(basename $src), and src/dst share a
+# basename here, so the write lands on that symlink — past both other guards.
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+dir-dst
+PATTERNS
+launch_reset
+dir_out=$(clwt new feat/dir-escape 2>&1 || true)
+check_equals 'a directory at the copy destination does not launch claude' '' "$(launched pwd)"
+check 'nothing was written through the directory-at-destination shape' \
+  test ! -e "$TMP/victim-dir/dir-dst"
+check 'the worktree is abandoned when the destination is a directory' \
+  test ! -e "$MANAGED/feat-dir-escape"
+if printf '%s\n' "$dir_out" | grep -qiF 'non-regular destination'; then
+  ok 'the refusal says the destination was not a regular file'
+else
+  not_ok "the refusal says the destination was not a regular file (got: $(printf '%s' "$dir_out" | tr '\n' '|'))"
+fi
+
+rm -rf "$PRIMARY/evil-link" "$PRIMARY/nested-link" "$PRIMARY/dir-dst" "$PRIMARY/.worktreeinclude"
 
 section 'remove'
 

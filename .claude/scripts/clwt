@@ -406,6 +406,21 @@ copy_worktree_includes() {
       return 1
     fi
 
+    # A directory at the destination is the third shape, and it slips past both
+    # the symlink check above and the parent-containment check below: given an
+    # existing directory, `cp` copies *into* it as $dst/$(basename $src) — and
+    # src and dst share a basename here, so a branch that commits `.env/` as a
+    # directory holding a symlink named `.env` lands the write on that symlink.
+    # Verified escaping to an arbitrary absolute path. Git can only materialise
+    # regular files, symlinks, directories, and gitlinks (directories too), so
+    # "nonexistent or a regular file" is the complete allowlist. Order matters:
+    # -L must be tested first, because -f follows symlinks. `cp -pT` would also
+    # fix it but -T is GNU-only, which the mktemp comment above exists to avoid.
+    if [[ -e $dst && ! -f $dst ]]; then
+      warn "refusing to copy onto a non-regular destination inside the worktree: $rel"
+      return 1
+    fi
+
     dst_dir=${dst%/*}
     mkdir -p "$dst_dir" || {
       warn "cannot create the directory for $rel"

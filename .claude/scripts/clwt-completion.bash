@@ -97,9 +97,16 @@ _clwt() {
       ;;
     branch)
       _clwt_add_matches "$cur" < <(_clwt_all_branches)
+      # readline inserts an accepted match into the command line unquoted, so on a
+      # *unique* match Tab silently rewrites the line and Enter expands it — a
+      # branch named `feat/x$(...)` then runs on Enter. `-o filenames` makes
+      # readline quote the insertion, so it arrives at clwt as literal text. Git's
+      # own completion has the same exposure; this makes clwt strictly safer.
+      compopt -o filenames 2>/dev/null || true
       ;;
     open | remove)
       _clwt_add_matches "$cur" < <(_clwt_managed_branches)
+      compopt -o filenames 2>/dev/null || true
       ;;
     *)
       # pr, root, list, prune, install, help take no completable operand.
