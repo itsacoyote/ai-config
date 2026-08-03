@@ -326,6 +326,68 @@ git clone -q "$REMOTE" "$HOME/github/owner/lonely"
 check_output 'list reports plainly when there are no managed worktrees' \
   'No managed worktrees' clwt_in "$HOME/github/owner/lonely" list
 
+# ------------------------------------------------------------------ launching
+
+section 'launch primitive, root, and --yolo'
+
+# The stub `claude` records the working directory and environment it was handed.
+# Reading those back is the only honest way to assert the thing this tool exists
+# for: that the launched process really is rooted in the target directory.
+launch_reset() { : >"$CLWT_TEST_LOG"; }
+launched() { sed -n "s/^$1=//p" "$CLWT_TEST_LOG" | tail -1; }
+
+launch_reset
+clwt root >/dev/null 2>&1
+check_equals 'root launches claude in the primary checkout' "$PRIMARY" "$(launched pwd)"
+check_equals 'root exports CLWT_REPO_ROOT equal to the primary checkout' \
+  "$PRIMARY" "$(launched CLWT_REPO_ROOT)"
+
+root_env=$(launched CLWT_REPO_ROOT)
+case $root_env in
+  *.git) not_ok 'the exported CLWT_REPO_ROOT does not end in .git' ;;
+  *) ok 'the exported CLWT_REPO_ROOT does not end in .git' ;;
+esac
+check_equals 'root passes no arguments to claude by default' '' "$(launched args)"
+
+# Invoked from inside a worktree, root must still land in the primary checkout —
+# the case `git rev-parse --show-toplevel` gets wrong.
+launch_reset
+clwt_in "$MANAGED/feat-listed" root >/dev/null 2>&1
+check_equals 'root launches in the primary checkout even when invoked from a worktree' \
+  "$PRIMARY" "$(launched pwd)"
+check_equals 'CLWT_REPO_ROOT is correct when clwt is invoked from inside a worktree' \
+  "$PRIMARY" "$(launched CLWT_REPO_ROOT)"
+
+# --yolo
+launch_reset
+clwt root --yolo >/dev/null 2>&1
+check_equals '--yolo passes --dangerously-skip-permissions to claude' \
+  '--dangerously-skip-permissions' "$(launched args)"
+
+launch_reset
+clwt root >/dev/null 2>&1
+check_equals 'without --yolo no permission flag is passed to claude' '' "$(launched args)"
+
+launch_reset
+clwt root --yolo -- --model opus >/dev/null 2>&1
+check_equals '--yolo composes with arguments after --' \
+  '--dangerously-skip-permissions --model opus' "$(launched args)"
+
+launch_reset
+clwt root -- --model opus >/dev/null 2>&1
+check_equals 'arguments after -- are passed through to claude' \
+  '--model opus' "$(launched args)"
+
+launch_reset
+clwt root -- >/dev/null 2>&1
+check_equals 'a bare -- with no following arguments is not an error' \
+  "$PRIMARY" "$(launched pwd)"
+
+check_fails 'an unknown clwt-side flag is rejected rather than silently forwarded' \
+  clwt root --yolol
+check_output 'an unknown clwt-side flag is named in the error' 'yolol' clwt root --yolol
+check_fails 'root rejects a positional argument' clwt root somebranch
+
 # -------------------------------------------------------------------- install
 
 section 'install'

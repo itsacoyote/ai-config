@@ -116,7 +116,83 @@ valid_identity_part() {
   return 0
 }
 
+# --------------------------------------------------------------- launching
+
+# Splits a launching subcommand's arguments into three parts:
+#   LAUNCH_POSITIONAL — the subcommand's own operands (a branch, a PR number)
+#   LAUNCH_YOLO       — 1 when --yolo was given
+#   LAUNCH_ARGS       — everything after `--`, handed to claude untouched
+#
+# Everything before `--` belongs to clwt. An unrecognized clwt-side flag is an
+# error rather than being forwarded, so a typo like `--yolol` fails loudly
+# instead of silently reaching claude as an unknown argument.
+parse_launch_args() {
+  LAUNCH_YOLO=0
+  LAUNCH_ARGS=()
+  LAUNCH_POSITIONAL=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --)
+        shift
+        LAUNCH_ARGS=("$@")
+        return 0
+        ;;
+      --yolo)
+        LAUNCH_YOLO=1
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*)
+        die "unknown option: $1 (run 'clwt help')"
+        ;;
+      *)
+        LAUNCH_POSITIONAL+=("$1")
+        ;;
+    esac
+    shift
+  done
+}
+
+# The whole point of the tool. `claude` has no "start in directory" flag — it
+# inherits its working directory from whoever launched it. So: cd into the
+# target, then exec. The session's cwd is then correct by construction, which is
+# what makes `git -C` unnecessary rather than merely discouraged.
+#
+# CLWT_REPO_ROOT rides along so any issue tracker in that session can find the
+# one central database in the primary checkout. `bd` resolves it through the git
+# common dir on its own; this is the tool-agnostic form of the same guarantee.
+launch() {
+  local target=$1
+  local -a argv=()
+
+  command -v claude >/dev/null 2>&1 || die 'claude not found on PATH'
+
+  if ((LAUNCH_YOLO)); then
+    argv+=(--dangerously-skip-permissions)
+  fi
+  if ((${#LAUNCH_ARGS[@]})); then
+    argv+=("${LAUNCH_ARGS[@]}")
+  fi
+
+  cd -P "$target" || die "cannot enter directory: $target"
+  export CLWT_REPO_ROOT="$primary"
+
+  note "launching claude in $target"
+  if ((${#argv[@]})); then
+    exec claude "${argv[@]}"
+  fi
+  exec claude
+}
+
 # ------------------------------------------------------------------- commands
+
+cmd_root() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
+  launch "$primary"
+}
 
 # Lists this repository's worktrees, marking any that live outside the managed
 # root. Those exist because Claude Code's own worktree feature is still available
@@ -267,7 +343,12 @@ main() {
       shift || true
       cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
-    new | branch | open | pr | root | remove | prune)
+    root)
+      shift || true
+      require_repo
+      cmd_root "$@"
+      ;;
+    new | branch | open | pr | remove | prune)
       not_implemented "$command"
       ;;
     *)
