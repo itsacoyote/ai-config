@@ -365,7 +365,13 @@ copy_worktree_includes() {
     return 1
   fi
 
-  local rel src dst copied=0 refused_beads=0
+  local resolved_target
+  resolved_target=$(cd -P "$target" 2>/dev/null && pwd -P) || {
+    warn "cannot resolve the worktree directory: $target"
+    return 1
+  }
+
+  local rel src dst dst_dir resolved_dir copied=0 refused_beads=0
   while IFS= read -r -d '' rel; do
     case $rel in
       .beads | .beads/*)
@@ -388,10 +394,37 @@ copy_worktree_includes() {
     src="$primary/$rel"
     [[ -f $src ]] || continue
     dst="$target/$rel"
-    mkdir -p "${dst%/*}" || {
+
+    # The destination is inside a tree whose *contents* came from a branch, which
+    # on a fork PR means from someone else. A hostile branch can commit the
+    # matched path as a tracked symlink pointing anywhere — git materializes it,
+    # and `cp` then writes THROUGH it, straight out of the managed root. (cp's
+    # -P/--no-dereference does not help; those govern the source.) Verified
+    # writing to ~/.bashrc this way before the guard existed.
+    if [[ -L $dst ]]; then
+      warn "refusing to copy onto a symlink inside the worktree: $rel"
+      return 1
+    fi
+
+    dst_dir=${dst%/*}
+    mkdir -p "$dst_dir" || {
       warn "cannot create the directory for $rel"
       return 1
     }
+    # An intermediate component can be a committed symlink too, so check where
+    # the parent actually lands rather than trusting the path text.
+    resolved_dir=$(cd -P "$dst_dir" 2>/dev/null && pwd -P) || {
+      warn "cannot resolve the destination directory for $rel"
+      return 1
+    }
+    case "$resolved_dir/" in
+      "$resolved_target"/*) ;;
+      *)
+        warn "refusing to copy $rel — its destination resolves outside the worktree"
+        return 1
+        ;;
+    esac
+
     cp -p "$src" "$dst" || {
       warn "cannot copy $rel into the worktree"
       return 1

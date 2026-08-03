@@ -746,7 +746,43 @@ else
   ok 'copy-failure assertions skipped (running as root; mode bits do not apply)'
 fi
 
-rm -f "$PRIMARY/.worktreeinclude"
+# A hostile branch can commit a .worktreeinclude-matched path as a tracked symlink
+# pointing anywhere. git materializes it in the worktree, and cp then writes
+# THROUGH it — out of the managed root entirely. Confirmed writing to ~/.bashrc
+# before the guard existed. `clwt pr` makes this reachable from a fork.
+(
+  cd "$TMP/seed"
+  git checkout -q stable
+  mkdir -p nested
+  ln -s "$TMP/victim-file" evil-link
+  ln -s "$TMP/victim-dir" nested-link
+  git add evil-link nested-link
+  git commit -qm 'branch carrying symlinks where copied files would land'
+  git push -q origin stable
+)
+printf 'ORIGINAL\n' >"$TMP/victim-file"
+mkdir -p "$TMP/victim-dir"
+printf 'SECRET=1\n' >"$PRIMARY/evil-link"
+printf 'SECRET=1\n' >"$PRIMARY/nested-link"
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+evil-link
+PATTERNS
+
+launch_reset
+symlink_out=$(clwt new feat/symlink-escape 2>&1 || true)
+
+check_equals 'a symlinked copy destination does not launch claude' '' "$(launched pwd)"
+check_equals 'the file outside the worktree is untouched' \
+  'ORIGINAL' "$(cat "$TMP/victim-file" 2>/dev/null)"
+check 'the worktree is abandoned when a copy destination is a symlink' \
+  test ! -e "$MANAGED/feat-symlink-escape"
+if printf '%s\n' "$symlink_out" | grep -qiF 'symlink'; then
+  ok 'the refusal says the destination was a symlink'
+else
+  not_ok "the refusal says the destination was a symlink (got: $(printf '%s' "$symlink_out" | tr '\n' '|'))"
+fi
+
+rm -f "$PRIMARY/evil-link" "$PRIMARY/nested-link" "$PRIMARY/.worktreeinclude"
 
 section 'remove'
 
@@ -1242,6 +1278,36 @@ if [ -f "$COMPLETION" ]; then
   else
     not_ok 'completion offers managed worktree branches for remove'
   fi
+
+  # `compgen -W` performs full word expansion — including command substitution —
+  # on its word list, and `git check-ref-format` accepts a branch named
+  # `feat/x$(...)`. Passing branch names through it is remote code execution on
+  # Tab, with no subcommand run and no confirmation. Verified live before the fix.
+  RCE_MARKER="$TMP/rce-marker"
+  rm -f "$RCE_MARKER"
+  HOSTILE_BRANCH='feat/x$(touch${IFS}'"$RCE_MARKER"')'
+  git -C "$PRIMARY" branch "$HOSTILE_BRANCH" 2>/dev/null
+
+  hostile_completions=$(complete_for clwt branch 'feat/x')
+  if [ -e "$RCE_MARKER" ]; then
+    not_ok 'completing a hostile branch name does not execute it'
+  else
+    ok 'completing a hostile branch name does not execute it'
+  fi
+  if printf '%s\n' "$hostile_completions" | grep -qF 'touch'; then
+    ok 'the hostile branch name is offered verbatim as inert text'
+  else
+    not_ok "the hostile branch name is offered verbatim as inert text (got: $hostile_completions)"
+  fi
+
+  rm -f "$RCE_MARKER"
+  managed_hostile=$(complete_for clwt open 'feat/x')
+  if [ -e "$RCE_MARKER" ]; then
+    not_ok 'completing a hostile managed branch name does not execute it'
+  else
+    ok 'completing a hostile managed branch name does not execute it'
+  fi
+  git -C "$PRIMARY" branch -D "$HOSTILE_BRANCH" >/dev/null 2>&1
 
   prs=$(complete_for clwt pr '')
   if [ -z "$(printf '%s' "$prs" | tr -d '[:space:]')" ]; then
