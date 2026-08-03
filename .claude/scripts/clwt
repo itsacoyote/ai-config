@@ -353,10 +353,106 @@ reuse_or_refuse() {
   launch "$existing"
 }
 
+# "Dirty" deliberately means `--untracked-files=all` WITHOUT `--ignored`, and
+# neither obvious alternative works:
+#
+#   plain --porcelain     a worktree holding a .worktreeinclude-copied .env reads
+#                         as clean (the project's .gitignore covers it), so
+#                         removal would silently destroy it
+#   ... --ignored         every worktree clwt creates reads as dirty, so removal
+#                         would always refuse
+#
+# So: genuine uncommitted or untracked work blocks removal, and ignored files do
+# not — but since `git worktree remove` deletes them without comment, they get
+# named first. The report is the only thing standing between you and a lost .env.
+worktree_is_dirty() {
+  [[ -n $(cd "$1" && git status --porcelain --untracked-files=all) ]]
+}
+
+worktree_ignored_files() {
+  (cd "$1" && git ls-files --others --ignored --exclude-standard)
+}
+
+# Removing the directory you are standing in leaves the shell in a path that no
+# longer exists. Realistic, since you open a terminal in a worktree and then tidy
+# up from it.
+refuse_if_caller_inside() {
+  local target=$1 here
+  here=$(pwd -P)
+  if [[ $here == "$target" || $here == "$target"/* ]]; then
+    die "refusing to remove the worktree you are standing in: $target"
+  fi
+}
+
+# Resolves <branch> to a managed worktree, applying every guard that must hold
+# before anything destructive happens. Sets `resolved_worktree`.
+resolve_removable() {
+  local branch=$1 target
+  validate_branch "$branch"
+  target=$(branch_worktree "$branch") ||
+    die "no worktree checked out for branch: $branch"
+  require_managed_worktree "$target"
+  target=$(cd -P "$target" && pwd -P)
+  refuse_if_caller_inside "$target"
+  resolved_worktree=$target
+}
+
+# Reports what removal will destroy, then removes. Shared by remove and prune.
+remove_worktree() {
+  local target=$1 branch=$2 delete_branch=$3
+  local -a doomed=()
+  local f
+
+  while IFS= read -r f; do
+    [[ -n $f ]] && doomed+=("$f")
+  done < <(worktree_ignored_files "$target")
+
+  if ((${#doomed[@]})); then
+    note "removing will destroy ${#doomed[@]} ignored file(s):"
+    printf '  %s\n' "${doomed[@]}"
+  fi
+
+  git worktree remove "$target"
+  note "removed $target"
+
+  if ((delete_branch)); then
+    # -d, not -D: an unmerged branch should fail loudly rather than vanish.
+    git branch -d "$branch"
+    note "deleted branch $branch"
+  fi
+}
+
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
   launch "$primary"
+}
+
+cmd_remove() {
+  local branch='' delete_branch=0
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --delete-branch) delete_branch=1 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*) die "unknown option: $1 (run 'clwt help')" ;;
+      *)
+        [[ -z $branch ]] || die 'remove takes exactly one branch name'
+        branch=$1
+        ;;
+    esac
+    shift
+  done
+  [[ -n $branch ]] || die 'remove requires a branch name'
+
+  resolve_removable "$branch"
+  if worktree_is_dirty "$resolved_worktree"; then
+    die "worktree has uncommitted or untracked work, refusing to remove: $resolved_worktree"
+  fi
+  remove_worktree "$resolved_worktree" "$branch" "$delete_branch"
 }
 
 cmd_branch() {
@@ -582,12 +678,12 @@ main() {
       shift || true
       cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
-    root | open | new | branch)
+    root | open | new | branch | remove)
       shift || true
       require_repo
       "cmd_$command" "$@"
       ;;
-    pr | remove | prune)
+    pr | prune)
       not_implemented "$command"
       ;;
     *)

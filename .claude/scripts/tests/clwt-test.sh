@@ -111,7 +111,11 @@ git init -q "$TMP/seed"
 (
   cd "$TMP/seed"
   printf 'seed\n' >README.md
-  git add README.md
+  # A tracked .gitignore covering .env is what makes a *copied* .env register as
+  # ignored rather than untracked. Without it the remove tests would exercise the
+  # wrong branch of the cleanliness check entirely.
+  printf '.env\n' >.gitignore
+  git add README.md .gitignore
   git commit -qm 'initial commit'
   git remote add origin "$REMOTE"
   git push -q origin HEAD:refs/heads/main
@@ -637,6 +641,79 @@ check 'branch also copies worktreeinclude matches' \
   test -f "$MANAGED/feat-copy-on-branch/.env"
 
 rm -f "$PRIMARY/.worktreeinclude"
+
+section 'remove'
+
+# Clean worktree: removed, branch kept.
+launch_reset
+clwt new feat/removable >/dev/null 2>&1
+check 'the worktree to remove exists first' test -d "$MANAGED/feat-removable"
+check 'remove deletes a clean managed worktree' clwt remove feat/removable
+check 'the worktree directory is gone' test ! -d "$MANAGED/feat-removable"
+check 'remove keeps the branch by default' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/removable
+
+# --delete-branch
+launch_reset
+clwt new feat/disposable >/dev/null 2>&1
+check 'remove --delete-branch succeeds' clwt remove feat/disposable --delete-branch
+check_fails 'remove --delete-branch deletes the branch as well' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/disposable
+
+# Uncommitted work blocks removal.
+launch_reset
+clwt new feat/dirty-tracked >/dev/null 2>&1
+printf 'edited\n' >>"$MANAGED/feat-dirty-tracked/README.md"
+check_fails 'remove refuses a worktree with uncommitted changes' clwt remove feat/dirty-tracked
+check 'the refused worktree still exists' test -d "$MANAGED/feat-dirty-tracked"
+
+# An untracked file is real work too, and plain --porcelain would miss it only
+# with -uno; --untracked-files=all is what catches it.
+launch_reset
+clwt new feat/dirty-untracked >/dev/null 2>&1
+printf 'scratch\n' >"$MANAGED/feat-dirty-untracked/notes.md"
+check_fails 'remove refuses a worktree with an untracked file' clwt remove feat/dirty-untracked
+
+# The HIGH-1 case. .env is gitignored, so a worktree holding a copied one is
+# *ignored*-dirty but not actually dirty. It must be removable — otherwise every
+# worktree clwt creates becomes unremovable — and the destruction must be named.
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+.env
+PATTERNS
+printf 'SECRET=1\n' >"$PRIMARY/.env"
+launch_reset
+clwt new feat/has-ignored >/dev/null 2>&1
+check 'the ignored file was copied in' test -f "$MANAGED/feat-has-ignored/.env"
+
+ignored_status=$(cd "$MANAGED/feat-has-ignored" && git status --porcelain --untracked-files=all)
+check_equals 'the copied ignored file does not register as untracked work' '' "$ignored_status"
+
+remove_out=$(clwt remove feat/has-ignored 2>&1)
+check 'remove succeeds on a worktree containing a copied worktreeinclude file' \
+  test ! -d "$MANAGED/feat-has-ignored"
+if printf '%s\n' "$remove_out" | grep -qF '.env'; then
+  ok 'remove names the ignored files it is about to destroy'
+else
+  not_ok "remove names the ignored files it is about to destroy (got: $(printf '%s' "$remove_out" | tr '\n' '|'))"
+fi
+rm -f "$PRIMARY/.worktreeinclude"
+
+# Standing inside the worktree you are removing.
+launch_reset
+clwt new feat/self-remove >/dev/null 2>&1
+check_fails 'remove refuses the worktree containing the caller working directory' \
+  clwt_in "$MANAGED/feat-self-remove" remove feat/self-remove
+check 'the worktree survives a refused self-removal' test -d "$MANAGED/feat-self-remove"
+check_output 'the self-removal refusal explains itself' \
+  'standing in' clwt_in "$MANAGED/feat-self-remove" remove feat/self-remove
+check 'removing it from elsewhere still works' clwt remove feat/self-remove
+
+# Guards inherited from the managed-root contract.
+check_fails 'remove refuses a worktree outside the managed root' clwt remove feat/stray
+check 'the unmanaged worktree survives' test -d "$UNMANAGED"
+check_fails 'remove fails for a branch with no worktree' clwt remove feat/never-existed
+check_fails 'remove requires a branch name' clwt remove
+check_fails 'remove rejects an unknown flag' clwt remove feat/listed --nope
 
 # -------------------------------------------------------------------- install
 
