@@ -46,5 +46,9 @@ mkdir -p ~/.agents/skills
 cp -R codex/.agents/skills/. ~/.agents/skills/
 ```
 
+This overwrites same-named skills already in `~/.agents/skills` — check with
+`ls ~/.agents/skills` first and merge by hand if `git-commit`, `branch-names`, or
+`create-pr` already exist there.
+
 `AGENTS.md` remains per-project — copy (or merge) it into each repository where the
 conventions should apply.

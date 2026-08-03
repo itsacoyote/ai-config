@@ -41,9 +41,18 @@ CLI cannot complete the task.
 
 ## Signing and pushing
 
-Follow the host repository's signing and push policy. Never bypass signing requirements to
-push or update a pull request. If commits must be signed and you cannot produce a valid
-signature, stop before pushing and ask a human to sign.
+Follow the host repository's signing and push policy. Before any push, force-push, or PR
+creation — including after a rebase, which strips existing signatures — check whether the
+repo requires signed commits (`git config --get commit.gpgsign`) and whether any commit in
+the range is unsigned (`git log --format='%G?' <base>..HEAD | grep -c '^N'` — non-zero
+means unsigned commits are present). If signing is required and you cannot produce a valid
+signature, STOP: do not push, do not open or update a PR — ask a human to sign.
+
+Never work around signing: do not disable, unset, or edit `commit.gpgsign`,
+`user.signingkey`, or `gpg.format`, and never push unsigned commits to unblock yourself.
+Where signing requires a hardware touch you cannot provide, commit with
+`git commit --no-gpg-sign` (a plain `git commit` hangs waiting for a touch) and leave
+signing and the push to the human.
 
 ## Code comments
 
