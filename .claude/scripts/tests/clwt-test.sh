@@ -1218,6 +1218,37 @@ else
   not_ok 'settings.json keeps its hooks and statusLine intact'
 fi
 
+README="$REPO_ROOT/README.md"
+check 'the README has a clwt section' grep -qiE '^#+ .*clwt' "$README"
+
+readme_missing=''
+for sub in new branch open pr root list remove prune install help; do
+  grep -qE "clwt $sub" "$README" || readme_missing="$readme_missing $sub"
+done
+if [ -z "$readme_missing" ]; then
+  ok 'the README documents all ten subcommands'
+else
+  not_ok "the README documents all ten subcommands (missing:$readme_missing)"
+fi
+
+check 'the README documents the managed root layout' \
+  grep -qF '.worktrees' "$README"
+check 'the README documents CLWT_REPO_ROOT' grep -qF 'CLWT_REPO_ROOT' "$README"
+check 'the README documents the --yolo shorthand' grep -qF -- '--yolo' "$README"
+check 'the README says what --yolo bypasses' \
+  grep -qF -- '--dangerously-skip-permissions' "$README"
+check 'the README documents the worktreeinclude and beads behavior' \
+  grep -qF '.worktreeinclude' "$README"
+check 'the README documents how to run the test suite' \
+  grep -qF 'clwt-test.sh' "$README"
+# Newlines collapsed first: the claim spans a line break in the prose, and grep is
+# line-based. The assertion is about what the document says, not how it wraps.
+if tr '\n' ' ' <"$README" | grep -qiE 'cannot relaunch *itself|must be run by'; then
+  ok 'the README says launching subcommands are run by the developer'
+else
+  not_ok 'the README says launching subcommands are run by the developer'
+fi
+
 check 'the reground skill recommends clwt' grep -qF 'clwt' "$REGROUND"
 if grep -qE '^\s*-.*`git worktree add <path>' "$REGROUND"; then
   not_ok 'the reground skill no longer recommends raw git worktree add as the default'
