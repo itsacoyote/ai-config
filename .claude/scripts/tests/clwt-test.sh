@@ -426,6 +426,63 @@ ln -s "$UNMANAGED" "$MANAGED/feat-symlinked"
 check_fails 'open refuses a symlinked worktree path' clwt open feat/symlinked
 rm -f "$SYMLINKED" "$MANAGED/feat-symlinked"
 
+section 'new'
+
+launch_reset
+clwt new feat/alpha >/dev/null 2>&1
+check 'new creates a managed worktree' test -d "$MANAGED/feat-alpha"
+check_equals 'new names the worktree from the branch with slashes as dashes' \
+  "$MANAGED/feat-alpha" "$(launched pwd)"
+if git -C "$PRIMARY" worktree list --porcelain | grep -qF "$MANAGED/feat-alpha"; then
+  ok 'new registers the new worktree with git'
+else
+  not_ok 'new registers the new worktree with git'
+fi
+
+# The fixture moved the remote default to `stable` after the clone, so origin/HEAD
+# in the clone still says `main`. stable.txt exists only on `stable` — its presence
+# proves clwt asked the remote what its default is *now* rather than trusting the
+# cached ref.
+check 'new bases the new branch on the current origin default branch' \
+  test -f "$MANAGED/feat-alpha/stable.txt"
+
+check_equals 'new launches claude in the worktree it created' \
+  "$MANAGED/feat-alpha" "$(launched pwd)"
+
+launch_reset
+clwt new feat/beta --yolo >/dev/null 2>&1
+check_equals '--yolo works on new' \
+  '--dangerously-skip-permissions' "$(launched args)"
+
+# Branch-name validation. These become directory names, so they are untrusted
+# input on a filesystem path.
+check_fails 'new rejects a branch name without a type prefix' clwt new nomprefix
+check_output 'new explains that a type prefix is required' 'feat/' clwt new noprefix
+check_fails 'new rejects a branch name failing git check-ref-format' clwt new 'feat/bad..name'
+check_fails 'new rejects a path-traversing branch name' clwt new '../evil'
+check_fails 'new rejects a deeper path-traversing branch name' clwt new 'feat/../../evil'
+check_fails 'new rejects a branch name containing whitespace' clwt new 'feat/a b'
+check_fails 'new requires a branch argument' clwt new
+
+check 'no traversal escaped the managed root' test ! -e "$HOME/github/.worktrees/owner/evil"
+check 'no traversal escaped to the home directory' test ! -e "$HOME/evil"
+
+# A directory squatting on the target path produces a confusing failure from
+# `git worktree add`; clwt should catch it first.
+mkdir -p "$MANAGED/feat-occupied"
+check_fails 'new refuses when the target path exists but is not a registered worktree' \
+  clwt new feat/occupied
+check_output 'new explains that the target path is occupied' \
+  'exists' clwt new feat/occupied
+rmdir "$MANAGED/feat-occupied"
+
+# An existing local branch that is not checked out anywhere is `branch`'s job.
+git -C "$PRIMARY" branch feat/dormant >/dev/null 2>&1
+check_fails 'new fails when the local branch already exists but is unchecked out' \
+  clwt new feat/dormant
+check_output 'new points at clwt branch when the local branch already exists' \
+  'clwt branch' clwt new feat/dormant
+
 # -------------------------------------------------------------------- install
 
 section 'install'

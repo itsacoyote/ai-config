@@ -225,10 +225,92 @@ require_managed_worktree() {
   esac
 }
 
+# Asks the remote what its default branch is *now*. Deliberately not
+# origin/HEAD, which is cached at clone time and goes stale the moment the
+# repository's default branch changes — branching from a stale default is a
+# quiet way to build on the wrong base.
+default_remote_branch() {
+  local ref
+  ref=$(git ls-remote --symref origin HEAD 2>/dev/null |
+    sed -n 's|^ref: refs/heads/\([^[:space:]]*\).*|\1|p' | head -1)
+  [[ -n $ref ]] || die 'cannot determine the current origin default branch'
+  printf '%s\n' "$ref"
+}
+
+worktree_name_for_branch() {
+  printf '%s\n' "${1//\//-}"
+}
+
+# The branch name has already passed check-ref-format, but it is about to become
+# a directory name, so it gets a second, narrower check against the character set
+# actually safe in a path segment.
+validate_worktree_name() {
+  case $1 in
+    '' | . | .. | *..* | */* | *[!A-Za-z0-9._-]*)
+      die "branch name does not produce a safe directory name: $1"
+      ;;
+  esac
+}
+
+registered_at() {
+  local wanted=$1 line
+  while IFS= read -r line; do
+    if [[ $line == "worktree $wanted" ]]; then
+      return 0
+    fi
+  done < <(git worktree list --porcelain)
+  return 1
+}
+
+# A stale directory squatting on the target path makes `git worktree add` fail
+# with a message about the path being unusable, which sends you looking in the
+# wrong place. Catch it here and say what is actually wrong.
+ensure_available_path() {
+  local path=$1
+  [[ ! -L $path ]] || die "target path must not be a symlink: $path"
+  if [[ -e $path ]]; then
+    registered_at "$path" ||
+      die "target path exists but is not a registered worktree: $path"
+  fi
+}
+
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
   launch "$primary"
+}
+
+cmd_new() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'new requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} existing base name target
+  validate_branch "$branch"
+  [[ $branch == */* ]] ||
+    die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
+
+  if existing=$(branch_worktree "$branch"); then
+    require_managed_worktree "$existing"
+    note "reusing existing worktree for $branch"
+    launch "$existing"
+  fi
+
+  if git show-ref --verify --quiet "refs/heads/$branch"; then
+    die "local branch already exists but is not checked out: $branch (use 'clwt branch $branch')"
+  fi
+
+  name=$(worktree_name_for_branch "$branch")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+
+  base=$(default_remote_branch)
+  note "fetching origin/$base"
+  git fetch --quiet origin "refs/heads/$base:refs/remotes/origin/$base"
+
+  mkdir -p "$managed_root"
+  git worktree add -b "$branch" "$target" "origin/$base"
+  launch "$target"
 }
 
 cmd_open() {
@@ -392,12 +474,12 @@ main() {
       shift || true
       cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
-    root | open)
+    root | open | new)
       shift || true
       require_repo
       "cmd_$command" "$@"
       ;;
-    new | branch | pr | remove | prune)
+    branch | pr | remove | prune)
       not_implemented "$command"
       ;;
     *)
