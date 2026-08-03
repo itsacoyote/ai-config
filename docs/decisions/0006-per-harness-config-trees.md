@@ -26,9 +26,11 @@ Two things have changed since:
   the copies diverge freely**, rather than abstract it and enforce parity. Divergence is
   expected — the harnesses differ enough that the trees would grow apart legitimately.
 
-Both harnesses read a root `AGENTS.md`, which becomes the shared mechanism: always-on
-conventions live in it directly, and (for Codex) it routes to plain-markdown skill files
-("when committing, read `skills/git-commit.md`").
+Both harnesses read a root `AGENTS.md`, which carries the always-on conventions directly.
+For skills, Codex has its own GA native mechanism — `.agents/skills/<name>/SKILL.md` with
+`name`/`description` frontmatter, invoked explicitly (`$name`) or implicitly by description
+match — so the codex tree ships skills in that layout rather than routing to them from
+AGENTS.md prose.
 
 ## Decision
 
@@ -40,8 +42,11 @@ Add two self-contained top-level trees, `codex/` and `pi/`, beside `.claude/`:
   checksums, no catalog, no validator, no parity obligation, and no instruction anywhere
   to keep the trees aligned. Editing `.claude/` never obligates touching `codex/` or `pi/`,
   and vice versa.
-- Porting a skill means rewriting it as plain markdown: strip frontmatter, `Skill()`
-  invocation, subagent references, and Claude tool syntax; keep the methodology.
+- Porting a skill means rewriting it for the target harness: for Codex, a
+  `.agents/skills/<name>/SKILL.md` with `name`/`description` frontmatter and no Claude
+  mechanics (`Skill()` invocation, subagent references, Claude tool syntax, `.claude/`
+  paths); keep the methodology. Substance the Claude version pulls from other skills,
+  rules, scripts, or templates is inlined, since none of those travel.
 - The first pass is minimal: `codex/` gets AGENTS.md, a README, and the three git skills;
   `pi/` gets only AGENTS.md. The Pi workflow is deliberately deferred to its own feature —
   Pi's minimalism demands its own design, not a copy of Codex's.
