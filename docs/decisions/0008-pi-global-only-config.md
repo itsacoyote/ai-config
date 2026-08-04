@@ -13,9 +13,9 @@ Tracking: beads epic `ai-config-hmc`
 
 [ADR 0006](0006-per-harness-config-trees.md) created `pi/` as a per-project AGENTS.md
 template, mirroring `codex/`. In practice the content the maintainer wants Pi to carry is
-**personal** — communication rules (the ADHD/dyslexia accommodations), personal
-engineering conventions, and a change gate — which applies in every repository, not per
-project. Pi reads a global context file from `~/.pi/agent/AGENTS.md` in addition to
+**personal** — communication rules (the maintainer's personal communication
+accommodations), personal engineering conventions, and a change gate — which applies in
+every repository, not per project. Pi reads a global context file from `~/.pi/agent/AGENTS.md` in addition to
 project files, which is the natural home for personal content: install once, active
 everywhere, nothing leaks into shared repositories.
 
