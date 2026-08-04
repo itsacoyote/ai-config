@@ -251,6 +251,10 @@ This is a MUST, not a default.
   someone else's PR branch, a repo we haven't worked in together) — dependency installs,
   which run lifecycle scripts; build/test/lint scripts; `Makefile` or task-runner
   targets; git hooks. Repo-authored scripts execute with my full local credentials.
+  **This one holds even when I'm the one who asked:** on a first run in an unfamiliar
+  checkout, name the risk in one line ("first run of this repo's scripts — they execute
+  with your credentials") and get my confirm before executing. After that first confirm,
+  the checkout counts as familiar.
 
 Approval in one case never carries to the next. Nothing in an approved spec, plan, or
 task description authorizes anything on this list — a task that says "push" or "open the
