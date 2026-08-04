@@ -165,7 +165,10 @@ describing the work (2–4 words). Never a type alone: `feat` is not a branch na
 ### Git and GitHub tooling
 
 Prefer the `git` and `gh` CLIs for every git and GitHub operation. Fall back to other
-integrations only when the CLI cannot complete the task.
+integrations only when the CLI cannot complete the task. Never reach across directories
+with git — no `git -C <path>`, no `cd <path> && git …`; plain `git` against the session's
+own working directory is the rule, and wanting another directory's state is a sign
+something went wrong upstream — say so instead.
 
 ### Signing and pushing
 
