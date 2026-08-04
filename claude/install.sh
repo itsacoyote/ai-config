@@ -139,7 +139,7 @@ TEMPLATE="$SRC/settings.json"
 # real global settings file (absolute /Users/<name>/.claude/...). Comparing
 # hook/statusLine commands verbatim would re-report them forever, so both
 # sides collapse any path ending in /.claude/ to a canonical marker.
-normalize() { sed 's|[^ "]*/\.claude/|<claude>/|g'; }
+normalize() { sed 's|[^[:space:]"]*/\.claude/|<claude>/|g'; }
 
 globals_json() {
   # Concatenated jq output of "$1" applied to whichever global files exist.

@@ -223,6 +223,39 @@ else
   ok 'merge report treats ~ and absolute statusline forms as equal'
 fi
 
+# Event pairing: the same command registered under a DIFFERENT event must
+# still be reported missing for the template's event. The command here is a
+# bare path (no `bash ` prefix) — normalization must not swallow the event
+# name across the tab separator ([^[:space:]"] not [^ "]). Replacing the
+# jq `.key as $e` pairing with a constant string must turn this red.
+H11="$TMP/h11"; mkdir -p "$H11/.claude"
+cat > "$H11/.claude/settings.json" <<'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      { "hooks": [ { "command": "~/.claude/hooks/h.sh", "type": "command" } ], "matcher": "" }
+    ]
+  }
+}
+EOF
+FIXBARE="$TMP/fixture-bare"
+make_fixture "$FIXBARE"
+cat > "$FIXBARE/settings.json" <<'EOF'
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "command": "~/.claude/hooks/h.sh", "type": "command" } ], "matcher": "" }
+    ]
+  }
+}
+EOF
+OUT="$(cd "$TMP" && HOME="$H11" bash "$FIXBARE/install.sh" 2>&1)"
+if printf '%s' "$OUT" | grep -q 'missing hook.*SessionStart'; then
+  ok 'hook under a different global event is still reported for its own event'
+else
+  not_ok "hook under a different global event is still reported for its own event (out='$OUT')"
+fi
+
 # The git -C deny is never suggested for migration — global deny is absolute
 # and the maintainer keeps a deliberate scoped git -C allow globally.
 run_install "$H1"
