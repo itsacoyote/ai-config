@@ -1,10 +1,11 @@
 # AI Config
 
-A portable, copy-paste library of [Claude Code](https://docs.claude.com/en/docs/claude-code) **skills, agents, rules, and references**. It gives Claude a structured, manual feature-development workflow — **Define → Research → Plan → Implement → Validate → Document** — plus a deep bench of engineering-quality skills (testing, security, API design, frontend, git, docs).
+A portable library of [Claude Code](https://docs.claude.com/en/docs/claude-code) **skills, agents, rules, and references**. It gives Claude a structured, manual feature-development workflow — **Define → Research → Plan → Implement → Validate → Document** — plus a deep bench of engineering-quality skills (testing, security, API design, frontend, git, docs).
 
 It runs **manual by default** — you drive each step — with an optional **supervised orchestrator** (`autorun`) that runs the post-Define steps for you, implementing one task at a time in fresh subagents while keeping permissions on and stopping at a ready-for-review PR. There's deliberately no *unattended* runner yet — the human stays in the loop at two gates (Define and the PR) and approves actions as they happen.
 
-Drop `claude/` into any project and the workflow and skills come with it.
+Run `claude/install.sh` once and every project on the machine gets the workflow
+(see [Installing the library](#installing-the-library)).
 
 ---
 
@@ -34,7 +35,7 @@ Run the steps in order; advance only when the previous step's output is in hand.
 
 State and tasks flow through **[beads](https://github.com/gastownhall/beads)** (the `bd` CLI) — it is required. Workflow skills hard-stop and redirect to `setup-beads` when beads is absent. A feature becomes an epic, plan tasks become child issues, review findings become issues. There is no `.docs/` folder or `context.yaml` — beads is the system of record.
 
-Run the **`setup-beads`** skill to install `bd` and initialize an isolated local database (nothing committed by default). The committed session-start gate hook (`claude/hooks/beads-gate.sh`) warns when beads is missing and injects current task context when it's present.
+Run the **`setup-beads`** skill to install `bd` and initialize an isolated local database (nothing committed by default). The session-start gate hook (`claude/hooks/beads-gate.sh`, installed to `~/.claude/hooks`) stays silent where beads is absent and injects current task context where it's present.
 
 ---
 
@@ -230,7 +231,9 @@ job is to recommend the command; you run it. `list`, `remove`, and `prune` don't
 launch anything, so Claude can run those.
 
 Because the session starts already rooted in the right worktree, `git -C` is never
-needed — `Bash(git -C *)` is in `permissions.deny`.
+needed — the settings *template* carries a `Bash(git -C *)` deny, which the installer
+flags do-not-migrate (a global deny can't be re-allowed per project); the `clwt` skill
+treats avoiding `git -C` as a convention.
 
 ### Untracked files and the issue database
 
@@ -307,7 +310,7 @@ orchestrator. See the `feature-workflow` skill for the map.
 [beads](https://github.com/gastownhall/beads) is required — the workflow records
 features/tasks/findings as beads issues and hard-stops when beads is absent. Run
 the `setup-beads` skill to install and initialize it. See
-`claude/references/beads.md`.
+`~/.claude/references/beads.md`.
 
 ## Conventions
 

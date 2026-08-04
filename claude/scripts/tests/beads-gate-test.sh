@@ -42,8 +42,13 @@ GATE="$FAKE_CLAUDE/hooks/beads-gate.sh"
 # beads install.
 STUB_BIN="$TMP/bin"
 mkdir -p "$STUB_BIN"
-cat > "$STUB_BIN/bd" <<'EOF'
+# The stub logs its arguments — the present-case assertions pin the exact bd
+# invocation (`ready -n 3`, the context-budget cap from d228380), which an
+# argument-ignoring stub would let regress silently.
+BD_LOG="$TMP/bd-invocations.log"
+cat > "$STUB_BIN/bd" <<EOF
 #!/bin/sh
+echo "\$*" >> "$BD_LOG"
 echo "stub-ready-output"
 EOF
 chmod +x "$STUB_BIN/bd"
@@ -117,6 +122,20 @@ if [ "$GATE_STATUS" = 0 ] && printf '%s' "$GATE_OUT" | grep -q 'stub-ready-outpu
   ok 'beads repo: emits ready-summary JSON'
 else
   not_ok "beads repo: emits ready-summary JSON (status=$GATE_STATUS out='$GATE_OUT')"
+fi
+
+# Regression pins for the present-case content, not just its presence:
+# `-n 3` is the SessionStart context-budget cap (added in d228380) and the
+# system-of-record preamble is what tells the model beads is authoritative.
+if grep -qx 'ready -n 3' "$BD_LOG"; then
+  ok 'present case invokes bd ready -n 3 (context-budget cap intact)'
+else
+  not_ok "present case invokes bd ready -n 3 (log: $(cat "$BD_LOG" 2>/dev/null))"
+fi
+if printf '%s' "$GATE_OUT" | grep -q 'system of record'; then
+  ok 'present case includes the system-of-record preamble'
+else
+  not_ok 'present case includes the system-of-record preamble'
 fi
 
 # Worktrees have no .beads/ of their own — detection must go through the git

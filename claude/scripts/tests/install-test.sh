@@ -279,6 +279,33 @@ else
   not_ok "refuses to run from inside ~/.claude (status=$STATUS)"
 fi
 
+# Guard: a copy of the tree living UNDER the target (e.g. someone cloned into
+# ~/.claude/lib) must refuse — running it would self-copy. Deleting the
+# SRC-inside-target case in install.sh must turn this red.
+H9="$TMP/h9"; mkdir -p "$H9/.claude/lib"
+cp -R "$FIX/." "$H9/.claude/lib/"
+OUT="$(cd "$TMP" && HOME="$H9" bash "$H9/.claude/lib/install.sh" 2>&1)"
+STATUS=$?
+if [ "$STATUS" != 0 ] && printf '%s' "$OUT" | grep -qi 'refus'; then
+  ok 'refuses to run a copy living inside ~/.claude'
+else
+  not_ok "refuses to run a copy living inside ~/.claude (status=$STATUS)"
+fi
+
+# Guard: a stray install.sh with no library next to it must die loudly rather
+# than "install" nothing. Deleting the no-library-content check must turn
+# this red.
+BARE="$TMP/bare"; mkdir -p "$BARE"
+cp "$FIX/install.sh" "$BARE/"
+H10="$TMP/h10"; mkdir -p "$H10"
+OUT="$(cd "$TMP" && HOME="$H10" bash "$BARE/install.sh" 2>&1)"
+STATUS=$?
+if [ "$STATUS" != 0 ] && printf '%s' "$OUT" | grep -qi 'no library content'; then
+  ok 'dies when no library content sits next to the script'
+else
+  not_ok "dies when no library content sits next to the script (status=$STATUS)"
+fi
+
 section 'source resolution'
 
 # The installer resolves its source tree from its own script path, not cwd —

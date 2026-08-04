@@ -21,7 +21,7 @@ For the catalog of skills/agents and the feature workflow they implement, see
 - `claude/references/<name>.md` — shared knowledge multiple skills point to (kept in one
   place so it doesn't drift).
 - `claude/scripts/<name>` — executable tooling. Two kinds live here: helpers a skill
-  shells out to (`worktree-status.sh`, `beads-preflight.sh`) and **developer-facing CLIs**
+  shells out to (`worktree-status.sh`) and **developer-facing CLIs**
   (`clwt`), which the human runs from their own shell rather than an agent invoking.
   Tests go in `claude/scripts/tests/`.
 - `claude/hooks/<name>.sh` — SessionStart hooks, registered in the user's global

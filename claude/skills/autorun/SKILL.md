@@ -209,7 +209,7 @@ where `--dangerously-skip-permissions` is forbidden. **Never** set
 inherit the session's permissions by design.
 
 To keep a supervised run from death-by-prompt, pre-approve the safe, high-frequency operations
-in `claude/settings.local.json` (via `update-config`) — for example:
+in `.claude/settings.local.json` (via `update-config`) — for example:
 
 ```
 Bash(bd *), Bash(git status*), Bash(git diff *), Bash(git log *), <test runner>, <linter>

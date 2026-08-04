@@ -16,15 +16,16 @@ right tree with no path argument. Reaching across directories re-derives a path 
 silently succeeds against the wrong tree when that path is stale, and makes every relative path
 a skill computes wrong.
 
-`Bash(git -C *)` is in `permissions.deny` in `claude/settings.json`, so the call will be
-blocked. That rule removes the habit's default spelling, not the capability —
-`git --git-dir=… --work-tree=…` and `cd <path> && git …` still work and are not denied. Treat
-the rule as a reminder that reaching across directories means something has gone wrong upstream,
-not as a wall to route around. If you genuinely believe you need another worktree's state, say
-so and let the developer decide.
+This is a convention, not a blocked call: the settings **template** carries a
+`Bash(git -C *)` deny, but the installer deliberately flags it do-not-migrate (a global deny
+is absolute — it can't be re-allowed per project, and would break legitimately scoped
+`git -C` use elsewhere). Treat reaching across directories as a sign something has gone
+wrong upstream, not as a wall to route around. If you genuinely believe you need another
+worktree's state, say so and let the developer decide.
 
 To find out where you are, use the `reground` skill or
-`bash claude/scripts/worktree-status.sh` — both report across all worktrees with plain git.
+`bash ${CLAUDE_SKILL_DIR}/../../scripts/worktree-status.sh` — both report across all
+worktrees with plain git.
 
 ## You cannot run the launching subcommands
 

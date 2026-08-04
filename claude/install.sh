@@ -154,12 +154,15 @@ note ""
 note "settings merge report (the installer never edits settings — apply by hand):"
 missing=0
 
-HOOK_FILTER='(.hooks // {}) | to_entries[] | .value[]? | .hooks[]? | .command // empty'
+# Event + command pairs, so a command registered under a DIFFERENT event
+# globally doesn't count as present.
+HOOK_FILTER='(.hooks // {}) | to_entries[] | .key as $e | .value[]? | .hooks[]? | "\($e)\t\(.command // empty)"'
 global_hooks="$(globals_json "$HOOK_FILTER" | normalize)"
-while IFS= read -r cmd; do
+while IFS=$'\t' read -r event cmd; do
   [ -n "$cmd" ] || continue
-  if ! printf '%s\n' "$global_hooks" | grep -Fxq "$(printf '%s' "$cmd" | normalize)"; then
-    note "  missing hook: $cmd (register as a SessionStart hook in your global settings)"
+  pair="$(printf '%s\t%s' "$event" "$cmd" | normalize)"
+  if ! printf '%s\n' "$global_hooks" | grep -Fxq "$pair"; then
+    note "  missing hook: $cmd (register as a $event hook in your global settings)"
     missing=$((missing + 1))
   fi
 done < <(jq -r "$HOOK_FILTER" "$TEMPLATE")
