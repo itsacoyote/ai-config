@@ -1,7 +1,7 @@
 #!/bin/sh
 # diff-scope.sh — resolve the pinned diff scope for a review dispatch.
 #
-# The deterministic git plumbing from .claude/references/diff-scope.md: a spawner
+# The deterministic git plumbing from claude/references/diff-scope.md: a spawner
 # (validate / autorun / document) resolves the scope ONCE and passes the pinned
 # range to every review agent. This emits the canonical payload line:
 #

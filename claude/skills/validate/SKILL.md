@@ -27,7 +27,7 @@ Trivial changes (typo, copy, config) don't need the full gate — a quick `senio
 
 ## Computing the diff scope
 
-Before each spawn, compute the **branch diff scope** and include the line it prints in the agent dispatch (the script is the single source of this git plumbing — see [`.claude/references/diff-scope.md`](../../references/diff-scope.md)):
+Before each spawn, compute the **branch diff scope** and include the line it prints in the agent dispatch (the script is the single source of this git plumbing — see [`claude/references/diff-scope.md`](../../references/diff-scope.md)):
 
 ```bash
 sh ${CLAUDE_SKILL_DIR}/../../references/diff-scope.sh
@@ -46,7 +46,7 @@ Do not advance to the security review until the senior review approves.
 
 ## Round 2 — Security review
 
-1. Recompute the diff scope, then spawn the **`security-scan` agent** (Agent tool). Pass the diff scope (spec and plan if present). **This round is non-optional and must run as an independent agent.** If the `security-scan` agent can't be dispatched — e.g. it isn't installed in `.claude/agents/` — **stop and report a setup defect**; do **not** fall back to reviewing security inline. An in-context security pass defeats the fresh-context independence the round exists for (it's the same context that may have written the code), and a missing agent is fixed by installing it, not worked around.
+1. Recompute the diff scope, then spawn the **`security-scan` agent** (Agent tool). Pass the diff scope (spec and plan if present). **This round is non-optional and must run as an independent agent.** If the `security-scan` agent can't be dispatched — e.g. it isn't installed in `claude/agents/` — **stop and report a setup defect**; do **not** fall back to reviewing security inline. An in-context security pass defeats the fresh-context independence the round exists for (it's the same context that may have written the code), and a missing agent is fixed by installing it, not worked around.
 2. If it returns CRITICAL or HIGH findings: fix each exactly as specified, run the test suite to confirm nothing broke, commit the fixes (`Skill(git-commit)` first), and re-spawn the agent.
 3. Repeat until no CRITICAL or HIGH findings remain — **max 3 fix iterations**. If CRITICAL or HIGH findings persist after 3, stop and report which remain, what was tried, and your assessment of the root cause. Do not attempt a 4th. MEDIUM/LOW/INFO findings are surfaced in the summary but do not block advancement.
 
@@ -73,7 +73,7 @@ Do not advance to QA until the design review approves (or is skipped as a non-fr
 
 Round 2 runs unconditionally, so a normal branch diff is already covered. This backstop catches the failure mode where the security round was **skipped or silently inlined** — a missing agent, an interrupted run — while the work included tasks the planner flagged for security. That is exactly how a scan gets lost without anyone noticing.
 
-Before producing the summary, query beads for epic children carrying the `security-sensitive` label the planning step sets (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)):
+Before producing the summary, query beads for epic children carrying the `security-sensitive` label the planning step sets (see the labels registry in [`claude/references/beads.md`](../../references/beads.md)):
 
 ```bash
 bd list --parent <epic-id> -l security-sensitive --json | jq -r '.[].id'
@@ -88,7 +88,7 @@ If that returns nothing, there is nothing extra to assert — proceed. If it ret
 
 Produce a validation summary: senior verdict + fix-iteration count; security verdict (highest severity found, fix-iteration count, and any unresolved MEDIUM/LOW/INFO items) — plus, if the backstop found any `security-sensitive` task, explicit confirmation the independent scan covered it; design verdict + fix-iteration count (or "skipped — no frontend changes"); QA verdict, coverage, fix-iteration count, and the e2e result; each finding that required a fix and what resolved it; any evidence captured.
 
-Record the validation summary on the feature epic and close out resolved finding issues — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+Record the validation summary on the feature epic and close out resolved finding issues — beads is the system of record. See [`claude/references/beads.md`](../../references/beads.md) for the full model.
 
 Then push the branch (`git push`) to flush any fix commits made during the rounds.
 

@@ -6,7 +6,7 @@ description: Use when opening a pull request — writing its title or body, or r
 # Creating Pull Requests
 
 Related skills: branch names → `branch-names`; commit messages → `git-commit`;
-which tool to open the PR with → the `github-tool-preference` rule (`.claude/rules/github-tool-preference.md`; default: `gh pr create`).
+which tool to open the PR with → the `github-tool-preference` rule (`claude/rules/github-tool-preference.md`; default: `gh pr create`).
 
 ## Step 1 — Run the preflight (discovery)
 

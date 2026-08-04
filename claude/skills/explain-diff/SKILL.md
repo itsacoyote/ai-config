@@ -30,7 +30,7 @@ Pass the `target` for what you're explaining — ask if it's ambiguous:
 
 - **Working tree** — omit the target (uses `git diff` / `--staged`).
 - **A pull request** — the PR number (uses `gh pr diff` / `gh pr view`; see
-  `.claude/rules/github-tool-preference.md`).
+  `claude/rules/github-tool-preference.md`).
 - **A commit range / single commit** — `a..b` / `a...b` (uses `git diff <range>`).
 - **A branch or ref** — the ref name. The script assumes the default branch as the base and says
   so — confirm that's the branch's actual base; that's a judgment call the script can't make.

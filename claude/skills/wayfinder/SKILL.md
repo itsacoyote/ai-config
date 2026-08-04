@@ -81,7 +81,7 @@ Each ticket is a **child issue** of the map; its beads ID is its identity. Its b
 <the decision or investigation this ticket resolves>
 ```
 
-Each ticket carries a `wayfinder:<type>` label — one of `research`, `prototype`, `dialogue`, `task` (see [Ticket types](#ticket-types)). Create tickets with `--no-inherit-labels` so they don't inherit the map's `wayfinder:map` label (children inherit parent labels by default — see [`.claude/references/beads.md`](../../references/beads.md)):
+Each ticket carries a `wayfinder:<type>` label — one of `research`, `prototype`, `dialogue`, `task` (see [Ticket types](#ticket-types)). Create tickets with `--no-inherit-labels` so they don't inherit the map's `wayfinder:map` label (children inherit parent labels by default — see [`claude/references/beads.md`](../../references/beads.md)):
 
 ```bash
 bd create "<ticket title>" -t task --parent <map-id> --no-inherit-labels -l wayfinder:dialogue --silent
@@ -95,7 +95,7 @@ Blocking uses beads' **native** dependency edges — `bd dep add <blocked-id> <b
 bd ready --parent <map-id>       # the frontier
 ```
 
-A ticket claimed by an interrupted session is `in_progress`, so it is invisible to `bd ready` — before declaring the frontier empty, sweep `bd list --parent <map-id> --status in_progress` and resume a stranded ticket rather than concluding there's nothing to do (see the resumability note in [`.claude/references/beads.md`](../../references/beads.md)).
+A ticket claimed by an interrupted session is `in_progress`, so it is invisible to `bd ready` — before declaring the frontier empty, sweep `bd list --parent <map-id> --status in_progress` and resume a stranded ticket rather than concluding there's nothing to do (see the resumability note in [`claude/references/beads.md`](../../references/beads.md)).
 
 The answer isn't part of the body — it's recorded on resolution (see [Work through the map](#work-through-the-map)). Assets created while resolving a ticket are linked from the issue (a comment with the path/URL), not pasted in.
 

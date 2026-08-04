@@ -92,7 +92,7 @@ Review where state lives and how it moves:
 
 Set the bar **adaptively**:
 - If the project defines an a11y standard — a dedicated a11y doc, or an a11y section in `DESIGN.md` — review **against that**.
-- Otherwise, review against **baseline WCAG 2.1 AA** using [`.claude/references/accessibility-checklist.md`](../../references/accessibility-checklist.md), and **note the absence** of a project standard in the verdict (an INFO-level finding — the project has no documented a11y bar).
+- Otherwise, review against **baseline WCAG 2.1 AA** using [`claude/references/accessibility-checklist.md`](../../references/accessibility-checklist.md), and **note the absence** of a project standard in the verdict (an INFO-level finding — the project has no documented a11y bar).
 
 Check keyboard navigation and focus management, ARIA/labels, contrast, and that color isn't the sole carrier of meaning. In **runtime mode**, verify focus order, computed contrast, and the accessibility tree against the live page rather than inferring from markup.
 
@@ -115,7 +115,7 @@ Grade every finding with exactly one of `CRITICAL` / `HIGH` / `MEDIUM` / `LOW` /
   - **What** — the precise problem
   - **Fix** — exactly what to change, not a vague suggestion
 
-File an issue per unresolved finding linked to the feature epic/task, labelled `finding:design` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)).
+File an issue per unresolved finding linked to the feature epic/task, labelled `finding:design` (see the labels registry in [`claude/references/beads.md`](../../references/beads.md)).
 
 ## Read-only
 
@@ -126,8 +126,8 @@ This skill **reports findings; it never edits, commits, or pushes code.** Runnin
 - `frontend-ui-engineering` — the build standard you review against (don't restate it)
 - `find-patterns` — map the component inventory before judging reuse/duplication
 - `api-and-interface-design` — props/interface design for area (c)
-- [`.claude/references/accessibility-checklist.md`](../../references/accessibility-checklist.md) — baseline WCAG 2.1 AA bar
-- [`.claude/references/performance-checklist.md`](../../references/performance-checklist.md) — frontend performance checks
+- [`claude/references/accessibility-checklist.md`](../../references/accessibility-checklist.md) — baseline WCAG 2.1 AA bar
+- [`claude/references/performance-checklist.md`](../../references/performance-checklist.md) — frontend performance checks
 - `browser-testing-with-devtools` — drives the running app for runtime mode via the Chrome DevTools MCP (preferred); Playwright is used as a fallback when the Chrome MCP isn't configured
 - `qa-review` — the testing half (test coverage / e2e evidence); design-review is the frontend/UX/a11y lens, not a test-coverage check
 - `impeccable` — authors design direction and visual craft; design-review audits, it doesn't create

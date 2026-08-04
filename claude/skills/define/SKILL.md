@@ -59,7 +59,7 @@ Avoid TBDs/TODOs/placeholders and contradictions between sections.
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
 Create the feature **epic** with the spec as its body — beads is the system of record.
-See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+See [`claude/references/beads.md`](../../references/beads.md) for the full model.
 
 Do not write step-doc files — there is no `.docs/`.
 

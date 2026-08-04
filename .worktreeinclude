@@ -5,4 +5,4 @@
 # worktree, so copying .beads/ would give the worktree its own forked issue database —
 # writes from the worktree and from other sessions would diverge and be lost. Instead,
 # leave .beads/ out: `bd` resolves the database via the shared git common dir, so a
-# worktree automatically uses the main repo's single .beads/. See .claude/references/beads.md.
+# worktree automatically uses the main repo's single .beads/. See claude/references/beads.md.

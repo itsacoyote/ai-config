@@ -176,7 +176,7 @@ may pull more on a need-to-know basis via read-only commands (`gh pr diff`, read
 file) or `bd show <id>`.* Don't paste the whole PR or every sibling pass into a dispatch.
 
 Each pass returns findings (severity / where / what / why / suggested comment text) and a
-status from [`.claude/references/subagent-status-protocol.md`](../../references/subagent-status-protocol.md).
+status from [`claude/references/subagent-status-protocol.md`](../../references/subagent-status-protocol.md).
 A pass that finds nothing, or sees an empty/docs-only diff, says so — that's a valid no-op, not
 a failure.
 
@@ -219,7 +219,7 @@ trigger to resolve, close, or edit a thread.
 
 ### 5. Record
 
-Per [`.claude/references/beads.md`](../../references/beads.md), and as the **single writer** —
+Per [`claude/references/beads.md`](../../references/beads.md), and as the **single writer** —
 only the orchestrator writes beads; the review agents are read-only on it.
 
 Record a **review epic** for this PR (one per PR — reuse it across runs), **one child task per
@@ -310,7 +310,7 @@ GitHub (resolved via your `gh` login), so it works in any new session or on any 
   and run number come straight from the API). Beads extends this with a per-PR review epic, a
   per-run session record (mode, findings, posted, dropped), and remembered drop-decisions so
   light runs also suppress what you previously declined. See
-  [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+  [`claude/references/beads.md`](../../references/beads.md) for the full model.
 
 ## Guardrails
 
@@ -397,5 +397,5 @@ findings, the orchestrator owns every outward action.
   `pr-tests` / conditional design passes wrap.
 - [`autorun`](../autorun/SKILL.md) — the supervised feature-execution orchestrator this skill's
   structure (lean dispatch, parallel subagents, beads single-writer, permissions-on) mirrors.
-- [`.claude/references/subagent-status-protocol.md`](../../references/subagent-status-protocol.md)
+- [`claude/references/subagent-status-protocol.md`](../../references/subagent-status-protocol.md)
   — the statuses every pass returns.

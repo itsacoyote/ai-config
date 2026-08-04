@@ -53,7 +53,7 @@ Does it hang together and fit the codebase?
 - Naming that says what the code does (not `data`/`handler`/`util`); consistent with existing conventions.
 - Pattern consistency with the surrounding codebase (state, API shape, imports).
 - No interface leakage — public surfaces expose behavior, not internals.
-- Structural smells per the baseline in [`.claude/references/code-smells.md`](../../references/code-smells.md) (Feature Envy, Data Clumps, Shotgun Surgery, …) — judgment calls, labelled as such; a documented repo standard overrides the baseline.
+- Structural smells per the baseline in [`claude/references/code-smells.md`](../../references/code-smells.md) (Feature Envy, Data Clumps, Shotgun Surgery, …) — judgment calls, labelled as such; a documented repo standard overrides the baseline.
 
 ### 4. YAGNI
 
@@ -70,7 +70,7 @@ Cut anything beyond what's required: unused params/options/config, abstraction l
 
 **If it passes**, state "Senior review approved" with one or two sentences on what was reviewed and held up.
 
-File an issue per unresolved finding linked to the feature epic/task, labelled `finding:senior` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)).
+File an issue per unresolved finding linked to the feature epic/task, labelled `finding:senior` (see the labels registry in [`claude/references/beads.md`](../../references/beads.md)).
 
 ## Non-negotiables
 

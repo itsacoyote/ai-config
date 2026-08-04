@@ -26,7 +26,7 @@ Borrow [`doubt-driven-development`](../doubt-driven-development/SKILL.md)'s post
 
 The artifacts from [`planning-and-task-breakdown`](../planning-and-task-breakdown/SKILL.md): the **architecture decisions**, the **file map** (each file's single responsibility + public interface), the **task breakdown** with acceptance criteria, the **dependency graph**, and the **risks** — checked against the **spec** it's supposed to satisfy.
 
-Source them from beads: read the spec from the epic (`bd show <epic>`) and the tasks from its children. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+Source them from beads: read the spec from the epic (`bd show <epic>`) and the tasks from its children. See [`claude/references/beads.md`](../../references/beads.md) for the full model.
 
 ## The seven review areas
 
@@ -72,7 +72,7 @@ A finding's severity isn't enough; the **path back differs**, so mark it:
 
 Conflating the two sends fixable plans back to Define and sends doomed approaches into a revise-and-re-review loop that can never converge. Keep them separate.
 
-File an issue per unresolved finding linked to the feature epic/task, labelled `finding:plan` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)). Surface them for the orchestrator/human to act on — the orchestrator owns the plan revisions and the beads lifecycle, not you.
+File an issue per unresolved finding linked to the feature epic/task, labelled `finding:plan` (see the labels registry in [`claude/references/beads.md`](../../references/beads.md)). Surface them for the orchestrator/human to act on — the orchestrator owns the plan revisions and the beads lifecycle, not you.
 
 ## Red flags in your own review
 

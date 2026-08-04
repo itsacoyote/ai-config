@@ -1,6 +1,6 @@
 # Security Checklist
 
-Actionable quick-ref for web application security: copy-paste snippets and pre-commit checks. For the authoritative preventive guidance and the full OWASP Top 10 prevention map, see `.claude/skills/security-and-hardening/SKILL.md`. For vulnerability detection patterns, see `.claude/skills/security-scan/references/vuln-categories.md`.
+Actionable quick-ref for web application security: copy-paste snippets and pre-commit checks. For the authoritative preventive guidance and the full OWASP Top 10 prevention map, see `claude/skills/security-and-hardening/SKILL.md`. For vulnerability detection patterns, see `claude/skills/security-scan/references/vuln-categories.md`.
 
 ## Table of Contents
 
@@ -119,4 +119,4 @@ res.status(500).json({
 
 ## OWASP Top 10
 
-For the full OWASP Top 10 prevention map (all 10 categories, with code examples), see the canonical preventive home: `.claude/skills/security-and-hardening/SKILL.md#owasp-top-10-prevention`.
+For the full OWASP Top 10 prevention map (all 10 categories, with code examples), see the canonical preventive home: `claude/skills/security-and-hardening/SKILL.md#owasp-top-10-prevention`.

@@ -7,7 +7,7 @@ description: Use when writing, updating, or reviewing tests — adding tests for
 
 ## Overview
 
-Good tests catch regressions and document intended behavior. They test **what** code does (observable behavior), not **how** it does it — so they survive refactors and fail only when behavior actually breaks. This skill is the judgment layer (what to test, at what level, how much). For concrete syntax — structure, assertions, mocking, React/API/E2E examples, and the full anti-pattern table — see [`.claude/references/testing-patterns.md`](../../references/testing-patterns.md).
+Good tests catch regressions and document intended behavior. They test **what** code does (observable behavior), not **how** it does it — so they survive refactors and fail only when behavior actually breaks. This skill is the judgment layer (what to test, at what level, how much). For concrete syntax — structure, assertions, mocking, React/API/E2E examples, and the full anti-pattern table — see [`claude/references/testing-patterns.md`](../../references/testing-patterns.md).
 
 ## When to Use
 

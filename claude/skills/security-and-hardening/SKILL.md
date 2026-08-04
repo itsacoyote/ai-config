@@ -343,11 +343,11 @@ git diff --cached | grep -i "password\|secret\|api_key\|token"
 
 ## Security Review Quick Reference
 
-For a fast pre-commit pass, use `.claude/references/security-checklist.md` — it has copy-paste security headers, CORS configuration, pre-commit grep checks, and dependency audit commands. That file is a quick-ref that links back here for the authoritative prevention guidance.
+For a fast pre-commit pass, use `claude/references/security-checklist.md` — it has copy-paste security headers, CORS configuration, pre-commit grep checks, and dependency audit commands. That file is a quick-ref that links back here for the authoritative prevention guidance.
 
 ## See Also
 
-- `.claude/references/security-checklist.md` — actionable quick-ref: pre-commit checks, copy-paste headers/CORS/error snippets
+- `claude/references/security-checklist.md` — actionable quick-ref: pre-commit checks, copy-paste headers/CORS/error snippets
 - `api-and-interface-design` — where validation belongs at interface boundaries
 - `browser-testing-with-devtools` — verify security headers and responses against the running app
 - `security-scan` — audit existing or changed code for vulnerabilities (the detective counterpart to this preventive skill; its `references/vuln-categories.md` has detection patterns for every OWASP category)

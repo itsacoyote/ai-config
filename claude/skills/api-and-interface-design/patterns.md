@@ -62,7 +62,7 @@ PATCH /api/tasks/123
 These are the API-design-specific applications of TypeScript's type system. For
 the general type-modeling techniques behind them (discriminated unions,
 `as const`, branded types, deriving types from values), follow the `typescript-tips`
-rule (`.claude/rules/typescript-tips.md`) — don't duplicate that guidance, build on it.
+rule (`claude/rules/typescript-tips.md`) — don't duplicate that guidance, build on it.
 
 ### Use Discriminated Unions for Variants
 

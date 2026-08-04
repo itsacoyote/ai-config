@@ -39,7 +39,7 @@ The line carries:
 Example:
 
 ```
-Diff scope: a1b2c3d4..e5f6a7b8 — changed files: .claude/references/diff-scope.md, .claude/agents/senior-review.md
+Diff scope: a1b2c3d4..e5f6a7b8 — changed files: claude/references/diff-scope.md, claude/agents/senior-review.md
 ```
 
 ## How a spawner computes it

@@ -54,4 +54,4 @@ Commit the documentation changes (`Skill(git-commit)` first; stage explicit path
 
 Before you ready the PR, confirm nothing durable is orphaned: `git status --porcelain` should show no untracked file that belongs in the repo (transient scratch is fine). A dangling ADR that the PR description links to is the classic miss — catch it here.
 
-This is also `autorun`'s terminal step: ready the PR and **stop** — never merge or approve, that's the human's gate. File issues for any deliberately-deferred documentation and close out the feature epic — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+This is also `autorun`'s terminal step: ready the PR and **stop** — never merge or approve, that's the human's gate. File issues for any deliberately-deferred documentation and close out the feature epic — beads is the system of record. See [`claude/references/beads.md`](../../references/beads.md) for the full model.

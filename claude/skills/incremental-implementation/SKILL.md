@@ -49,7 +49,7 @@ The loop is **red → green**: a failing test (or a missing capability), then th
 `sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
-When a plan exists (from `planning-and-task-breakdown`), implement its tasks in dependency order, one task per increment. Pull the next task with `bd ready`, `bd update <id> --claim` before starting it, and `bd close <id>` once its commit lands — beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model. Maintain test coverage as you go — don't defer tests to the end (see `writing-tests`).
+When a plan exists (from `planning-and-task-breakdown`), implement its tasks in dependency order, one task per increment. Pull the next task with `bd ready`, `bd update <id> --claim` before starting it, and `bd close <id>` once its commit lands — beads is the system of record. See [`claude/references/beads.md`](../../references/beads.md) for the full model. Maintain test coverage as you go — don't defer tests to the end (see `writing-tests`).
 
 ### Review checkpoints (optional)
 

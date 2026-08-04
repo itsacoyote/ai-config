@@ -123,7 +123,7 @@ Each task follows this structure:
 ```
 
 Alongside the body, each task carries **routing labels** (set with `-l` at create — see the
-labels registry in [`.claude/references/beads.md`](../../references/beads.md)), and these plus
+labels registry in [`claude/references/beads.md`](../../references/beads.md)), and these plus
 skill hints feed `autorun` (the supervised-autonomous orchestrator):
 
 - **`risk:review-per-task`** (label) sets the senior-review cadence — apply it to tasks touching sensitive or high-blast-radius areas (auth, payments, migrations, public API, crypto, concurrency, or anything the spec flags). **No label means `end-of-run`** — the always-run `validate` pass covers those.
@@ -138,7 +138,7 @@ All three are still useful without autorun — they document where review attent
 `sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh`. If it exits non-zero, **stop** — do not
 proceed without beads — and tell the user to run the `setup-beads` skill, then retry.
 
-Create one **child issue per task** under the feature epic — put the file-map slice, named tests, and skill hints in each issue body, and set the **routing labels at create** (`-l risk:review-per-task`, `-l security-sensitive`, where applicable) — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically. Beads is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+Create one **child issue per task** under the feature epic — put the file-map slice, named tests, and skill hints in each issue body, and set the **routing labels at create** (`-l risk:review-per-task`, `-l security-sensitive`, where applicable) — and wire ordering with `bd dep add`. Implement then pulls work with `bd ready`. Capture each new issue's ID from `bd create --silent` (or `--json`), not by scraping output; consider `bd create --graph` to build the whole task graph atomically. Beads is the system of record. See [`claude/references/beads.md`](../../references/beads.md) for the full model.
 
 Do not write a `3_plan.md` or any step-doc file — there is no `.docs/`.
 

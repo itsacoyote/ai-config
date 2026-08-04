@@ -17,7 +17,7 @@
 #   ℹ body word count
 #
 # Usage:  check-skill.sh <skill-dir|SKILL.md>     check one
-#         check-skill.sh --all                     check every .claude/skills/*/SKILL.md
+#         check-skill.sh --all                     check every skill (claude/skills or .claude/skills)
 # Exit:   0 all checked skills pass; 1 a hard check failed; 2 usage.
 
 set -u
@@ -79,7 +79,9 @@ check_one() {  # $1 = SKILL.md path; echoes results; returns 1 on hard fail
     [ -n "$target" ] || continue
     case "$target" in
       /*)        path="$ROOT/${target#/}" ;;   # repo-absolute
-      .claude/*) path="$ROOT/$target" ;;       # repo-root-relative
+      # Both prefixes: this library lives at claude/, but the script also runs
+      # in target projects whose skills live at the platform's .claude/.
+      .claude/*|claude/*) path="$ROOT/$target" ;;  # repo-root-relative
       *)         path="$dir/$target" ;;        # relative to this skill
     esac
     [ -e "$path" ] || { echo "  ✗ dead link: $l"; fail=1; }
@@ -97,7 +99,10 @@ check_one() {  # $1 = SKILL.md path; echoes results; returns 1 on hard fail
 overall=0
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then sed -n '2,24p' "$0"; exit 0; fi
 if [ "${1:-}" = "--all" ]; then
-  for d in "$ROOT"/.claude/skills/*/; do
+  # Both roots: claude/skills in this library's repo, .claude/skills in a
+  # target project the script was copied into. Only existing dirs iterate.
+  for d in "$ROOT"/claude/skills/*/ "$ROOT"/.claude/skills/*/; do
+    [ -d "$d" ] || continue
     check_one "$d/SKILL.md" || overall=1
     echo
   done

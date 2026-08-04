@@ -60,7 +60,7 @@ Return an **orientation brief** with these parts:
   security/senior/test passes should weigh.
 
 Close with a status from
-[`.claude/references/subagent-status-protocol.md`](../references/subagent-status-protocol.md) —
+[`claude/references/subagent-status-protocol.md`](../references/subagent-status-protocol.md) —
 **DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED** — plus a one-line summary. You cannot ask
 the human (no `AskUserQuestion`) and cannot spawn subagents (no `Agent`), so you **always return
 a status, never hang.** When you can't proceed or can't decide, pick `NEEDS_CONTEXT` or `BLOCKED`

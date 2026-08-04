@@ -4,7 +4,7 @@ A portable, copy-paste library of [Claude Code](https://docs.claude.com/en/docs/
 
 It runs **manual by default** — you drive each step — with an optional **supervised orchestrator** (`autorun`) that runs the post-Define steps for you, implementing one task at a time in fresh subagents while keeping permissions on and stopping at a ready-for-review PR. There's deliberately no *unattended* runner yet — the human stays in the loop at two gates (Define and the PR) and approves actions as they happen.
 
-Drop `.claude/` into any project and the workflow and skills come with it.
+Drop `claude/` into any project and the workflow and skills come with it.
 
 ---
 
@@ -34,7 +34,7 @@ Run the steps in order; advance only when the previous step's output is in hand.
 
 State and tasks flow through **[beads](https://github.com/gastownhall/beads)** (the `bd` CLI) — it is required. Workflow skills hard-stop and redirect to `setup-beads` when beads is absent. A feature becomes an epic, plan tasks become child issues, review findings become issues. There is no `.docs/` folder or `context.yaml` — beads is the system of record.
 
-Run the **`setup-beads`** skill to install `bd` and initialize an isolated local database (nothing committed by default). The committed session-start gate hook (`.claude/hooks/beads-gate.sh`) warns when beads is missing and injects current task context when it's present.
+Run the **`setup-beads`** skill to install `bd` and initialize an isolated local database (nothing committed by default). The committed session-start gate hook (`claude/hooks/beads-gate.sh`) warns when beads is missing and injects current task context when it's present.
 
 ---
 
@@ -148,7 +148,7 @@ Thin wrappers that run a review skill in an **isolated context** — the value i
 
 ## Rules
 
-Always-on conventions in [`.claude/rules/`](.claude/rules) — auto-applied, no invocation needed.
+Always-on conventions in [`claude/rules/`](claude/rules) — auto-applied, no invocation needed.
 
 | Rule | |
 |------|--|
@@ -159,7 +159,7 @@ Always-on conventions in [`.claude/rules/`](.claude/rules) — auto-applied, no 
 
 ## References
 
-Shared knowledge in [`.claude/references/`](.claude/references) that skills point to (kept in one place so it doesn't drift across skills):
+Shared knowledge in [`claude/references/`](claude/references) that skills point to (kept in one place so it doesn't drift across skills):
 
 | Reference | Used by |
 |-----------|---------|
@@ -175,7 +175,7 @@ Shared knowledge in [`.claude/references/`](.claude/references) that skills poin
 
 ## `clwt` — worktree CLI
 
-A small Bash CLI at `.claude/scripts/clwt` that manages this repository's git
+A small Bash CLI at `claude/scripts/clwt` that manages this repository's git
 worktrees and launches Claude Code inside them. **You run it from your shell, not
 from inside Claude.**
 
@@ -185,7 +185,7 @@ or logged out. The repository must have an `origin` remote, since the managed pa
 derived from it.
 
 ```bash
-.claude/scripts/clwt install     # symlinks clwt + its completion; run once
+claude/scripts/clwt install     # symlinks clwt + its completion; run once
 ```
 
 That links `~/.local/bin/clwt` and, for Tab completion,
@@ -250,7 +250,7 @@ tracker won't have to reimplement git internals to do the same.
 No CI and no package manager here, so the suite is manual:
 
 ```bash
-bash .claude/scripts/tests/clwt-test.sh
+bash claude/scripts/tests/clwt-test.sh
 ```
 
 It builds a throwaway world under a fake `$HOME` — a bare remote, a clone, and stub
@@ -261,12 +261,12 @@ Exits non-zero on any failure.
 
 ## Using this in another project
 
-1. **Copy `.claude/` into the target project's root** — skills, agents, rules, and references all live there and travel together. (When copying an individual skill, bring any `.claude/references/` file it points to as well.)
+1. **Copy `claude/` into the target project's root** — skills, agents, rules, and references all live there and travel together. (When copying an individual skill, bring any `claude/references/` file it points to as well.)
 2. **The project's own `CLAUDE.md` does not come from here** — this repo's `CLAUDE.md` documents *this* repo. To orient Claude to the workflow in the target project, paste the snippet below into that project's `CLAUDE.md` and adapt it.
 3. **Optionally copy `.mcp.json`** (see [MCP servers](#mcp-servers)).
 4. Open Claude Code in the project and start with `/define` (or read `feature-workflow` first).
 
-> **Note:** `.claude/settings.json` carries `permissions.deny: ["Bash(git -C *)"]`, which
+> **Note:** `claude/settings.json` carries `permissions.deny: ["Bash(git -C *)"]`, which
 > travels with the copy. It exists because a `clwt`-launched session is already rooted in
 > the right worktree — in a project without `clwt`, where `git -C` may be in legitimate
 > use, delete that one line. `clwt` itself is repo-agnostic and works in any project with
@@ -292,7 +292,7 @@ orchestrator. See the `feature-workflow` skill for the map.
 [beads](https://github.com/gastownhall/beads) is required — the workflow records
 features/tasks/findings as beads issues and hard-stops when beads is absent. Run
 the `setup-beads` skill to install and initialize it. See
-`.claude/references/beads.md`.
+`claude/references/beads.md`.
 
 ## Conventions
 
@@ -305,7 +305,7 @@ the `setup-beads` skill to install and initialize it. See
 
 ## Other harnesses (Codex, Pi)
 
-`.claude/` is Claude Code-only. Two sibling trees carry the git conventions to other
+`claude/` is Claude Code-only. Two sibling trees carry the git conventions to other
 harnesses, each self-contained and copied into a target project on its own:
 
 - **[`codex/`](codex/)** — for the Codex CLI: an `AGENTS.md` conventions file plus the
@@ -314,9 +314,9 @@ harnesses, each self-contained and copied into a target project on its own:
 - **[`pi/`](pi/)** — for [Pi](https://pi.dev): an `AGENTS.md` conventions file only, for
   now — the Pi workflow is a future feature.
 
-There is **no sync** between `.claude/`, `codex/`, and `pi/`: content was duplicated at
+There is **no sync** between `claude/`, `codex/`, and `pi/`: content was duplicated at
 porting time and diverges freely
-([ADR 0006](docs/decisions/0006-per-harness-config-trees.md)). `.claude/` is canonical
+([ADR 0006](docs/decisions/0006-per-harness-config-trees.md)). `claude/` is canonical
 for this repo's own work.
 
 ---
@@ -337,7 +337,7 @@ Both are optional — skills degrade gracefully when a server isn't present (e.g
 ## Repo layout
 
 ```text
-.claude/
+claude/
 ├── skills/        # the skills above (one folder each, SKILL.md + optional files)
 ├── agents/        # the review/implementer agents above (one .md each)
 ├── rules/         # always-on conventions
@@ -345,8 +345,8 @@ Both are optional — skills degrade gracefully when a server isn't present (e.g
 ├── hooks/         # SessionStart hooks (beads gate, session orientation)
 ├── scripts/       # clwt, worktree-status.sh, and their tests
 └── settings.json  # hooks, permission allow/deny, statusline
-codex/             # Codex CLI config: AGENTS.md + native skills (not synced with .claude/)
-pi/                # Pi config: AGENTS.md only (not synced with .claude/)
+codex/             # Codex CLI config: AGENTS.md + native skills (not synced with claude/)
+pi/                # Pi config: AGENTS.md only (not synced with claude/)
 archive/           # the previous automated pipeline, kept for reference
 CLAUDE.md          # how to work IN this repo (does not travel to other projects)
 ```

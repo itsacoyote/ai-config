@@ -47,7 +47,7 @@ When the app runs and `browser-testing-with-devtools` (or Playwright) is availab
 - **Gaps** — list each: type (unit/integration/e2e), what's missing (the specific behavior/story/path), and the test required (what it must assert).
 - **Blocked** — e2e couldn't reach green after 3 attempts, or a required runtime is missing. Report the per-attempt log; don't approve.
 
-File an issue per gap linked to the feature epic/task, labelled `finding:qa` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)).
+File an issue per gap linked to the feature epic/task, labelled `finding:qa` (see the labels registry in [`claude/references/beads.md`](../../references/beads.md)).
 
 ## Non-negotiables
 

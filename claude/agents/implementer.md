@@ -61,7 +61,7 @@ session. Never assume bypass.
 ## Return
 
 Close your turn with a status from
-[`.claude/references/subagent-status-protocol.md`](../references/subagent-status-protocol.md)
+[`claude/references/subagent-status-protocol.md`](../references/subagent-status-protocol.md)
 — **DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED** — plus a short summary (what you
 built, which named tests pass, the commit subject). For the non-DONE statuses, give the
 specifics the orchestrator needs to act.

@@ -180,7 +180,7 @@ interface surface the current task actually covers.
 
 For general TypeScript type-modeling techniques (discriminated unions, `as const`,
 branded types, deriving types from values), follow the `typescript-tips` rule
-(`.claude/rules/typescript-tips.md`, loaded into context automatically) rather than
+(`claude/rules/typescript-tips.md`, loaded into context automatically) rather than
 restating them here.
 
 ## Common Rationalizations

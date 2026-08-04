@@ -322,8 +322,8 @@ function useToggleTask() {
 
 ## See Also
 
-- `.claude/references/accessibility-checklist.md` — detailed WCAG 2.1 AA requirements and testing tools
-- `.claude/references/performance-checklist.md` — frontend performance checks
+- `claude/references/accessibility-checklist.md` — detailed WCAG 2.1 AA requirements and testing tools
+- `claude/references/performance-checklist.md` — frontend performance checks
 - `browser-testing-with-devtools` — verify the UI, accessibility tree, console, and responsiveness against the running page (don't ship UI you haven't seen in a browser)
 - `/impeccable` — deliberate, deeper design workflow (shape, craft, critique, audit, polish). Invoke explicitly when you want design direction and visual craft beyond these implementation conventions.
 

@@ -37,7 +37,7 @@ This is a narrower window than `senior-review`, which reviews the entire branch 
 
 Run as a single named pass: **Simplification + YAGNI + Clarity/Naming**.
 
-Work through the diff against the [criteria below](#simplification-and-yagni-criteria) and the smell baseline in [`.claude/references/code-smells.md`](../../references/code-smells.md) — a fixed set of Fowler smells that applies even when the repo documents no standards. Smells are always judgment calls ("possible Feature Envy"), a documented repo standard overrides them, and **skip anything tooling already enforces** (formatter, linter, typechecker) — `project-checks` front-loads those; review effort belongs on the calls tooling can't make.
+Work through the diff against the [criteria below](#simplification-and-yagni-criteria) and the smell baseline in [`claude/references/code-smells.md`](../../references/code-smells.md) — a fixed set of Fowler smells that applies even when the repo documents no standards. Smells are always judgment calls ("possible Feature Envy"), a documented repo standard overrides them, and **skip anything tooling already enforces** (formatter, linter, typechecker) — `project-checks` front-loads those; review effort belongs on the calls tooling can't make.
 
 For each finding, note severity, location, the problem, and the exact fix.
 
@@ -80,7 +80,7 @@ Flag names that obscure intent:
 - **Misleading names.** A function named `getUser` that also mutates; a variable named `result` used for a list of items; a boolean named `flag`.
 - **Inconsistent casing or style.** Mixed `camelCase` / `snake_case` in the same file; inconsistent naming patterns relative to the surrounding codebase (see `find-patterns` for conventions).
 - **Abbreviations that save two characters.** `mgr`, `cfg`, `usr`, `idx` in non-loop contexts where the full word fits easily.
-- **TypeScript-specific naming issues.** See [`.claude/rules/typescript-tips.md`](../../rules/typescript-tips.md) for: over-annotation that widens types, `any` instead of `unknown`, `as` casts that hide unsafe assumptions, enum names where literal unions would be clearer.
+- **TypeScript-specific naming issues.** See [`claude/rules/typescript-tips.md`](../../rules/typescript-tips.md) for: over-annotation that widens types, `any` instead of `unknown`, `as` casts that hide unsafe assumptions, enum names where literal unions would be clearer.
 
 ## Verdict
 
@@ -106,7 +106,7 @@ Use the severity scale as follows for efficiency findings:
 
 `CRITICAL` is reserved for findings that indicate a fundamental structural problem worth stopping work for. Rare in a pure efficiency review; use it when the architecture choice will make correct behavior impossible or force a large rewrite later.
 
-File an issue per unresolved finding linked to the feature task, labelled `finding:efficiency` (see the labels registry in [`.claude/references/beads.md`](../../references/beads.md)).
+File an issue per unresolved finding linked to the feature task, labelled `finding:efficiency` (see the labels registry in [`claude/references/beads.md`](../../references/beads.md)).
 
 ## Non-negotiables
 

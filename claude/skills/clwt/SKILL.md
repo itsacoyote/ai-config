@@ -6,7 +6,7 @@ description: Use when the developer asks to create, open, list, or tear down a g
 # clwt
 
 `clwt` manages this repository's worktrees and launches Claude Code inside them. It lives at
-`.claude/scripts/clwt` and installs onto the developer's `PATH` with `clwt install`.
+`claude/scripts/clwt` and installs onto the developer's `PATH` with `clwt install`.
 
 ## You are already in the right worktree — use plain git
 
@@ -16,7 +16,7 @@ right tree with no path argument. Reaching across directories re-derives a path 
 silently succeeds against the wrong tree when that path is stale, and makes every relative path
 a skill computes wrong.
 
-`Bash(git -C *)` is in `permissions.deny` in `.claude/settings.json`, so the call will be
+`Bash(git -C *)` is in `permissions.deny` in `claude/settings.json`, so the call will be
 blocked. That rule removes the habit's default spelling, not the capability —
 `git --git-dir=… --work-tree=…` and `cd <path> && git …` still work and are not denied. Treat
 the rule as a reminder that reaching across directories means something has gone wrong upstream,
@@ -24,7 +24,7 @@ not as a wall to route around. If you genuinely believe you need another worktre
 so and let the developer decide.
 
 To find out where you are, use the `reground` skill or
-`bash .claude/scripts/worktree-status.sh` — both report across all worktrees with plain git.
+`bash claude/scripts/worktree-status.sh` — both report across all worktrees with plain git.
 
 ## You cannot run the launching subcommands
 

@@ -114,7 +114,7 @@ while `bd ready` lists an implementable task (skip the epic / non-leaf issues):
 
 Find stranded tasks with `bd list --status in_progress` scoped to the epic.
 
-Statuses follow [`.claude/references/subagent-status-protocol.md`](../../references/subagent-status-protocol.md).
+Statuses follow [`claude/references/subagent-status-protocol.md`](../../references/subagent-status-protocol.md).
 You own the beads lifecycle (`claim`/`close`) and the terminal push; the implementer only
 commits.
 
@@ -145,7 +145,7 @@ Hybrid by default, overridable at launch. Four reviewers, four triggers — each
   migrations, public API, crypto, concurrency). Tasks without the label are not reviewed
   individually — the always-run `validate` pass covers them. (Legacy epics may carry the body
   marker `Risk: review-per-task` instead — see the labels registry in
-  [`.claude/references/beads.md`](../../references/beads.md).)
+  [`claude/references/beads.md`](../../references/beads.md).)
 - **`security-scan` agent (per-task on `security-sensitive` tasks):** triggered by the
   task's `security-sensitive` label — **independent of and orthogonal to the risk label**. A
   task labelled `security-sensitive` gets a `security-scan` run per-task regardless of whether
@@ -167,7 +167,7 @@ returned DONE_WITH_CONCERNS, or it touched more than its file-map slice).
   `bd close` the task until its review passes.
 
   Each reviewer is dispatched with the **task's pinned commit range** as the diff scope
-  (per [`.claude/references/diff-scope.md`](../../references/diff-scope.md)): `base` = the
+  (per [`claude/references/diff-scope.md`](../../references/diff-scope.md)): `base` = the
   commit before the implementer's first commit for this task, `head` = `git rev-parse HEAD`
   at spawn time. **Recompute the scope on each re-spawn** — fix commits move HEAD, so a
   scope pinned at the first spawn would miss them. The end-of-run `validate` pass computes
@@ -209,7 +209,7 @@ where `--dangerously-skip-permissions` is forbidden. **Never** set
 inherit the session's permissions by design.
 
 To keep a supervised run from death-by-prompt, pre-approve the safe, high-frequency operations
-in `.claude/settings.local.json` (via `update-config`) — for example:
+in `claude/settings.local.json` (via `update-config`) — for example:
 
 ```
 Bash(bd *), Bash(git status*), Bash(git diff *), Bash(git log *), <test runner>, <linter>
@@ -228,7 +228,7 @@ exception-stop instead of forcing anything.
 ## Status & summary
 
 Progress is the issue states (claimed → closed) and the validation summary on the epic — beads
-is the system of record. See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+is the system of record. See [`claude/references/beads.md`](../../references/beads.md) for the full model.
 
 ## Resuming
 

@@ -79,7 +79,7 @@ parallel sessions reference each other's issues. Two rules protect it:
 - **Never `bd init` in a worktree** — it forks a second database that drifts from the main one.
 - **Never add `.beads/**` to `.worktreeinclude`** — Claude Code *copies* (does not symlink)
   those patterns, so each worktree would get its own fork. Leave `.beads/` out and let the
-  git-common-dir resolution share the one database. See [`.claude/references/beads.md`](../../references/beads.md).
+  git-common-dir resolution share the one database. See [`claude/references/beads.md`](../../references/beads.md).
 
 ## Do NOT run `bd setup claude`
 
@@ -87,19 +87,20 @@ beads ships a `bd setup claude` command, but **avoid it in this config.** It wri
 
 ## Session-start gate hook
 
-A committed `SessionStart` hook (`.claude/hooks/beads-gate.sh`, wired in the committed `.claude/settings.json`) ships as standard in this config. It runs automatically at the start of every session and:
+A `SessionStart` hook (`claude/hooks/beads-gate.sh`, installed to `~/.claude/hooks` by the library's installer and registered in your global settings) ships as standard in this config. It runs automatically at the start of every session:
 
-- detects whether beads is present (`.beads/` exists, `bd` on PATH)
-- warns and tells the user to run `setup-beads` when beads is absent
+- detects whether beads is present (worktree-correct, via the shared preflight script)
+- stays completely silent when beads is absent — it runs globally in every repo, so
+  absence is the normal case, not an error
 - injects `bd ready` context when beads is present, so the session starts with current task state
 
-**Do NOT wire `bd prime` as an additional hook.** `bd prime` injects ~1–2k tokens of opinionated context that instructs the agent not to use `MEMORY.md` or `TaskCreate` and to run a session-close/push protocol — that fights this config's memory system and isolated (no-push) setup. The committed gate hook is purpose-built and avoids those conflicts.
+**Do NOT wire `bd prime` as an additional hook.** `bd prime` injects ~1–2k tokens of opinionated context that instructs the agent not to use `MEMORY.md` or `TaskCreate` and to run a session-close/push protocol — that fights this config's memory system and isolated (no-push) setup. The gate hook is purpose-built and avoids those conflicts.
 
 The script writes the `Bash(bd *)` permission to **`.claude/settings.local.json`** (git-excluded under stealth) using `jq` — never to committed settings. If `jq` is unavailable it says so; add the permission by hand with the `update-config` skill.
 
 ## After the script succeeds
 
-The script's recap is your report — relay it (mode, flags, that `.gitignore` was reverted, the exclude and permission, and that the gate hook ships committed). Then point the user at the next step: the workflow skills now run with beads — `define` creates a feature epic, `planning-and-task-breakdown` files tasks, and so on, per [`.claude/references/beads.md`](../../references/beads.md). Try `define` to start a feature, or `standup` to read current state.
+The script's recap is your report — relay it (mode, flags, that `.gitignore` was reverted, the exclude and permission, and that the gate hook ships with the library). Then point the user at the next step: the workflow skills now run with beads — `define` creates a feature epic, `planning-and-task-breakdown` files tasks, and so on, per [`claude/references/beads.md`](../../references/beads.md). Try `define` to start a feature, or `standup` to read current state.
 
 ## What this skill will not do
 

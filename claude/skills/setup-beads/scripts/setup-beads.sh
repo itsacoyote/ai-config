@@ -161,7 +161,7 @@ echo "  • bd init     : --stealth --non-interactive${PREFIX:+ -p $PREFIX}"
 echo "  • .gitignore  : bd's edit reverted; nothing beads-related tracked"
 echo "  • exclude     : .beads/ + .claude/settings.local.json in .git/info/exclude"
 echo "  • permission  : Bash(bd *) in $SETTINGS"
-echo "  • hook        : .claude/hooks/beads-gate.sh ships committed & wired — no action"
+echo "  • hook        : beads-gate.sh runs from your global ~/.claude/hooks — no action"
 echo
 echo "git status should show nothing beads-related:"
 git status --porcelain | grep -iE 'beads|\.gitignore' || echo "  (clean — no beads/gitignore changes)"

@@ -27,7 +27,7 @@ Spawn these three lenses **in parallel** on every run (one `Agent(...)` call per
 - **[`research-patterns`](../../agents/research-patterns.md)** — structural and naming conventions, architecture the implementation must match.
 - **[`research-risks`](../../agents/research-risks.md)** — edge cases, failure modes, gotchas, and security-adjacent risks.
 
-Each lens is read-only, returns structured text, and closes with a status. See [`.claude/references/lens-agent-contract.md`](../../references/lens-agent-contract.md) for the shared posture all lenses follow.
+Each lens is read-only, returns structured text, and closes with a status. See [`claude/references/lens-agent-contract.md`](../../references/lens-agent-contract.md) for the shared posture all lenses follow.
 
 Dispatch each lens with:
 1. The feature spec or description.
@@ -48,9 +48,9 @@ Once all spawned lenses have returned, synthesize their reports into unified fin
 
 **Organize findings** using [template.md](template.md) as the structure (a findings outline — not a file to write). Present conversationally in this session. Don't write step-doc files.
 
-**Risks and gotchas** (from `research-risks`) attach to the epic as advisory notes — they are **never** created as standalone beads issues. Record them on the epic with `bd comment <epic-id> --file <notes.md>` (see [`.claude/references/beads.md`](../../references/beads.md)).
+**Risks and gotchas** (from `research-risks`) attach to the epic as advisory notes — they are **never** created as standalone beads issues. Record them on the epic with `bd comment <epic-id> --file <notes.md>` (see [`claude/references/beads.md`](../../references/beads.md)).
 
-**Gaps** (from `research-reuse`) still become beads child issues with dependencies, one per actionable gap — labelled `gap` so the Plan step can sweep them (`bd list --parent <epic-id> -l gap`). See [`.claude/references/beads.md`](../../references/beads.md) for the full model.
+**Gaps** (from `research-reuse`) still become beads child issues with dependencies, one per actionable gap — labelled `gap` so the Plan step can sweep them (`bd list --parent <epic-id> -l gap`). See [`claude/references/beads.md`](../../references/beads.md) for the full model.
 
 ## No step-doc files
 

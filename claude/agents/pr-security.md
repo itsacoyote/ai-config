@@ -56,7 +56,7 @@ Return your findings as an ordered list, most severe first. For **each** finding
 If the diff is empty or you find nothing, say so plainly — don't manufacture filler findings.
 
 Close with a status from
-[`.claude/references/subagent-status-protocol.md`](../references/subagent-status-protocol.md) —
+[`claude/references/subagent-status-protocol.md`](../references/subagent-status-protocol.md) —
 **DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED** — plus a one-line summary. You cannot ask
 the human (no `AskUserQuestion`) and cannot spawn subagents (no `Agent`), so you **always return a
 status, never hang.** When you can't proceed or can't decide, pick `NEEDS_CONTEXT` or `BLOCKED`
