@@ -336,7 +336,8 @@ derived from another:
 - **[`pi/`](pi/)** — for [Pi](https://pi.dev): a **personal global context file**
   (communication rules, conventions, workflow, change gate), installed once and active in
   every repo — `mkdir -p ~/.pi/agent && cp pi/AGENTS.md ~/.pi/agent/AGENTS.md`
-  (ADR 0008). The Pi workflow skills are a future feature.
+  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). The Pi workflow skills are
+  a future feature.
 
 There is **no sync** between the trees: content was duplicated at porting time and
 diverges freely ([ADR 0006](docs/decisions/0006-per-harness-config-trees.md),
