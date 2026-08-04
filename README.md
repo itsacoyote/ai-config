@@ -333,8 +333,11 @@ derived from another:
   `git-commit`, `branch-names`, and `create-pr` skills in Codex's native
   `.agents/skills/` layout, copied **per project**. Install steps in
   [`codex/README.md`](codex/README.md).
-- **[`pi/`](pi/)** — for [Pi](https://pi.dev): an `AGENTS.md` conventions file only, for
-  now — the Pi workflow is a future feature. Copied per project.
+- **[`pi/`](pi/)** — for [Pi](https://pi.dev): a **personal global context file**
+  (communication rules, conventions, workflow, change gate), installed once and active in
+  every repo — `mkdir -p ~/.pi/agent && cp pi/AGENTS.md ~/.pi/agent/AGENTS.md`
+  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). The Pi workflow skills are
+  a future feature.
 
 There is **no sync** between the trees: content was duplicated at porting time and
 diverges freely ([ADR 0006](docs/decisions/0006-per-harness-config-trees.md),
@@ -377,7 +380,7 @@ claude/
 ├── settings.json          # settings TEMPLATE the merge report diffs against (not live config)
 └── statusline-command.sh  # statusline script, installed to ~/.claude
 codex/             # Codex CLI config: AGENTS.md + native skills (not synced with claude/)
-pi/                # Pi config: AGENTS.md only (not synced with claude/)
+pi/                # Pi config: personal global AGENTS.md, installed to ~/.pi/agent (not synced)
 archive/           # the previous automated pipeline, kept for reference
 AGENTS.md          # how to work IN this repo (read by all three harnesses)
 CLAUDE.md          # symlink to AGENTS.md — how Claude Code reads it

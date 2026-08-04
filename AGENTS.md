@@ -30,7 +30,7 @@ For the catalog of skills/agents and the feature workflow they implement, see
   against. It is not live config; this repo carries no project-level Claude config
   directory.
 - `codex/`, `pi/` — the other harnesses' trees, each fully self-contained. See
-  `codex/README.md` and the root README's "Other harnesses" section.
+  `codex/README.md` and the root README's "The three harness trees" section.
 - `docs/decisions/` — architectural decisions and their rationale.
 
 Decide by intent: a discoverable technique → **skill**; an always-on convention →
@@ -111,9 +111,13 @@ The three trees install differently — this is the crux of what each tree *is*:
   into `~/.claude`, where every Claude session on the machine loads them. There is no
   per-project copy of this library; this repo itself runs off the same global install.
   The installer never touches the global settings files — it prints a merge report.
-- **`codex/` and `pi/` are per-project copies.** Each is self-contained and gets copied
-  into a target project (see `codex/README.md`); their harnesses discover project-scoped
-  config natively.
+- **`codex/` is a per-project copy.** Self-contained and copied into a target project
+  (see `codex/README.md`); Codex's project-scoped discovery is the point there.
+- **`pi/` is a personal global file, never copied into a project.** `pi/AGENTS.md`
+  installs once to `~/.pi/agent/AGENTS.md` (`mkdir -p ~/.pi/agent && cp pi/AGENTS.md
+  ~/.pi/agent/AGENTS.md`) and applies in every repo
+  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). It carries personal
+  accommodations — copying it into a shared repo is the failure mode.
 
 ## Workflow state: beads is required
 
