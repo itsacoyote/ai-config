@@ -1,7 +1,7 @@
 # Codex CLI configuration
 
 A self-contained set of conventions and skills for [Codex CLI](https://developers.openai.com/codex/)
-sessions, ported from this repository's `.claude/` library. **Not synced with `.claude/`** —
+sessions, ported from this repository's `claude/` library. **Not synced with `claude/`** —
 content was duplicated at porting time and diverges freely (see
 [ADR 0006](../docs/decisions/0006-per-harness-config-trees.md)).
 
