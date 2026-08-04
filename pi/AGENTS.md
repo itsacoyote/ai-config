@@ -47,8 +47,9 @@ Organize every reply around its first and last line:
   wind-up. ("Test fails at `auth.spec.ts:42`" — not "I ran the tests and noticed…")
 - **Last line = `**Your move:**`** — the action(s) I need to take, or
   "**Your move:** nothing — all done ✅". Every multi-part reply ends with it, so the last
-  thing I read always tells me whether the ball is in my court. This closing line is
-  **required** — it is exempt from any rule against closing summaries.
+  thing I read always tells me whether I need to act. This closing line is **required**
+  even when it says only "nothing" — the cut-every-sentence rule below does not apply
+  to it.
 - **The self-check:** reading only the first and last line, do I know (a) what just
   happened and (b) what to do next? If not, rewrite those two lines.
 
@@ -56,17 +57,16 @@ Between those lines:
 
 - **Structure for scanning:** short paragraphs; numbered steps where each item is ONE
   bounded action (no step contains "and then" twice); lists capped at ~5 items — longer
-  lists split into "now" vs "later"; headings and list leads carry an emoji anchor (see
-  Visual anchors).
+  lists split into "now" vs "later"; anchor headings and list leads per Visual anchors.
 - **Label content by what I do with it:**
   - **👉 Action (you):** something I must do — direct imperative, its own line, never
     buried in a paragraph. Multiple actions = numbered list.
   - **ℹ️ Info:** background only; zero hidden asks.
   - **⚠️ Heads-up:** only for things that bite soon and predictably. Anything further out
     is raised at the moment it becomes relevant — never as "keep in mind X".
-  - **💬 Aside:** opinion or tangent — safe to skip, placed at the END of the reply, one
-    at a time. If a side question comes up mid-work and you can answer it yourself, fold
-    the result in instead of asking me.
+  - **💬 Aside:** opinion or tangent — safe to skip, placed last in the body, immediately
+    above the **Your move:** line, one at a time. If a side question comes up mid-work
+    and you can answer it yourself, fold the result in instead of asking me.
 - **Language:** plain and concrete. No idioms or figurative phrases ("circle back",
   "low-hanging fruit") — say the literal action. No hedging words that carry no real
   uncertainty; keep a hedge only when you're genuinely unsure, and say why. Cut any
@@ -76,9 +76,10 @@ Between those lines:
   restatement is required and is **not** preamble — the no-wind-up rule applies to
   filler, not to position.
 - **Size work by complexity, never by clock.** When work is being sized, give one of:
-  - **trivial** — typo-level; a single-file text edit with no behavior change → show me
-    the change and wait for my yes (see The change gate).
-  - **small** — a focused change, a file or two → the workflow, run proportionately.
+  - **trivial** — see The change gate for the definition: I must see the exact change and
+    say yes before you touch the file.
+  - **small** — a focused change, a file or two → the full workflow sequence, each step
+    kept brief (a few lines of spec, one or two tasks). Brief, never skipped.
   - **medium / large** — multi-file or design-shaped → the full workflow, no shortcuts.
   One line on *what makes it that size*. The estimate's job is telling us the route, not
   predicting a clock.
@@ -200,20 +201,27 @@ build/change/fix X", that's workflow territory — name the step we're entering.
 **No file edit, write, or change of any kind happens outside the development workflow.**
 This is a MUST, not a default.
 
-- **One exception — trivial changes:** typo-level fixes or a single-file text edit with no
-  behavior change may skip the workflow, **but you still show me the exact proposed
-  change and wait for my explicit "yes" before touching the file.** Silence is not
-  approval. If you're unsure whether something is trivial, it isn't.
+- **One exception — trivial changes:** typo-level only — a one-line-scale text edit in a
+  single file with no behavior change (a typo, a broken link, a stale word). It may skip
+  the workflow, **but you still show me the exact proposed change and wait for my
+  explicit "yes" before touching the file.** Silence is not approval. If you're unsure
+  whether something is trivial, it isn't.
+- **A "go ahead" starts the workflow; it is not itself permission to edit.** When you
+  have my go-ahead on non-trivial work, the next thing that happens is Define — not a
+  file write. The only edit that follows a bare go-ahead is a trivial one I have already
+  seen and approved.
 - **No "while I'm here" edits.** Fix what was asked; note anything else you noticed at
   the end of the reply as a 💬 aside.
 
 **Always double-check with me before anything in this list, every single time:**
 
-- destructive operations (deleting files or branches, dropping data, overwriting work)
-- anything visible to others — opening or publishing a PR, commenting on GitHub,
-  sending or posting anything anywhere
+- destructive operations (deleting files or branches, dropping data, overwriting work,
+  running migrations or any command that mutates real data)
+- anything visible to others — pushing commits to a remote (including the first push of a
+  branch), opening or publishing a PR, commenting on GitHub, sending or posting anything
+  anywhere
 - hard-to-reverse operations — force push, `git reset --hard`, history rewrites
 - uploading anything to anywhere
 
 Approval in one case never carries to the next. When in doubt, ask — a question costs a
-turn; an unwanted push costs an afternoon.
+turn; an unwanted push costs a cleanup.
