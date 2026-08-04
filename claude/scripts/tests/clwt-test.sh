@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# clwt-test.sh — self-contained test suite for .claude/scripts/clwt
+# clwt-test.sh — self-contained test suite for claude/scripts/clwt
 #
 # Builds a throwaway world under a fake $HOME: a bare "remote", a primary clone,
 # and stub `claude` / `gh` binaries on PATH that log how they were invoked. That
 # stub-logs-its-environment trick is what lets us assert the thing that matters
 # most — that a launched session really does inherit the worktree as its cwd.
 #
-# Usage:  bash .claude/scripts/tests/clwt-test.sh
+# Usage:  bash claude/scripts/tests/clwt-test.sh
 # Exits non-zero if any check fails.
 
 set -uo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)
-CLWT="$REPO_ROOT/.claude/scripts/clwt"
+CLWT="$REPO_ROOT/claude/scripts/clwt"
 
 pass=0
 fail=0
@@ -1164,7 +1164,7 @@ check 'install works outside a git repository' clwt_in "$TMP/not-a-repo" install
 
 COMP_DIR="$HOME/.local/share/bash-completion/completions"
 COMP_LINK="$COMP_DIR/clwt"
-EXPECTED_COMPLETION="$REPO_ROOT/.claude/scripts/clwt-completion.bash"
+EXPECTED_COMPLETION="$REPO_ROOT/claude/scripts/clwt-completion.bash"
 
 reset_install
 rm -rf "$HOME/.local/share/bash-completion"
@@ -1267,7 +1267,7 @@ rm -f "$PRIMARY/.worktreeinclude"
 
 section 'bash completion'
 
-COMPLETION="$REPO_ROOT/.claude/scripts/clwt-completion.bash"
+COMPLETION="$REPO_ROOT/claude/scripts/clwt-completion.bash"
 
 check 'the completion script exists' test -f "$COMPLETION"
 check 'the completion script parses as valid bash' bash -n "$COMPLETION"
@@ -1467,9 +1467,9 @@ fi
 # behavior.
 section 'claude integration'
 
-SKILL="$REPO_ROOT/.claude/skills/clwt/SKILL.md"
-SETTINGS="$REPO_ROOT/.claude/settings.json"
-REGROUND="$REPO_ROOT/.claude/skills/reground/SKILL.md"
+SKILL="$REPO_ROOT/claude/skills/clwt/SKILL.md"
+SETTINGS="$REPO_ROOT/claude/settings.json"
+REGROUND="$REPO_ROOT/claude/skills/reground/SKILL.md"
 
 check 'the clwt skill exists' test -f "$SKILL"
 check 'the clwt skill instructs against git -C' grep -qF 'git -C' "$SKILL"
@@ -1487,7 +1487,7 @@ while IFS= read -r target; do
   case $target in
     http*) continue ;;
   esac
-  resolved="$REPO_ROOT/.claude/skills/clwt/${target%%#*}"
+  resolved="$REPO_ROOT/claude/skills/clwt/${target%%#*}"
   [ -e "$resolved" ] || dead="$dead $target"
 done < <(sed -n 's/.*](\([^)]*\)).*/\1/p' "$SKILL" 2>/dev/null)
 if [ -z "$dead" ]; then

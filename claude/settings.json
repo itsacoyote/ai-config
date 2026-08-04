@@ -4,11 +4,11 @@
       {
         "hooks": [
           {
-            "command": "bash .claude/hooks/beads-gate.sh",
+            "command": "bash ~/.claude/hooks/beads-gate.sh",
             "type": "command"
           },
           {
-            "command": "bash .claude/hooks/session-orient.sh",
+            "command": "bash ~/.claude/hooks/session-orient.sh",
             "type": "command"
           }
         ],
@@ -44,7 +44,7 @@
     ]
   },
   "statusLine": {
-    "command": "bash statusline-command.sh",
+    "command": "bash ~/.claude/statusline-command.sh",
     "type": "command"
   }
 }
