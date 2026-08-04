@@ -89,7 +89,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `api-and-interface-design` | Stable, hard-to-misuse APIs and module boundaries |
 | `prototype` | Throwaway code that answers a design question — an interactive logic/state TUI, or radically different UI variants switchable on one route; capture the answer, delete the prototype |
 | `frontend-ui-engineering` | Production-quality UIs; honors `DESIGN.md`/`PRODUCT.md` |
-| `impeccable` `/cmd` | Deep design-system workflow (shape, craft, critique, audit, polish) |
+| `impeccable` `/cmd` | Deep design-system workflow (shape, craft, critique, audit, polish) — third-party, adopted into the library |
 | `documentation-and-adrs` | Record decisions and keep documentation current |
 | `deprecation-and-migration` | Remove and migrate old systems safely |
 | `ci-cd-and-automation` | Build/deploy pipelines and quality gates |
@@ -259,18 +259,33 @@ Exits non-zero on any failure.
 
 ---
 
-## Using this in another project
+## Installing the library
 
-1. **Copy `claude/` into the target project's root** — skills, agents, rules, and references all live there and travel together. (When copying an individual skill, bring any `claude/references/` file it points to as well.)
-2. **The project's own `CLAUDE.md` does not come from here** — this repo's `CLAUDE.md` documents *this* repo. To orient Claude to the workflow in the target project, paste the snippet below into that project's `CLAUDE.md` and adapt it.
-3. **Optionally copy `.mcp.json`** (see [MCP servers](#mcp-servers)).
-4. Open Claude Code in the project and start with `/define` (or read `feature-workflow` first).
+The Claude library is consumed **globally** — one install serves every project on the
+machine. There is no per-project copy.
 
-> **Note:** `claude/settings.json` carries `permissions.deny: ["Bash(git -C *)"]`, which
-> travels with the copy. It exists because a `clwt`-launched session is already rooted in
-> the right worktree — in a project without `clwt`, where `git -C` may be in legitimate
-> use, delete that one line. `clwt` itself is repo-agnostic and works in any project with
-> an `origin` remote.
+```sh
+claude/install.sh             # install/update into ~/.claude + settings merge report
+claude/install.sh --dry-run   # show what a real run would create/overwrite, write nothing
+```
+
+**Run it yourself, not through an agent** — agents are denied writes to `~/.claude`
+(the same convention as `clwt`'s launching subcommands). What it does:
+
+- **Additive copy** of the content dirs (`skills/`, `agents/`, `rules/`, `references/`,
+  `scripts/`, `hooks/`) plus `statusline-command.sh` into `~/.claude`. It never deletes:
+  your global-only skills and scripts survive every run, and are listed in the report so
+  stale copies stay visible.
+- **Never touches `~/.claude/settings.json`** (or `settings.local.json`). It prints a
+  merge report instead — template entries (hooks, permissions, statusline) missing from
+  your global settings — for you to apply by hand. The template's `Bash(git -C *)` deny
+  is flagged do-NOT-migrate: a global deny is absolute and can't be re-allowed per
+  project.
+
+To orient Claude to the workflow in a target project, paste the snippet below into that
+project's `CLAUDE.md` and adapt it. Optionally copy `.mcp.json` (see
+[MCP servers](#mcp-servers)); then start with `/define` (or read `feature-workflow`
+first).
 
 ### Example: paste into your project's `CLAUDE.md`
 
@@ -303,21 +318,31 @@ the `setup-beads` skill to install and initialize it. See
 
 ---
 
-## Other harnesses (Codex, Pi)
+## The three harness trees
 
-`claude/` is Claude Code-only. Two sibling trees carry the git conventions to other
-harnesses, each self-contained and copied into a target project on its own:
+This repo ships three self-contained libraries, one per harness — none of them is
+derived from another:
 
+- **[`claude/`](claude/)** — the full workflow library for Claude Code, installed
+  **globally** via `claude/install.sh` (see [Installing the library](#installing-the-library)).
 - **[`codex/`](codex/)** — for the Codex CLI: an `AGENTS.md` conventions file plus the
   `git-commit`, `branch-names`, and `create-pr` skills in Codex's native
-  `.agents/skills/` layout. Install steps in [`codex/README.md`](codex/README.md).
+  `.agents/skills/` layout, copied **per project**. Install steps in
+  [`codex/README.md`](codex/README.md).
 - **[`pi/`](pi/)** — for [Pi](https://pi.dev): an `AGENTS.md` conventions file only, for
-  now — the Pi workflow is a future feature.
+  now — the Pi workflow is a future feature. Copied per project.
 
-There is **no sync** between `claude/`, `codex/`, and `pi/`: content was duplicated at
-porting time and diverges freely
-([ADR 0006](docs/decisions/0006-per-harness-config-trees.md)). `claude/` is canonical
+There is **no sync** between the trees: content was duplicated at porting time and
+diverges freely ([ADR 0006](docs/decisions/0006-per-harness-config-trees.md),
+[ADR 0007](docs/decisions/0007-claude-tree-global-install.md)). `claude/` is canonical
 for this repo's own work.
+
+This repo's own guidance lives in `AGENTS.md` (read natively by Codex and Pi);
+`CLAUDE.md` is a **symlink** to it, which is how Claude Code reads the same file. Two
+symlink notes: GitHub's web UI shows `CLAUDE.md` as a pointer to `AGENTS.md` rather than
+inlining the content — that's the symlink rendering, not broken docs. And a checkout
+with `core.symlinks=false` (some Windows setups) materializes `CLAUDE.md` as a one-line
+text file; if `readlink CLAUDE.md` prints nothing, re-clone with symlinks enabled.
 
 ---
 
@@ -338,17 +363,20 @@ Both are optional — skills degrade gracefully when a server isn't present (e.g
 
 ```text
 claude/
-├── skills/        # the skills above (one folder each, SKILL.md + optional files)
-├── agents/        # the review/implementer agents above (one .md each)
-├── rules/         # always-on conventions
-├── references/    # shared knowledge skills point to
-├── hooks/         # SessionStart hooks (beads gate, session orientation)
-├── scripts/       # clwt, worktree-status.sh, and their tests
-└── settings.json  # hooks, permission allow/deny, statusline
+├── install.sh             # global installer (human-run): additive copy + merge report
+├── skills/                # the skills above (one folder each, SKILL.md + optional files)
+├── agents/                # the review/implementer agents above (one .md each)
+├── rules/                 # always-on conventions
+├── references/            # shared knowledge skills point to
+├── hooks/                 # SessionStart hooks (beads gate, session orientation)
+├── scripts/               # clwt, worktree-status.sh, and their tests
+├── settings.json          # settings TEMPLATE the merge report diffs against (not live config)
+└── statusline-command.sh  # statusline script, installed to ~/.claude
 codex/             # Codex CLI config: AGENTS.md + native skills (not synced with claude/)
 pi/                # Pi config: AGENTS.md only (not synced with claude/)
 archive/           # the previous automated pipeline, kept for reference
-CLAUDE.md          # how to work IN this repo (does not travel to other projects)
+AGENTS.md          # how to work IN this repo (read by all three harnesses)
+CLAUDE.md          # symlink to AGENTS.md — how Claude Code reads it
 ```
 
 The `archive/` directory holds the previous fully-automated pipeline (the `/feature` orchestrator, `context.yaml`, step agents) — preserved for reference while the workflow is rebuilt manually.
