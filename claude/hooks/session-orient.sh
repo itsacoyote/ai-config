@@ -6,8 +6,8 @@
 # Never exits non-zero (a SessionStart hook must not abort the session).
 #
 # Path handling: resolves the helper script relative to this file's own location
-# ($HERE), so it always finds the copy in the *current* worktree rather than a
-# hardcoded checkout. Each worktree carries its own .claude/, so this stays local.
+# ($HERE) — installed globally that is ~/.claude/hooks, so the sibling
+# ~/.claude/scripts copy is found regardless of which repo the session is in.
 #
 # Schema: {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}
 
