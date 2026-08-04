@@ -157,8 +157,8 @@ integrations only when the CLI cannot complete the task.
 
 Follow the host repository's signing and push policy. Every push also needs my go-ahead
 first — see The change gate; the checks below are in addition to that, never instead of
-it. Before any push, force-push, or PR
-creation — including after a rebase, which strips existing signatures — check whether the
+it. Before any push, force-push, or PR creation — including after a rebase, which strips
+existing signatures — check whether the
 repo requires signed commits (`git config --get commit.gpgsign`) and whether any commit in
 the range is unsigned (`git log --format='%G?' <base>..HEAD | grep -c '^N'` — non-zero
 means unsigned commits are present). If signing is required and you cannot produce a valid
