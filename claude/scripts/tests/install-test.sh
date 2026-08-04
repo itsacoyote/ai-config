@@ -22,7 +22,8 @@ section() { printf '\n== %s ==\n' "$1"; }
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 INSTALL_SRC="$REPO_ROOT/claude/install.sh"
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/install-test.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/install-test.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
+[ -n "$TMP" ] && [ -d "$TMP" ] || { echo "mktemp produced no directory" >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 
 # Isolate git for the worktree fixture.
@@ -221,6 +222,22 @@ if printf '%s' "$OUT" | grep -qi 'missing statusline'; then
   not_ok 'merge report treats ~ and absolute statusline forms as equal'
 else
   ok 'merge report treats ~ and absolute statusline forms as equal'
+fi
+
+# GUARD (mutation-tested): a symlink planted at a destination path redirects
+# cp THROUGH to its target — here, straight at settings.json, past the
+# rel-name guard. Delete the [ -L "$dest" ] refusal in install.sh and this
+# must go red with settings clobbered.
+H12="$TMP/h12"; mkdir -p "$H12/.claude/skills/foo"
+echo '{"my":"settings"}' > "$H12/.claude/settings.json"
+ln -s "$H12/.claude/settings.json" "$H12/.claude/skills/foo/SKILL.md"
+OUT="$(cd "$TMP" && HOME="$H12" bash "$FIX/install.sh" 2>&1)"
+STATUS=$?
+if [ "$STATUS" != 0 ] && printf '%s' "$OUT" | grep -qi 'symlink' &&
+  [ "$(cat "$H12/.claude/settings.json")" = '{"my":"settings"}' ]; then
+  ok 'refuses a destination symlink; settings stay byte-identical'
+else
+  not_ok "refuses a destination symlink; settings stay byte-identical (status=$STATUS settings='$(cat "$H12/.claude/settings.json")')"
 fi
 
 # Event pairing: the same command registered under a DIFFERENT event must

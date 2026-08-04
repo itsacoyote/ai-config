@@ -106,7 +106,8 @@ what it would *fail* to catch.
 The three trees install differently — this is the crux of what each tree *is*:
 
 - **`claude/` is consumed globally.** `claude/install.sh` (run by the **human**, never an
-  agent — `~/.claude` writes are denied to agents) additively copies the content dirs
+  agent — treat `~/.claude` as human-owned; on this maintainer's machines a settings-level
+  deny enforces it) additively copies the content dirs
   into `~/.claude`, where every Claude session on the machine loads them. There is no
   per-project copy of this library; this repo itself runs off the same global install.
   The installer never touches the global settings files — it prints a merge report.

@@ -272,8 +272,9 @@ claude/install.sh             # install/update into ~/.claude + settings merge r
 claude/install.sh --dry-run   # show what a real run would create/overwrite, write nothing
 ```
 
-**Run it yourself, not through an agent** — agents are denied writes to `~/.claude`
-(the same convention as `clwt`'s launching subcommands). What it does:
+**Run it yourself, not through an agent** — treat `~/.claude` as human-owned (on this
+maintainer's machines a settings-level deny enforces it; the same convention as `clwt`'s
+launching subcommands). What it does:
 
 - **Additive copy** of the content dirs (`skills/`, `agents/`, `rules/`, `references/`,
   `scripts/`, `hooks/`) plus `statusline-command.sh` into `~/.claude`. It never deletes:

@@ -12,7 +12,7 @@
 # entries (hooks, permissions, statusLine) missing from BOTH global settings
 # files — for the human to apply by hand.
 #
-# Run this yourself, not through an agent: agents are denied writes to ~/.claude.
+# Run this yourself, not through an agent: ~/.claude is human-owned territory.
 #
 # Usage:
 #   claude/install.sh             install/update into ~/.claude + merge report
@@ -61,22 +61,43 @@ created=0
 updated=0
 unchanged=0
 
+# A symlinked PARENT dir would also redirect writes outside the target —
+# verify the physically-resolved directory still lives under $TARGET. The
+# target is re-resolved here (not reused from startup) because on a fresh
+# install ~/.claude doesn't exist yet when the startup guard computed it.
+assert_contained() {
+  local rel="$1" dir="$2" dir_p target_p
+  dir_p="$(cd "$dir" 2>/dev/null && pwd -P)" || die "guard: cannot resolve parent of $rel"
+  target_p="$(cd "$TARGET" 2>/dev/null && pwd -P)" || die "guard: cannot resolve $TARGET"
+  case "$dir_p/" in
+    "$target_p"/*) : ;;
+    *) die "guard: $rel resolves to $dir_p, outside $TARGET — refusing to write" ;;
+  esac
+}
+
 install_file() {
   local rel="$1" src="$2" dest="$3"
   case "$rel" in
     settings.json|settings.local.json)
       die "guard: attempted to write $rel — the installer never touches settings files" ;;
   esac
+  # A symlink at $dest makes cp -p write THROUGH to its target — outside the
+  # managed set and past the settings guard above, which only sees $rel. A
+  # dangling link is even worse: it looks non-existent and takes the create
+  # branch, writing wherever it points.
+  [ -L "$dest" ] && die "guard: $rel is a symlink under $TARGET — refusing to write through it"
   if [ ! -e "$dest" ]; then
     created=$((created + 1))
     if [ "$DRY_RUN" = 1 ]; then
       note "  would create: $rel"
     else
       mkdir -p "$(dirname "$dest")"
+      assert_contained "$rel" "$(dirname "$dest")"
       cp -p "$src" "$dest"
       note "  new: $rel"
     fi
   elif ! cmp -s "$src" "$dest"; then
+    assert_contained "$rel" "$(dirname "$dest")"
     updated=$((updated + 1))
     if [ "$DRY_RUN" = 1 ]; then
       note "  would overwrite: $rel"
@@ -96,6 +117,9 @@ for d in "${CONTENT_DIRS[@]}"; do
     rel="${f#"$SRC"/}"
     install_file "$rel" "$f" "$TARGET/$rel"
   done < <(find "$SRC/$d" -type f -print0 | sort -z)
+  # -type f without -L is deliberate: it skips source symlinks, so a checkout
+  # cannot pull arbitrary host files into ~/.claude via a planted link.
+  # "Fixing" this to -L reopens that hole.
 done
 for f in "${EXTRA_FILES[@]}"; do
   [ -f "$SRC/$f" ] && install_file "$f" "$SRC/$f" "$TARGET/$f"
@@ -152,6 +176,13 @@ globals_json() {
 
 note ""
 note "settings merge report (the installer never edits settings — apply by hand):"
+# A malformed global file reads as empty and would report everything missing,
+# nudging a hand-merge of duplicates into an already-broken file — warn first.
+for f in "$TARGET/settings.json" "$TARGET/settings.local.json"; do
+  if [ -f "$f" ] && ! jq -e . "$f" >/dev/null 2>&1; then
+    note "  WARNING: $f is not valid JSON — treated as empty; entries below may already be present"
+  fi
+done
 missing=0
 
 # Event + command pairs, so a command registered under a DIFFERENT event

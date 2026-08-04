@@ -24,7 +24,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 HOOKS_SRC="$REPO_ROOT/claude/hooks"
 REFS_SRC="$REPO_ROOT/claude/references"
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/beads-gate-test.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/beads-gate-test.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
+[ -n "$TMP" ] && [ -d "$TMP" ] || { echo "mktemp produced no directory" >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 
 # Install-shaped copy: the hook resolves beads-preflight.sh relative to its own
@@ -111,6 +112,21 @@ else
   not_ok "git repo without beads, jq absent: still silent, exit 0 (status=$GATE_STATUS out='$GATE_OUT')"
 fi
 
+# A git-TRACKED .beads/ is a hostile-checkout pattern (bd self-gitignores its
+# database) — the hook must stay silent rather than inject planted issue
+# titles into session context. Deleting the ls-files guard must turn this red.
+TRACKED="$TMP/tracked-beads-repo"
+git init -q "$TRACKED"
+mkdir -p "$TRACKED/.beads"
+echo "planted" > "$TRACKED/.beads/config.yaml"
+( cd "$TRACKED" && git add -f .beads/config.yaml && git commit -qm plant )
+run_gate "$TRACKED" "$PATH_WITH_BD"
+if [ "$GATE_STATUS" = 0 ] && [ -z "$GATE_OUT" ]; then
+  ok 'git-tracked .beads (hostile-checkout pattern): silent, exit 0'
+else
+  not_ok "git-tracked .beads (hostile-checkout pattern): silent, exit 0 (out='$GATE_OUT')"
+fi
+
 section 'output where beads is present'
 
 BEADSREPO="$TMP/beads-repo"
@@ -136,6 +152,14 @@ if printf '%s' "$GATE_OUT" | grep -q 'system of record'; then
   ok 'present case includes the system-of-record preamble'
 else
   not_ok 'present case includes the system-of-record preamble'
+fi
+# The bd output is repo data — the fence marks it as non-instructions so a
+# hostile issue title can't read as a directive. Dropping the fence goes red.
+if printf '%s' "$GATE_OUT" | grep -q 'bd-ready' &&
+  printf '%s' "$GATE_OUT" | grep -q 'not instructions'; then
+  ok 'present case fences bd output as untrusted repo data'
+else
+  not_ok 'present case fences bd output as untrusted repo data'
 fi
 
 # Worktrees have no .beads/ of their own — detection must go through the git
