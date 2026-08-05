@@ -334,8 +334,9 @@ derived from another:
   `.agents/skills/` layout, copied **per project**. Install steps in
   [`codex/README.md`](codex/README.md).
 - **[`pi/`](pi/)** — for [Pi](https://pi.dev): a **personal global context file**
-  (communication rules, conventions, workflow, change gate), installed once and active in
-  every repo — `mkdir -p ~/.pi/agent && cp pi/AGENTS.md ~/.pi/agent/AGENTS.md`
+  (communication rules, conventions, workflow, change gate, execution guardrails),
+  installed once and active in every repo —
+  `mkdir -p ~/.pi/agent && cp pi/AGENTS.md ~/.pi/agent/AGENTS.md`
   ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). The Pi workflow skills are
   a future feature.
 
