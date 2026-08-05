@@ -9,6 +9,7 @@ copy with:
 ```sh
 # Run ONLY from the ai-config repo root. Confirm with `git remote -v` first — if the
 # remote isn't ai-config, stop: a relative `pi/AGENTS.md` in another repo is not my config.
+# I run this from an outside terminal — not you.
 mkdir -p ~/.pi/agent && cp pi/AGENTS.md ~/.pi/agent/AGENTS.md
 ```
 
@@ -210,6 +211,44 @@ Comment the why, never the what — names and control flow already carry the wha
 comment only when omitting it would invite a plausible wrong "fix": a non-obvious
 constraint, a deliberate trade-off, the reason for a workaround. If a competent reader
 would understand the code without the comment, delete the comment.
+
+## Execution guardrails
+
+How you execute, in every repo — Pi has no sandbox, so these bounds are the rules:
+
+- **Blast radius** — deliberate writes land only inside the current checkout (including
+  its git directory — worktrees count) and temp directories you create under `$TMPDIR`;
+  never write to dotfiles in my home directory, `~/.pi`, or `~/.claude` (dotfiles inside
+  a repo are ordinary files under the change gate). Running installed tools (`git`, `gh`,
+  package managers) is fine — what the commands you run must not do is cause *effects*
+  outside that write boundary: no `sudo`, no global installs (anything deliberately
+  installing outside the repo's own dependency directory, `--user` included; caches your
+  tools maintain on their own don't count). Remote-side effects — push, PRs, comments —
+  are the confirm-first list's territory, not this rule's. Reads are fine everywhere:
+  this rule governs writes and effects, not reads. First runs of a repository's own code
+  still gate per the change gate.
+- **Secrets** — never echo, transmit, or commit credential or `.env` values. Reading to
+  diagnose is fine; the output describes the problem without the value ("has a trailing
+  space", not the string). Prefer key-presence checks over dumping values wholesale. A
+  secret copied to a temp file is still a violation. Redaction beats verbatim: when a
+  failure report would contain a secret-shaped substring, redact just that.
+- **Verify before claiming** — no "done", "fixed", or "passing" without the command
+  output that proves it, and no citing a file, function, or flag you haven't read in the
+  current context (after context loss, re-read — see Re-ground). Failures are reported
+  verbatim, minus the redaction above.
+- **Loop breaker** — two distinct failed fix attempts at the same failure: stop, name the
+  assumption that might be wrong, ask. My answer resumes the work already authorized — it
+  is not new approval. Transient external failures (network, rate limits, flake) get a
+  bounded retry before counting as an attempt. If you can't tell how many attempts you've
+  made, you're past the limit. This is the execution twin of the Debug spiral rule in
+  "When to bend these rules" — whichever trips first governs.
+- **Re-ground** — at the start of new state-changing work (not per question, and not
+  per-task inside work we're already oriented in): check the branch and `git status`;
+  never assume the branch or a clean tree. When unsure what state you're in, re-read it
+  instead of reconstructing from memory.
+
+These guardrails never supersede the change gate or the confirm-first list — retry or
+verification pressure is not authorization.
 
 ## The development workflow
 
