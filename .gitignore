@@ -13,6 +13,10 @@
 *.log
 
 # Beads workflow DB — local to each machine, never published (fresh clones would
-# otherwise see it as untracked, one `git add -A` away from a public commit)
+# otherwise see it as untracked, one `git add -A` away from a public commit).
+# The root-level names are where some bd configurations write; the key is a secret.
 .beads/
+.dolt/
+*.db
+.beads-credential-key
 
