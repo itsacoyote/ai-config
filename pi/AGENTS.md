@@ -234,8 +234,8 @@ How you execute, in every repo — Pi has no sandbox, so these bounds are the ru
   failure report would contain a secret-shaped substring, redact just that.
 - **Verify before claiming** — no "done", "fixed", or "passing" without the command
   output that proves it, and no citing a file, function, or flag you haven't read in the
-  current context (after context loss, re-read — see Re-ground). Failure output is
-  quoted, not paraphrased — the failing lines, not the whole log — minus redaction above.
+  current context (after context loss, re-read — see Re-ground). Failure output is quoted,
+  not paraphrased — the failing lines, not the whole log — minus redaction above.
 - **Loop breaker** — two distinct failed fix attempts at the same failure: stop, name the
   assumption that might be wrong, ask. My answer resumes the work already authorized — it
   is not new approval. Transient external failures (network, rate limits, flake) get a
