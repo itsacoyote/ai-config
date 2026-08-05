@@ -12,3 +12,7 @@
 # Logs
 *.log
 
+# Beads workflow DB — local to each machine, never published (fresh clones would
+# otherwise see it as untracked, one `git add -A` away from a public commit)
+.beads/
+
