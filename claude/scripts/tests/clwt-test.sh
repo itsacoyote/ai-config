@@ -143,9 +143,10 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   esac
 fi
 if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
-  meta="$CLWT_GH_PRS/$3"
+  number=$3
+  meta="$CLWT_GH_PRS/$number"
   if [ ! -f "$meta" ]; then
-    echo "could not resolve to a pull request with the number of $3" >&2
+    echo "could not resolve to a pull request with the number of $number" >&2
     exit 1
   fi
   if grep -q '^checkoutFails=true$' "$meta"; then
@@ -154,9 +155,42 @@ if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
     exit 1
   fi
   head_ref=$(sed -n 's/^headRefName=//p' "$meta")
-  # Real gh checks the PR out into the current working tree; so does this.
-  git checkout -q -b "$head_ref" 2>/dev/null || git checkout -q "$head_ref"
-  exit 0
+
+  force=0
+  shift 3
+  for arg in "$@"; do
+    [ "$arg" = "--force" ] && force=1
+  done
+
+  # Real `gh pr checkout` fetches the PR head and updates the origin tracking ref
+  # as a side effect, for every fixture — isCrossRepository is metadata the real
+  # command does not branch checkout mechanics on, so neither does this stub. The
+  # `+` forces the tracking-ref update even when it would not itself be a
+  # fast-forward, since a force-pushed PR is exactly the case under test.
+  if ! git fetch -q origin "+refs/heads/$head_ref:refs/remotes/origin/$head_ref" 2>/dev/null; then
+    echo "fatal: couldn't find remote ref $head_ref" >&2
+    exit 1
+  fi
+
+  if ! git show-ref --verify --quiet "refs/heads/$head_ref"; then
+    # No local branch: create it at the PR head, tracking origin.
+    git checkout -q -b "$head_ref" "refs/remotes/origin/$head_ref"
+    exit $?
+  fi
+
+  git checkout -q "$head_ref" || exit 1
+
+  if [ "$force" = 1 ]; then
+    git reset -q --hard "refs/remotes/origin/$head_ref"
+    exit $?
+  fi
+
+  # `merge --ff-only` natively succeeds in both directions (fast-forward when
+  # behind, "Already up to date." when ahead) and emits the real
+  # "Not possible to fast-forward" fatal on divergence — no pre-check needed,
+  # and its stderr must reach the caller because tests assert on that message.
+  git merge --ff-only "refs/remotes/origin/$head_ref" >/dev/null
+  exit $?
 fi
 exit 0
 STUB
@@ -168,6 +202,121 @@ mkdir -p "$CLWT_GH_STATES" "$CLWT_GH_PRS"
 pr_state() { printf '%s\n' "$2" >"$CLWT_GH_STATES/$(printf '%s' "$1" | tr '/' '-')"; }
 pr_meta() {
   printf 'headRefName=%s\nisCrossRepository=%s\n' "$2" "$3" >"$CLWT_GH_PRS/$1"
+  push_pr_head "$2"
+}
+
+# ensure_scratch_push — a clone of $REMOTE used exclusively for creating and
+# pushing PR-head commits. `git push` opportunistically updates the PUSHING
+# repo's own remote-tracking ref for whatever it just pushed (confirmed
+# empirically) — so if $PRIMARY did the pushing, every fixture branch would
+# look "already fetched" before the gh stub ever ran, and the whole point of
+# these fixtures (a stub that must fetch to learn the real head) would be
+# defeated silently.
+SCRATCH_PUSH="$TMP/scratch-push"
+ensure_scratch_push() {
+  [ -d "$SCRATCH_PUSH" ] || git clone -q "$REMOTE" "$SCRATCH_PUSH" >/dev/null 2>&1
+}
+
+# cached_object <branch> — fetches <branch>'s current head from $REMOTE into
+# $PRIMARY's object database under a throwaway ref outside refs/heads and
+# refs/remotes/origin, so a LOCAL commit can be built on top of it (parent
+# objects must exist locally) without ever touching the origin tracking ref
+# the gh stub is supposed to update itself. Prints the fetched commit's sha.
+cached_object() {
+  local branch=$1
+  git -C "$PRIMARY" fetch -q origin "refs/heads/$branch:refs/pr-fixture-cache/$branch" 2>/dev/null || return 1
+  git -C "$PRIMARY" rev-parse "refs/pr-fixture-cache/$branch"
+}
+
+# push_pr_head <branch> — gives a pr_meta fixture a REAL head branch on
+# $REMOTE, pushed from the scratch clone (never $PRIMARY — see
+# ensure_scratch_push) so $PRIMARY's own origin tracking ref for it stays
+# genuinely absent until the gh stub fetches it.
+push_pr_head() {
+  local branch=$1 sha
+  ensure_scratch_push
+  sha=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse HEAD^{tree})" \
+    -p HEAD -m "initial head for $branch ($RANDOM$RANDOM)")
+  git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
+}
+
+# force_advance_pr_head <branch> — force-moves an EXISTING PR head on $REMOTE
+# to a brand-new commit, pushed from the scratch clone, so "the PR was
+# force-pushed" is a real fact on $REMOTE rather than assumed, and $PRIMARY's
+# own tracking ref for it stays stale (or absent) until fetched.
+force_advance_pr_head() {
+  local branch=$1 old_tip new_sha
+  ensure_scratch_push
+  git -C "$SCRATCH_PUSH" fetch -q origin "refs/heads/$branch" >/dev/null 2>&1
+  old_tip=$(git -C "$SCRATCH_PUSH" ls-remote origin "refs/heads/$branch" | cut -f1)
+  if [ -z "$old_tip" ]; then
+    echo "force_advance_pr_head: $branch has no existing head on \$REMOTE" >&2
+    return 1
+  fi
+  new_sha=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse "$old_tip^{tree}")" \
+    -p "$old_tip" -m "force-push $branch ($RANDOM$RANDOM)")
+  git -C "$SCRATCH_PUSH" push -q -f origin "$new_sha:refs/heads/$branch"
+  printf '%s\n' "$new_sha"
+}
+
+# new_commit_on <parent-sha> <label> — a new LOCAL commit in $PRIMARY on top of
+# <parent-sha>, same tree, unique message. Built with plumbing so it never
+# touches any checkout; a branch pointed at it stays held nowhere until
+# something checks it out. <parent-sha> must already exist in $PRIMARY's
+# object database (see cached_object).
+new_commit_on() {
+  git -C "$PRIMARY" commit-tree "$(git -C "$PRIMARY" rev-parse "$1^{tree}")" \
+    -p "$1" -m "seed: $2 ($RANDOM$RANDOM)"
+}
+
+# seed_leftover_branch <branch> <equal|behind|ahead|diverged> — seeds a LOCAL
+# branch in $PRIMARY, held nowhere, at the given relationship to the PR head that
+# will exist on $REMOTE once the gh stub fetches it. For every relation except
+# "ahead" the remote head is force-advanced first, so the relationship under test
+# is to the branch AFTER a force-push — the scenario the probe exists to catch —
+# not to the branch's original, never-moved head.
+seed_leftover_branch() {
+  local branch=$1 relation=$2 base new_head local_sha
+
+  # ENFORCED, not assumed: a branch already registered to a worktree elsewhere in
+  # the suite would route a later `clwt pr` through reuse_or_refuse — exit 0, no
+  # probe at all — and any test built on this helper would pass for the wrong
+  # reason. Checked first, not left to `git branch -f`'s own worktree guard, so
+  # this assertion is the one that actually fires and can be tested on its own.
+  if git -C "$PRIMARY" worktree list --porcelain | grep -qxF "branch refs/heads/$branch"; then
+    echo "seed_leftover_branch: $branch is already checked out somewhere" >&2
+    return 1
+  fi
+
+  base=$(cached_object "$branch") || {
+    echo "seed_leftover_branch: $branch has no PR head on \$REMOTE yet (call pr_meta first)" >&2
+    return 1
+  }
+
+  case "$relation" in
+    equal)
+      new_head=$(force_advance_pr_head "$branch") || return 1
+      cached_object "$branch" >/dev/null || return 1 # pulls new_head into $PRIMARY's object db
+      git -C "$PRIMARY" branch -f "$branch" "$new_head" >/dev/null
+      ;;
+    behind)
+      force_advance_pr_head "$branch" >/dev/null || return 1
+      git -C "$PRIMARY" branch -f "$branch" "$base" >/dev/null
+      ;;
+    ahead)
+      local_sha=$(new_commit_on "$base" "ahead of $branch")
+      git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null
+      ;;
+    diverged)
+      force_advance_pr_head "$branch" >/dev/null || return 1
+      local_sha=$(new_commit_on "$base" "diverged from $branch")
+      git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null
+      ;;
+    *)
+      echo "seed_leftover_branch: unknown relation: $relation (want equal|behind|ahead|diverged)" >&2
+      return 1
+      ;;
+  esac
 }
 
 export PATH="$BIN:$PATH"
@@ -1264,6 +1413,129 @@ check_fails 'pr exits non-zero when gh is unavailable' clwt pr 101
 check_output 'pr says it needs gh' 'pr needs gh' clwt pr 101
 rm -f "$CLWT_GH_UNAVAILABLE"
 rm -f "$PRIMARY/.worktreeinclude"
+
+section 'gh stub self-checks'
+
+# stub_checkout <pr-number> [gh-args...] — invokes the gh stub's `pr checkout`
+# exactly the way `clwt pr` does: from inside a fresh detached worktree of
+# $PRIMARY, so a leftover local branch (which shares $PRIMARY's ref namespace)
+# behaves exactly as it would under the real command. These self-checks pin the
+# stub directly — ahead of and independent from any clwt-side behavior — so later
+# probe tests can trust that a checkout failing (or succeeding) means what it
+# says.
+stub_checkout() {
+  local number=$1
+  shift
+  local wt="$TMP/stub-checkout-$number"
+  rm -rf "$wt"
+  git -C "$PRIMARY" worktree add --detach --quiet "$wt" HEAD >/dev/null 2>&1
+  (cd "$wt" && gh pr checkout "$number" "$@")
+  local rc=$?
+  git -C "$PRIMARY" worktree remove --force "$wt" >/dev/null 2>&1
+  return $rc
+}
+
+pr_meta 601 feat/stub-tracking-ref false
+# Force-advance the PR head before checkout, so this exercises the exact
+# real-world case: $PRIMARY has never fetched this branch at all, and the head
+# it eventually sees is not even the one pr_meta originally pushed.
+force_advance_pr_head feat/stub-tracking-ref >/dev/null
+new_head_601=$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/stub-tracking-ref | cut -f1)
+check_fails 'the origin tracking ref does not exist before the first checkout' \
+  git -C "$PRIMARY" rev-parse -q --verify refs/remotes/origin/feat/stub-tracking-ref
+check 'gh stub checkout succeeds for a fresh pull request fixture' stub_checkout 601
+check_equals 'gh stub updates the origin tracking ref as a side effect of checkout' \
+  "$new_head_601" "$(git -C "$PRIMARY" rev-parse -q --verify refs/remotes/origin/feat/stub-tracking-ref)"
+
+pr_meta 602 feat/stub-diverged false
+seed_leftover_branch feat/stub-diverged diverged
+diverged_before=$(git -C "$PRIMARY" rev-parse feat/stub-diverged)
+check_fails 'gh stub refuses a plain checkout over a diverged local branch' \
+  stub_checkout 602
+check_equals 'a refused diverged checkout leaves the local branch tip untouched' \
+  "$diverged_before" "$(git -C "$PRIMARY" rev-parse feat/stub-diverged)"
+
+pr_meta 603 feat/stub-force false
+seed_leftover_branch feat/stub-force diverged
+check 'gh stub resets a diverged local branch when given --force' \
+  stub_checkout 603 --force
+check_equals 'the force-reset local branch now matches the pull request head exactly' \
+  "$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/stub-force | cut -f1)" \
+  "$(git -C "$PRIMARY" rev-parse feat/stub-force)"
+
+# A fixture written without going through pr_meta/push_pr_head — the metadata
+# names a head branch that was never pushed to $REMOTE.
+printf 'headRefName=feat/stub-never-pushed\nisCrossRepository=false\n' >"$CLWT_GH_PRS/604"
+check_fails 'gh stub fails loudly when the fixture has no head branch on the remote' \
+  stub_checkout 604
+check_output 'the fail-loudly message names the missing remote ref' \
+  "couldn't find remote ref" stub_checkout 604
+check_fails 'a missing remote head is never papered over by creating the branch at HEAD' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/stub-never-pushed
+
+pr_meta 605 feat/stub-ahead false
+seed_leftover_branch feat/stub-ahead ahead
+ahead_before=$(git -C "$PRIMARY" rev-parse feat/stub-ahead)
+check 'gh stub allows a plain checkout over a branch ahead of the pull request head' \
+  stub_checkout 605
+check_equals 'a checkout over an ahead branch does not move its tip' \
+  "$ahead_before" "$(git -C "$PRIMARY" rev-parse feat/stub-ahead)"
+
+section 'seed_leftover_branch fixture helper'
+
+# All four relationships, confirmed independently of the gh stub via rev-parse /
+# merge-base, so a bug in the helper itself cannot hide behind a bug in the stub.
+pr_meta 611 feat/relation-equal false
+seed_leftover_branch feat/relation-equal equal
+check_equals 'seed_leftover_branch equal: the local tip matches the force-pushed pull request head exactly' \
+  "$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/relation-equal | cut -f1)" \
+  "$(git -C "$PRIMARY" rev-parse feat/relation-equal)"
+
+pr_meta 612 feat/relation-behind false
+seed_leftover_branch feat/relation-behind behind
+# cached_object, not a bare ls-remote: merge-base needs the remote tip's commit
+# OBJECT present in $PRIMARY, and "behind"/"diverged" force-advance the remote
+# without fetching the new tip anywhere (only "equal" does, internally). A raw
+# SHA string from ls-remote would make merge-base error on an unknown object —
+# which check_fails below would then pass on for the wrong reason, masking a
+# missing fetch entirely.
+behind_head=$(cached_object feat/relation-behind)
+check 'seed_leftover_branch behind: the local tip is a strict ancestor of the force-pushed pull request head' \
+  git -C "$PRIMARY" merge-base --is-ancestor feat/relation-behind "$behind_head"
+check_fails 'seed_leftover_branch behind: the pull request head is not itself an ancestor of the local tip' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$behind_head" feat/relation-behind
+
+pr_meta 613 feat/relation-ahead false
+seed_leftover_branch feat/relation-ahead ahead
+ahead_head=$(cached_object feat/relation-ahead)
+check 'seed_leftover_branch ahead: the pull request head is a strict ancestor of the local tip' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$ahead_head" feat/relation-ahead
+check_fails 'seed_leftover_branch ahead: the local tip is not itself an ancestor of the pull request head' \
+  git -C "$PRIMARY" merge-base --is-ancestor feat/relation-ahead "$ahead_head"
+
+pr_meta 614 feat/relation-diverged false
+seed_leftover_branch feat/relation-diverged diverged
+diverged_head=$(cached_object feat/relation-diverged)
+check_fails 'seed_leftover_branch diverged: neither tip is an ancestor of the other (local to remote)' \
+  git -C "$PRIMARY" merge-base --is-ancestor feat/relation-diverged "$diverged_head"
+check_fails 'seed_leftover_branch diverged: neither tip is an ancestor of the other (remote to local)' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$diverged_head" feat/relation-diverged
+
+# The "held nowhere" contract: a branch checked out elsewhere must be refused,
+# not silently rewritten. git's own worktree-branch protection would also block
+# the eventual `git branch -f` here, so a bare exit-code check would pass even
+# with our guard deleted — passing for the wrong reason. The side-effect check
+# below is the one that actually depends on our guard: without it,
+# force_advance_pr_head would already have force-pushed to $REMOTE before
+# git's own protection ever got a chance to refuse the branch move.
+pr_meta 615 feat/relation-held false
+initial_head_615=$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/relation-held | cut -f1)
+git -C "$PRIMARY" worktree add -q -b feat/relation-held "$MANAGED/feat-relation-held" >/dev/null 2>&1
+check_fails 'seed_leftover_branch refuses a branch that is already checked out somewhere' \
+  seed_leftover_branch feat/relation-held equal
+check_equals 'that refusal happens before any $REMOTE mutation, not after a failed git branch -f' \
+  "$initial_head_615" "$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/relation-held | cut -f1)"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-relation-held" >/dev/null 2>&1
 
 section 'bash completion'
 
