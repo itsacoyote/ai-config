@@ -799,6 +799,14 @@ cmd_pr() {
   head_ref=$(printf '%s\n' "$meta" | sed -n 1p)
   cross=$(printf '%s\n' "$meta" | sed -n 2p)
   [[ -n $head_ref ]] || die "pull request #$number has no head branch"
+  # head_ref is fork-controlled input, unvalidated before this point — reject a
+  # malicious ref name before it reaches branch_worktree or any other git command.
+  validate_branch "$head_ref"
+  # Anything other than a literal true/false would otherwise reach the
+  # auto-force decision below unvalidated — fail closed by naming the only two
+  # values that decision can trust.
+  [[ $cross == true || $cross == false ]] ||
+    die "cannot determine whether pull request #$number comes from a fork"
 
   local existing
   if existing=$(branch_worktree "$head_ref"); then
@@ -826,7 +834,7 @@ cmd_pr() {
   # circuits the whole probe for an explicit --force, which already means
   # reset and needs no safety check.
   local auto_force=0
-  if ((! force)) && [[ $cross != true ]] && ((branch_existed)) &&
+  if ((! force)) && [[ $cross == false ]] && ((branch_existed)) &&
     branch_contained_in_origin "$head_ref"; then
     auto_force=1
   fi
@@ -860,9 +868,12 @@ cmd_pr() {
     git worktree remove --force "$target" 2>/dev/null || true
     # Only worth the hint when a local branch was actually in the way — the
     # captured, pre-fetch fact, not a re-check now that gh has already run and
-    # moved the tracking ref out from under a re-check.
+    # moved the tracking ref out from under a re-check. Also gated on !force
+    # and !auto_force: a failed checkout that already ran WITH --force (explicit
+    # or auto) means resetting the branch is exactly what just failed to help,
+    # so re-suggesting the same --force would be circular.
     local hint=''
-    if ((branch_existed)); then
+    if ((branch_existed && ! force && ! auto_force)); then
       hint=" — $head_ref may have diverged from the pull request; run 'clwt pr $number --force' to reset it"
     fi
     die "gh could not check out pull request #$number$hint"
