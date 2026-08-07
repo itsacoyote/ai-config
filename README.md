@@ -203,7 +203,7 @@ second by name — no `.bashrc` change needed.
 | `clwt new <type>/<slug>` | branch from the **current** origin default, create the worktree, launch |
 | `clwt branch <branch>` | check out an existing local or origin branch, launch |
 | `clwt open <branch>` | launch in an existing managed worktree |
-| `clwt pr <number>` | check a pull request out into a worktree, launch (warns on forks) |
+| `clwt pr <number> [--force]` | check a pull request out into a worktree, launch (warns on forks) |
 | `clwt root` | launch in the primary checkout |
 | `clwt remove <branch> [--delete-branch]` | remove a clean managed worktree |
 | `clwt prune [--yes]` | sweep worktrees whose branch has a merged PR — dry run without `--yes` |
@@ -221,6 +221,10 @@ through to `claude` untouched:
 ```bash
 clwt new feat/token-refresh --yolo -- --model opus
 ```
+
+A leftover local branch from a merged/force-pushed PR resets automatically when `clwt pr`
+can prove it holds no commits of its own; otherwise it refuses and names `--force` to reset
+it explicitly (see `clwt help` for the exact wording).
 
 ### Why it's a CLI and not a skill
 

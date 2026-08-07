@@ -2062,6 +2062,26 @@ if [ -f "$COMPLETION" ]; then
     not_ok 'completion offers --yes for prune'
   fi
 
+  # pr was split out of the shared --yolo arm to also offer --force, without
+  # the parser rejecting --force on the other four subcommands.
+  pr_flags=$(complete_for clwt pr 701 '--')
+  if printf '%s\n' "$pr_flags" | grep -qx -- '--force'; then
+    ok 'completion offers --force for pr'
+  else
+    not_ok 'completion offers --force for pr'
+  fi
+  if printf '%s\n' "$pr_flags" | grep -qx -- '--yolo'; then
+    ok 'completion still offers --yolo for pr'
+  else
+    not_ok 'completion still offers --yolo for pr'
+  fi
+  branch_flags=$(complete_for clwt branch feat/alpha '--')
+  if printf '%s\n' "$branch_flags" | grep -qx -- '--force'; then
+    not_ok 'completion does not offer --force for branch'
+  else
+    ok 'completion does not offer --force for branch'
+  fi
+
   # Outside a repo: subcommands still complete, branch lookups just come back empty.
   cd "$TMP/not-a-repo" || exit 1
   outside=$(complete_for clwt '')
