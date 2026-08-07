@@ -319,6 +319,19 @@ seed_leftover_branch() {
   esac
 }
 
+# fetch_stale_tracking_ref <branch> — fetches <branch>'s CURRENT $REMOTE head
+# into $PRIMARY's refs/remotes/origin/<branch> right now, simulating a
+# tracking ref clwt already knows about from an earlier session. Call this
+# BEFORE any later force_advance_pr_head call whose relation should be judged
+# against exactly this value — the auto-force probe under test reads this ref
+# before gh's OWN (later) fetch can move it again, and that "before" is the
+# entire point: seed_leftover_branch alone never populates this ref at all, so
+# without a call like this the probe would only ever see it as absent.
+fetch_stale_tracking_ref() {
+  local branch=$1
+  git -C "$PRIMARY" fetch -q origin "refs/heads/$branch:refs/remotes/origin/$branch"
+}
+
 export PATH="$BIN:$PATH"
 
 # Bare remote with a real commit, default branch `main`.
@@ -1479,6 +1492,150 @@ check_fails 'branch rejects --force as an unknown option' clwt branch --force
 check_fails 'root rejects --force as an unknown option' clwt root --force
 
 check_output 'help documents --force' '--force' clwt help
+
+section 'pr auto-force safety probe'
+
+# Fresh PR numbers throughout this section too — see the note above the
+# 'pr --force' section for why reusing an earlier number would route through
+# reuse_or_refuse instead of the path each test actually targets.
+
+# The "equal" scenario: a tracking ref clwt already fetched once (established
+# here via fetch_stale_tracking_ref, BEFORE the force-push moves $REMOTE
+# again) exactly matches the leftover local branch. That stale ref is what
+# "the pre-fetch origin tip" means — gh's own fetch, later, moves it again.
+pr_meta 705 feat/pr-auto-equal false
+old_705=$(cached_object feat/pr-auto-equal)
+fetch_stale_tracking_ref feat/pr-auto-equal
+git -C "$PRIMARY" branch feat/pr-auto-equal "$old_705" >/dev/null
+force_advance_pr_head feat/pr-auto-equal >/dev/null
+launch_reset
+equal_out=$(clwt pr 705 2>&1)
+equal_rc=$?
+check_equals 'pr auto-resets a leftover branch equal to the pre-fetch origin tip' '0' "$equal_rc"
+check_equals 'the equal-branch auto-reset lands at the pull request head' \
+  "$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/pr-auto-equal | cut -f1)" \
+  "$(git -C "$PRIMARY" rev-parse feat/pr-auto-equal)"
+if printf '%s\n' "$equal_out" | grep -qF 'resetting feat/pr-auto-equal'; then
+  ok 'the auto-reset prints a note naming the branch'
+else
+  not_ok 'the auto-reset prints a note naming the branch'
+fi
+
+# "Strictly behind": the stale tracking ref (fetched once, at commit1) sits
+# BETWEEN the leftover local branch (commit0, older) and $REMOTE's real
+# current head (commit2, force-pushed again after the stale fetch).
+pr_meta 706 feat/pr-auto-behind false
+base_706=$(cached_object feat/pr-auto-behind)
+force_advance_pr_head feat/pr-auto-behind >/dev/null
+fetch_stale_tracking_ref feat/pr-auto-behind
+force_advance_pr_head feat/pr-auto-behind >/dev/null
+git -C "$PRIMARY" branch feat/pr-auto-behind "$base_706" >/dev/null
+launch_reset
+check 'pr auto-resets a leftover branch strictly behind origin' clwt pr 706
+check_equals 'the behind-branch auto-reset lands at the pull request head' \
+  "$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/pr-auto-behind | cut -f1)" \
+  "$(git -C "$PRIMARY" rev-parse feat/pr-auto-behind)"
+
+# Diverged: a genuine local-only commit off the same base $REMOTE force-pushed
+# from, so it is provably NOT contained no matter which tip the probe reads.
+pr_meta 707 feat/pr-auto-diverged false
+seed_leftover_branch feat/pr-auto-diverged diverged
+diverged_before_707=$(git -C "$PRIMARY" rev-parse feat/pr-auto-diverged)
+launch_reset
+check_fails 'pr refuses a leftover branch carrying a local-only commit' clwt pr 707
+check_output 'that refusal suggests clwt pr N --force' 'clwt pr 707 --force' clwt pr 707
+check 'that refusal leaves no worktree behind' test ! -e "$MANAGED/feat-pr-auto-diverged"
+check_equals 'the refused diverged branch keeps its tip untouched' \
+  "$diverged_before_707" "$(git -C "$PRIMARY" rev-parse feat/pr-auto-diverged)"
+
+# Cross-repository: the local branch IS contained in a same-named origin
+# branch (same construction as the "equal" case above), so this is the test
+# that fails if the $cross gate is ever dropped — the only thing standing
+# between this fixture and an auto-reset is isCrossRepository=true.
+pr_meta 708 feat/pr-auto-cross true
+old_708=$(cached_object feat/pr-auto-cross)
+fetch_stale_tracking_ref feat/pr-auto-cross
+git -C "$PRIMARY" branch feat/pr-auto-cross "$old_708" >/dev/null
+launch_reset
+cross_out=$(clwt pr 708 2>&1)
+cross_rc=$?
+check_equals 'a cross-repository pull request with a contained local branch still succeeds' \
+  '0' "$cross_rc"
+if printf '%s\n' "$cross_out" | grep -qF 'resetting feat/pr-auto-cross'; then
+  not_ok 'pr never auto-resets for a cross-repository pull request'
+else
+  ok 'pr never auto-resets for a cross-repository pull request'
+fi
+
+# Ahead: gh's plain ff-only checkout is a no-op success on its own — the
+# point is proving the fresh-worktree path ran (not reuse_or_refuse) and the
+# tip never moved, pinning AC 9's accepted pass-through.
+pr_meta 709 feat/pr-auto-ahead false
+seed_leftover_branch feat/pr-auto-ahead ahead
+ahead_before_709=$(git -C "$PRIMARY" rev-parse feat/pr-auto-ahead)
+launch_reset
+ahead_out=$(clwt pr 709 2>&1)
+ahead_rc=$?
+check_equals 'pr passes through a leftover branch ahead of the pull request head' \
+  '0' "$ahead_rc"
+check_equals 'the ahead branch tip is unchanged by the pass-through path' \
+  "$ahead_before_709" "$(git -C "$PRIMARY" rev-parse feat/pr-auto-ahead)"
+if printf '%s\n' "$ahead_out" | grep -qF 'reusing existing worktree'; then
+  not_ok 'the ahead pass-through takes the fresh-worktree path, not reuse_or_refuse'
+else
+  ok 'the ahead pass-through takes the fresh-worktree path, not reuse_or_refuse'
+fi
+
+# Cross-repository, checkout fails outright (the fork's real head is gone):
+# branch_existed must still have been captured before the $cross gate, or the
+# hint below would go silent on exactly the failure it exists to serve.
+pr_meta 710 feat/pr-auto-cross-fail true
+printf 'checkoutFails=true\n' >>"$CLWT_GH_PRS/710"
+git -C "$PRIMARY" branch feat/pr-auto-cross-fail >/dev/null
+launch_reset
+check_fails 'a failed cross-repository checkout still exits non-zero' clwt pr 710
+check_output 'a failed checkout on a cross-repository pull request still suggests --force when a local branch exists' \
+  'clwt pr 710 --force' clwt pr 710
+
+# Missing tracking ref, same-repo — distinct from the fork case above: nobody
+# has ever fetched this branch, so refs/remotes/origin/<branch> is simply
+# absent. The probe must fall through to a plain checkout without crashing,
+# and without ever handing merge-base a ref that doesn't exist (which is what
+# the guard being dropped would do, spilling git's own fatal onto stderr).
+pr_meta 711 feat/pr-auto-missing-ref false
+# Fetched by raw SHA rather than through cached_object/seed_leftover_branch:
+# fetching a branch BY NAME opportunistically populates
+# refs/remotes/origin/<branch> as a side effect (real git behavior, confirmed
+# independently of any refspec configured), which would defeat the one thing
+# this fixture needs — that the tracking ref is genuinely absent. Fetching
+# the raw object id instead pulls the commit with no branch name attached, so
+# nothing gets auto-tracked.
+sha_711=$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/pr-auto-missing-ref | cut -f1)
+git -C "$PRIMARY" fetch -q origin "$sha_711"
+git -C "$PRIMARY" branch feat/pr-auto-missing-ref "$sha_711" >/dev/null
+check_fails 'the origin tracking ref does not exist yet for this branch' \
+  git -C "$PRIMARY" rev-parse -q --verify refs/remotes/origin/feat/pr-auto-missing-ref
+launch_reset
+missing_ref_out=$(clwt pr 711 2>&1)
+missing_ref_rc=$?
+# Exit 0 alone is not enough: a merge-base fail-closed catch-all would ALSO
+# exit 0 here even if it were handed a ref that does not exist yet — the only
+# way to tell "the guard skipped calling merge-base" from "merge-base was
+# called and happened to fail closed" is git's own noisy fatal on stderr,
+# which the guard exists specifically to keep this path from ever producing.
+if ((missing_ref_rc == 0)) && ! printf '%s\n' "$missing_ref_out" | grep -qF 'Not a valid object name'; then
+  ok 'pr with a missing origin tracking ref falls through to a plain checkout'
+else
+  not_ok 'pr with a missing origin tracking ref falls through to a plain checkout'
+fi
+
+# No leftover branch at all — branch_existed stays 0 and the probe never
+# runs; the plain, pre-Task-3 path is unaffected.
+pr_meta 712 feat/pr-auto-none false
+launch_reset
+check 'pr with no leftover branch is unaffected by the probe' clwt pr 712
+check_equals 'pr with no leftover branch still names the worktree from the head ref' \
+  "$MANAGED/feat-pr-auto-none" "$(launched pwd)"
 
 section 'gh stub self-checks'
 
