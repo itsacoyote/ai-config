@@ -33,7 +33,7 @@ Usage:
   clwt new <branch> [-- <args>]     branch from the origin default, then launch
   clwt branch <branch> [-- <args>]  check out an existing branch, then launch
   clwt open <branch> [-- <args>]    launch in an existing managed worktree
-  clwt pr <number> [--force] [-- <args>]  check out a pull request, then launch
+  clwt pr <n> [--force] [-- <args>]  check out a pull request, then launch
   clwt root [-- <args>]             launch in the primary checkout
   clwt remove <branch> [--delete-branch]
   clwt prune [--yes]                sweep worktrees whose branch has merged
@@ -61,6 +61,10 @@ bypasses every permission check for that session.
 `--force` on `clwt pr` passes --force to `gh pr checkout`, resetting a leftover
 local branch to the pull request head; it is a no-op when the branch is
 already checked out in a managed worktree — that worktree is reused instead.
+Without the flag, `clwt pr` resets a leftover branch on its own only when the
+branch is provably contained in `origin/<branch>` (no local-only commits);
+otherwise the checkout runs plain, and if it then fails, the error names this
+flag.
 
 Arguments after `--` are passed through to `claude`.
 EOF

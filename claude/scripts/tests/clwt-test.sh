@@ -176,11 +176,13 @@ if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
     [ "$arg" = "--force" ] && force=1
   done
 
-  # Real `gh pr checkout` fetches the PR head and updates the origin tracking ref
-  # as a side effect, for every fixture — isCrossRepository is metadata the real
-  # command does not branch checkout mechanics on, so neither does this stub. The
-  # `+` forces the tracking-ref update even when it would not itself be a
-  # fast-forward, since a force-pushed PR is exactly the case under test.
+  # This stub models the SAME-REPO checkout only: fetch the PR head and update
+  # the origin tracking ref as a side effect, for every fixture. Real gh fetches
+  # a fork PR from refs/pull/N/head into a <login>-<branch> local name and never
+  # updates refs/remotes/origin/<head> — so cross-repo fixtures here exercise
+  # clwt's pre-checkout decision, not gh's fork mechanics. The `+` forces the
+  # tracking-ref update even when it would not itself be a fast-forward, since a
+  # force-pushed PR is exactly the case under test.
   if ! git fetch -q origin "+refs/heads/$head_ref:refs/remotes/origin/$head_ref" 2>/dev/null; then
     echo "fatal: couldn't find remote ref $head_ref" >&2
     exit 1
@@ -332,12 +334,15 @@ new_commit_on() {
     -p "$1" -m "seed: $2 ($RANDOM$RANDOM)"
 }
 
-# seed_leftover_branch <branch> <equal|behind|ahead|diverged> — seeds a LOCAL
-# branch in $PRIMARY, held nowhere, at the given relationship to the PR head that
-# will exist on $REMOTE once the gh stub fetches it. For every relation except
-# "ahead" the remote head is force-advanced first, so the relationship under test
-# is to the branch AFTER a force-push — the scenario the probe exists to catch —
-# not to the branch's original, never-moved head.
+# seed_leftover_branch <branch> <ahead|diverged> — seeds a LOCAL branch in
+# $PRIMARY, held nowhere, at the given relationship to the PR head that will
+# exist on $REMOTE once the gh stub fetches it. For "diverged" the remote head
+# is force-advanced first, so the relationship under test is to the branch
+# AFTER a force-push — the scenario the probe exists to catch. The equal and
+# behind relationships are NOT offered here: the probe judges them against a
+# STALE tracking ref that must be fetched mid-fixture (see fixtures 705/706,
+# which interleave fetch_stale_tracking_ref with rewrite_pr_head) — a helper
+# arm judging against the live head would test a different, easier property.
 seed_leftover_branch() {
   local branch=$1 relation=$2 base new_head local_sha
 
@@ -357,15 +362,6 @@ seed_leftover_branch() {
   }
 
   case "$relation" in
-    equal)
-      new_head=$(force_advance_pr_head "$branch") || return 1
-      cached_object "$branch" >/dev/null || return 1 # pulls new_head into $PRIMARY's object db
-      git -C "$PRIMARY" branch -f "$branch" "$new_head" >/dev/null
-      ;;
-    behind)
-      force_advance_pr_head "$branch" >/dev/null || return 1
-      git -C "$PRIMARY" branch -f "$branch" "$base" >/dev/null
-      ;;
     ahead)
       local_sha=$(new_commit_on "$base" "ahead of $branch")
       git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null
@@ -376,7 +372,7 @@ seed_leftover_branch() {
       git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null
       ;;
     *)
-      echo "seed_leftover_branch: unknown relation: $relation (want equal|behind|ahead|diverged)" >&2
+      echo "seed_leftover_branch: unknown relation: $relation (want ahead|diverged)" >&2
       return 1
       ;;
   esac
@@ -1554,7 +1550,10 @@ check_equals 'pr --force on a reused worktree still relaunches claude there' \
 check_fails 'branch rejects --force as an unknown option' clwt branch --force
 check_fails 'root rejects --force as an unknown option' clwt root --force
 
-check_output 'help documents --force' '--force' clwt help
+# A phrase from the explanatory paragraph, not the bare flag: the synopsis line
+# alone would keep this green with the whole paragraph deleted.
+check_output 'help documents --force' 'resetting a leftover' clwt help
+check_output 'help documents the no-flag auto-reset' 'provably contained' clwt help
 
 section 'pr auto-force safety probe'
 
@@ -1830,28 +1829,13 @@ check_equals 'a checkout over an ahead branch does not move its tip' \
 
 section 'seed_leftover_branch fixture helper'
 
-# All four relationships, confirmed independently of the gh stub via rev-parse /
+# Both relationships, confirmed independently of the gh stub via rev-parse /
 # merge-base, so a bug in the helper itself cannot hide behind a bug in the stub.
-pr_meta 611 feat/relation-equal false
-seed_leftover_branch feat/relation-equal equal
-check_equals 'seed_leftover_branch equal: the local tip matches the force-pushed pull request head exactly' \
-  "$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/relation-equal | cut -f1)" \
-  "$(git -C "$PRIMARY" rev-parse feat/relation-equal)"
-
-pr_meta 612 feat/relation-behind false
-seed_leftover_branch feat/relation-behind behind
 # cached_object, not a bare ls-remote: merge-base needs the remote tip's commit
-# OBJECT present in $PRIMARY, and "behind"/"diverged" force-advance the remote
-# without fetching the new tip anywhere (only "equal" does, internally). A raw
-# SHA string from ls-remote would make merge-base error on an unknown object —
-# which check_fails below would then pass on for the wrong reason, masking a
-# missing fetch entirely.
-behind_head=$(cached_object feat/relation-behind)
-check 'seed_leftover_branch behind: the local tip is a strict ancestor of the force-pushed pull request head' \
-  git -C "$PRIMARY" merge-base --is-ancestor feat/relation-behind "$behind_head"
-check_fails 'seed_leftover_branch behind: the pull request head is not itself an ancestor of the local tip' \
-  git -C "$PRIMARY" merge-base --is-ancestor "$behind_head" feat/relation-behind
-
+# OBJECT present in $PRIMARY, and "diverged" force-advances the remote without
+# fetching the new tip anywhere. A raw SHA string from ls-remote would make
+# merge-base error on an unknown object — which check_fails below would then
+# pass on for the wrong reason, masking a missing fetch entirely.
 pr_meta 613 feat/relation-ahead false
 seed_leftover_branch feat/relation-ahead ahead
 ahead_head=$(cached_object feat/relation-ahead)
@@ -1879,7 +1863,7 @@ pr_meta 615 feat/relation-held false
 initial_head_615=$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/relation-held | cut -f1)
 git -C "$PRIMARY" worktree add -q -b feat/relation-held "$MANAGED/feat-relation-held" >/dev/null 2>&1
 check_fails 'seed_leftover_branch refuses a branch that is already checked out somewhere' \
-  seed_leftover_branch feat/relation-held equal
+  seed_leftover_branch feat/relation-held diverged
 check_equals 'that refusal happens before any $REMOTE mutation, not after a failed git branch -f' \
   "$initial_head_615" "$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/relation-held | cut -f1)"
 git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-relation-held" >/dev/null 2>&1
@@ -2075,11 +2059,16 @@ if [ -f "$COMPLETION" ]; then
   else
     not_ok 'completion still offers --yolo for pr'
   fi
+  # Positive control first: an empty completion result (e.g. mapfile missing on
+  # bash 3.2) would satisfy the bare negative no matter what the flags arm
+  # contains — the assertion must prove completion WORKS before proving --force
+  # is absent from it.
   branch_flags=$(complete_for clwt branch feat/alpha '--')
-  if printf '%s\n' "$branch_flags" | grep -qx -- '--force'; then
-    not_ok 'completion does not offer --force for branch'
-  else
+  if printf '%s\n' "$branch_flags" | grep -qx -- '--yolo' &&
+    ! printf '%s\n' "$branch_flags" | grep -qx -- '--force'; then
     ok 'completion does not offer --force for branch'
+  else
+    not_ok 'completion does not offer --force for branch'
   fi
 
   # Outside a repo: subcommands still complete, branch lookups just come back empty.
@@ -2210,6 +2199,8 @@ check 'the README documents CLWT_REPO_ROOT' grep -qF 'CLWT_REPO_ROOT' "$README"
 check 'the README documents the --yolo shorthand' grep -qF -- '--yolo' "$README"
 check 'the README says what --yolo bypasses' \
   grep -qF -- '--dangerously-skip-permissions' "$README"
+check 'the README documents the pr --force flag' grep -qF -- '--force' "$README"
+check 'the clwt skill documents the pr --force flag' grep -qF -- '--force' "$SKILL"
 check 'the README documents the worktreeinclude and beads behavior' \
   grep -qF '.worktreeinclude' "$README"
 check 'the README documents how to run the test suite' \

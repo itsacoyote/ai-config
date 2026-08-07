@@ -223,8 +223,9 @@ clwt new feat/token-refresh --yolo -- --model opus
 ```
 
 A leftover local branch from a merged/force-pushed PR resets automatically when `clwt pr`
-can prove it holds no commits of its own; otherwise it refuses and names `--force` to reset
-it explicitly (see `clwt help` for the exact wording).
+can prove it holds no commits of its own; otherwise the branch is left untouched, and a
+checkout failure names `--force` to reset it explicitly (see `clwt help` for the exact
+wording).
 
 ### Why it's a CLI and not a skill
 

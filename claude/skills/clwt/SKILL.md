@@ -60,9 +60,10 @@ pass through to `claude`: `clwt new feat/x --yolo -- --model opus`.
 Worktrees live at `~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/`.
 
 A local branch left over from an earlier `clwt pr` (the PR merged, or its head force-pushed)
-resets automatically when `clwt` can prove it holds no commits of its own — otherwise it
-refuses and points at `clwt pr <n> --force` to reset explicitly. Recommend that exact command
-when a developer hits the refusal; see `clwt help` for the full wording.
+resets automatically when `clwt` can prove it holds no commits of its own — otherwise the
+branch is left untouched, and a failed checkout points at `clwt pr <n> --force` to reset
+explicitly. Recommend that exact command when a developer hits the refusal; see `clwt help`
+for the full wording.
 
 ## What to recommend, when
 
