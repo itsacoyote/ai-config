@@ -1414,6 +1414,72 @@ check_output 'pr says it needs gh' 'pr needs gh' clwt pr 101
 rm -f "$CLWT_GH_UNAVAILABLE"
 rm -f "$PRIMARY/.worktreeinclude"
 
+section 'pr --force'
+
+# Fresh PR numbers throughout this section — 101/202/303's managed worktrees
+# linger from the tests above, so reusing them would route through
+# reuse_or_refuse instead of the fresh-checkout path these tests target.
+
+pr_meta 701 feat/pr-force-diverged false
+seed_leftover_branch feat/pr-force-diverged diverged
+launch_reset
+check 'pr --force resets a diverged leftover branch to the pull request head' \
+  clwt pr 701 --force
+check_equals 'the --force reset branch tip matches the pull request head exactly' \
+  "$(git -C "$PRIMARY" ls-remote origin refs/heads/feat/pr-force-diverged | cut -f1)" \
+  "$(git -C "$PRIMARY" rev-parse feat/pr-force-diverged)"
+
+pr_meta 702 feat/pr-force-fresh false
+launch_reset
+check 'pr --force succeeds when no leftover local branch exists' \
+  clwt pr 702 --force
+check_equals 'pr --force still launches claude in the new worktree' \
+  "$MANAGED/feat-pr-force-fresh" "$(launched pwd)"
+
+# "ahead" so the plain (non-forced) checkout the gh stub performs here succeeds
+# on its own — the point is to prove --force after `--` never reaches gh at
+# all, not to also exercise a forced reset.
+pr_meta 703 feat/pr-force-passthrough false
+seed_leftover_branch feat/pr-force-passthrough ahead
+passthrough_before=$(git -C "$PRIMARY" rev-parse feat/pr-force-passthrough)
+launch_reset
+check 'pr passes --force after -- through to claude untouched' \
+  clwt pr 703 -- --force
+check_equals 'the literal --force argument reaches claude' \
+  '--force' "$(launched args)"
+check_equals 'a --force after -- never reaches gh, so the branch tip is unchanged' \
+  "$passthrough_before" "$(git -C "$PRIMARY" rev-parse feat/pr-force-passthrough)"
+
+# Reuses PR 303 (feat/deleted-head, checkoutFails=true) from the plain-pr
+# checks above: the failure is unconditional in the gh stub, so it also
+# exercises the --force branch of the same checkout call.
+launch_reset
+check_fails 'a failed --force checkout leaves no worktree behind' clwt pr 303 --force
+check 'a failed --force checkout leaves no directory behind' \
+  test ! -e "$MANAGED/feat-deleted-head"
+if git -C "$PRIMARY" worktree list --porcelain | grep -qF 'feat-deleted-head'; then
+  not_ok 'a failed --force checkout unregisters the worktree it made'
+else
+  ok 'a failed --force checkout unregisters the worktree it made'
+fi
+
+pr_meta 704 feat/pr-force-reuse false
+launch_reset
+clwt pr 704 >/dev/null 2>&1
+reuse_before=$(git -C "$PRIMARY" rev-parse feat/pr-force-reuse)
+launch_reset
+check_output 'pr --force on a reused worktree notes the branch was not reset' \
+  'not reset' clwt pr 704 --force
+check_equals 'a reused worktree leaves the branch tip untouched by --force' \
+  "$reuse_before" "$(git -C "$PRIMARY" rev-parse feat/pr-force-reuse)"
+check_equals 'pr --force on a reused worktree still relaunches claude there' \
+  "$MANAGED/feat-pr-force-reuse" "$(launched pwd)"
+
+check_fails 'branch rejects --force as an unknown option' clwt branch --force
+check_fails 'root rejects --force as an unknown option' clwt root --force
+
+check_output 'help documents --force' '--force' clwt help
+
 section 'gh stub self-checks'
 
 # stub_checkout <pr-number> [gh-args...] — invokes the gh stub's `pr checkout`
