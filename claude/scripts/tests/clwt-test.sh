@@ -443,9 +443,16 @@ printf 'sandbox: %s\n' "$TMP"
 section 'harness fixtures'
 # Guard the fixture itself: if this stops being stale, task 3's "bases on the
 # current origin default" test would pass for the wrong reason.
+#
+# `[^[:space:]]`, never `[^\t ]`: BSD sed does not read `\t` as a tab inside a
+# bracket expression, so that class excludes the LETTER t and truncates the
+# branch name it is meant to capture — `stable` came back as `s`, and the guard
+# reported a fixture mismatch that did not exist. The parse is deliberately its
+# own copy rather than a call into clwt: a fixture guard that reused the code
+# under test would go quiet exactly when that code broke.
 check_equals 'the clone origin/HEAD is stale relative to the remote default' \
   'refs/heads/main|stable' \
-  "$(git -C "$PRIMARY" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/|refs/heads/|')|$(git -C "$PRIMARY" ls-remote --symref origin HEAD 2>/dev/null | sed -n 's|^ref: refs/heads/\([^\t ]*\).*|\1|p')"
+  "$(git -C "$PRIMARY" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/|refs/heads/|')|$(git -C "$PRIMARY" ls-remote --symref origin HEAD 2>/dev/null | sed -n 's|^ref: refs/heads/\([^[:space:]]*\).*|\1|p')"
 
 section 'script'
 check 'the clwt script exists and is executable' test -x "$CLWT"
