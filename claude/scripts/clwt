@@ -33,7 +33,7 @@ Usage:
   clwt new <branch> [-- <args>]     branch from the origin default, then launch
   clwt branch <branch> [-- <args>]  check out an existing branch, then launch
   clwt open <branch> [-- <args>]    launch in an existing managed worktree
-  clwt pr <number> [-- <args>]      check out a pull request, then launch
+  clwt pr <n> [--force] [-- <args>]  check out a pull request, then launch
   clwt root [-- <args>]             launch in the primary checkout
   clwt remove <branch> [--delete-branch]
   clwt prune [--yes]                sweep worktrees whose branch has merged
@@ -57,6 +57,14 @@ Managed worktrees live in:
 
 `--yolo` on a launching subcommand adds --dangerously-skip-permissions, which
 bypasses every permission check for that session.
+
+`--force` on `clwt pr` passes --force to `gh pr checkout`, resetting a leftover
+local branch to the pull request head; it is a no-op when the branch is
+already checked out in a managed worktree — that worktree is reused instead.
+Without the flag, `clwt pr` resets a leftover branch on its own only when the
+branch is provably contained in `origin/<branch>` (no local-only commits);
+otherwise the checkout runs plain, and if it then fails, the error names this
+flag.
 
 Arguments after `--` are passed through to `claude`.
 EOF
@@ -244,6 +252,32 @@ branch_worktree() {
         ;;
     esac
   done < <(git worktree list --porcelain)
+  return 1
+}
+
+# True iff <branch>'s local tip is provably contained in (equal to, or an
+# ancestor of) refs/remotes/origin/<branch> AT THIS MOMENT — i.e. resetting the
+# local branch to that tip would discard nothing. Fully-qualified refs only:
+# head_ref is fork-controlled input, and an unqualified name could resolve to a
+# tag or some other ref outside refs/heads / refs/remotes/origin entirely.
+#
+# Every check sits in its own `if`, never chained straight into merge-base:
+# the script runs set -euo pipefail, and the ref this guards against missing —
+# a branch clwt has never fetched — is the COMMON case here, not a corner one.
+# The existence guard doubles as what keeps git's own "Not a valid object
+# name" fatal off stderr on that common path, by never handing merge-base a
+# ref that isn't there.
+branch_contained_in_origin() {
+  local branch=$1
+  if ! git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    return 1
+  fi
+  # Fail closed: an ancestor match returns 0 (safe). Anything else — not an
+  # ancestor (exit 1) or a broken repository state (exit >1) — returns 1
+  # (not safe). A merge-base error must never read as "safe to reset".
+  if git merge-base --is-ancestor "refs/heads/$branch" "refs/remotes/origin/$branch"; then
+    return 0
+  fi
   return 1
 }
 
@@ -480,7 +514,7 @@ copy_worktree_includes() {
 # message names none of them usefully, which leaves you hunting for where the
 # branch actually is.
 reuse_or_refuse() {
-  local branch=$1 existing=$2
+  local branch=$1 existing=$2 force=${3:-0}
 
   if [[ $existing == "$primary" ]]; then
     die "$branch is checked out in the primary checkout ($primary); use 'clwt root' to work there"
@@ -492,6 +526,12 @@ reuse_or_refuse() {
   esac
 
   require_managed_worktree "$existing"
+  # --force resets a branch clwt is about to check out fresh; once it is already
+  # sitting in a managed worktree there is nothing to reset, so say so rather
+  # than silently swallowing the flag.
+  if ((force)); then
+    note "not resetting $branch — it is already checked out at $existing"
+  fi
   note "reusing existing worktree for $branch"
   launch "$existing"
 }
@@ -708,10 +748,46 @@ cmd_prune() {
 # The ordering here is forced, not stylistic. `gh pr checkout` operates on the
 # *current* working tree, so the worktree must exist before it runs — but the
 # directory name derives from the pull request's head ref, which is not known
-# until the PR is queried. Hence: query, derive, create (detached), check out
-# inside it, copy, warn, launch.
+# until the PR is queried. The auto-force safety probe (branch_contained_in_origin)
+# has to read refs/remotes/origin/<head_ref> before that checkout runs too: `gh
+# pr checkout`'s own fetch moves that ref, and a probe run afterward would be
+# deciding from evidence gh itself just destroyed. So: query, derive, probe,
+# create (detached), check out inside it, copy, warn, launch — read ref,
+# decide, invoke gh exactly once; never try-then-retry.
 cmd_pr() {
-  parse_launch_args "$@"
+  # `--force` is pr-only — parse_launch_args must not learn it, or
+  # branch/new/open/root silently start accepting it too. Stripped here, before
+  # the remainder reaches the shared parser. Stops at the first `--`: from
+  # there on every argument belongs to claude (the `--` contract the shared
+  # parser itself implements), and scanning the whole argv would misread
+  # `clwt pr 12 -- --force` as a request to reset the branch instead of
+  # forwarding a literal --force to claude.
+  local -a rest=()
+  local force=0
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --)
+        rest+=("$@")
+        break
+        ;;
+      --force)
+        force=1
+        ;;
+      *)
+        rest+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  # Two literal calls, not a guarded "${rest[@]}" expansion: under `set -u`,
+  # expanding an empty array errors on bash older than 4.4 — the same hazard
+  # the guarded-array precedent in launch() exists to avoid.
+  if ((${#rest[@]})); then
+    parse_launch_args "${rest[@]}"
+  else
+    parse_launch_args
+  fi
   ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'pr requires exactly one pull request number'
 
   local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross name target
@@ -727,10 +803,44 @@ cmd_pr() {
   head_ref=$(printf '%s\n' "$meta" | sed -n 1p)
   cross=$(printf '%s\n' "$meta" | sed -n 2p)
   [[ -n $head_ref ]] || die "pull request #$number has no head branch"
+  # head_ref is fork-controlled input, unvalidated before this point — reject a
+  # malicious ref name before it reaches branch_worktree or any other git command.
+  validate_branch "$head_ref"
+  # Anything other than a literal true/false would otherwise reach the
+  # auto-force decision below unvalidated — fail closed by naming the only two
+  # values that decision can trust.
+  [[ $cross == true || $cross == false ]] ||
+    die "cannot determine whether pull request #$number comes from a fork"
 
   local existing
   if existing=$(branch_worktree "$head_ref"); then
-    reuse_or_refuse "$head_ref" "$existing"
+    reuse_or_refuse "$head_ref" "$existing" "$force"
+  fi
+
+  # Captured UNCONDITIONALLY, outside the $cross gate below: only the
+  # auto-force DECISION is gated on cross, but the die-hint after a failed
+  # checkout further down needs this fact for a fork PR too. A three-term &&
+  # that short-circuited on $cross would leave it unset there and silence the
+  # hint on exactly the fork + coincidentally-same-named-local-branch failure
+  # it exists to serve. (reuse_or_refuse above already owns the case where the
+  # branch is checked out somewhere, so "exists" here means "exists, unheld".)
+  local branch_existed=0
+  if git show-ref --verify --quiet "refs/heads/$head_ref"; then
+    branch_existed=1
+  fi
+
+  # Three required terms, all gating the DECISION only (branch_existed itself
+  # stays ungated, see above): not cross-repository — a fork's head ref name
+  # can coincide with an unrelated base-repo branch, so containment there
+  # would prove nothing about the fork's actual head, and fork PRs always take
+  # the plain path; a pre-existing local branch to reset; and that branch
+  # provably contained in the pre-fetch origin tip. `((! force))` short-
+  # circuits the whole probe for an explicit --force, which already means
+  # reset and needs no safety check.
+  local auto_force=0
+  if ((! force)) && [[ $cross == false ]] && ((branch_existed)) &&
+    branch_contained_in_origin "$head_ref"; then
+    auto_force=1
   fi
 
   name=$(worktree_name_for_branch "$head_ref")
@@ -742,13 +852,35 @@ cmd_pr() {
   # Detached, because `gh pr checkout` is what decides the branch — for a fork it
   # may pick a local name of its own.
   git worktree add --detach --quiet "$target" HEAD
-  if ! (cd "$target" && gh pr checkout "$number"); then
+  # Two literal invocations for the same "${rest[@]}"-under-set-u reason as the
+  # arg-parsing pre-pass above — `gh pr checkout "$number" "${arr[@]}"` with an
+  # empty $arr errors on bash older than 4.4.
+  local checkout_ok=1
+  if ((force || auto_force)); then
+    if ((auto_force)); then
+      note "resetting $head_ref — it has no local-only commits"
+    fi
+    (cd "$target" && gh pr checkout "$number" --force) || checkout_ok=0
+  else
+    (cd "$target" && gh pr checkout "$number") || checkout_ok=0
+  fi
+  if ((! checkout_ok)); then
     # Clean up rather than leaving a half-made worktree. This is not theoretical:
     # `clwt pr` against a merged pull request whose head branch has since been
     # deleted fails exactly here, and an orphaned worktree makes the retry fail
     # for a second, unrelated-looking reason.
     git worktree remove --force "$target" 2>/dev/null || true
-    die "gh could not check out pull request #$number"
+    # Only worth the hint when a local branch was actually in the way — the
+    # captured, pre-fetch fact, not a re-check now that gh has already run and
+    # moved the tracking ref out from under a re-check. Also gated on !force
+    # and !auto_force: a failed checkout that already ran WITH --force (explicit
+    # or auto) means resetting the branch is exactly what just failed to help,
+    # so re-suggesting the same --force would be circular.
+    local hint=''
+    if ((branch_existed && ! force && ! auto_force)); then
+      hint=" — $head_ref may have diverged from the pull request; run 'clwt pr $number --force' to reset it"
+    fi
+    die "gh could not check out pull request #$number$hint"
   fi
 
   copy_worktree_includes "$target" || {
