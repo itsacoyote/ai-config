@@ -195,6 +195,20 @@ That links `~/.local/bin/clwt` and, for Tab completion,
 repo, so edits take effect with no reinstall, and bash-completion autoloads the
 second by name — no `.bashrc` change needed.
 
+**zsh** has no equivalent autoload, so add two lines to `~/.zshrc` after your
+existing `compinit`:
+
+```zsh
+autoload -Uz bashcompinit && bashcompinit
+source ~/.local/share/bash-completion/completions/clwt
+```
+
+The completion runs unmodified there: `bashcompinit` invokes it through a
+`compgen` shim that runs `emulate -L sh`, which turns on `KSH_ARRAYS` and gives
+`${COMP_WORDS[COMP_CWORD]}` the 0-based indexing it expects. Calling the
+function outside that emulation returns nothing — a testing artifact, not a
+defect.
+
 ### Commands
 
 | Command | |
