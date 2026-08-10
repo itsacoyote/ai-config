@@ -2013,10 +2013,24 @@ if [ -f "$COMPLETION" ]; then
   # on its word list, and `git check-ref-format` accepts a branch named
   # `feat/x$(...)`. Passing branch names through it is remote code execution on
   # Tab, with no subcommand run and no confirmation. Verified live before the fix.
-  RCE_MARKER="$TMP/rce-marker"
+  # The payload writes a RELATIVE path deliberately. An absolute one embeds $TMP
+  # in a git ref name, and refs reject what paths allow: a `//` — which is what
+  # $TMP becomes whenever $TMPDIR carries a trailing slash, as macOS's default
+  # /var/folders/.../T/ always does — makes `git branch` refuse the name. The
+  # branch then never exists, so this test failed with an empty `got:` while the
+  # two "does not execute it" checks passed vacuously, having no payload to run.
+  # Completions below run with cwd $PRIMARY, so an executed payload lands there.
+  RCE_MARKER="$PRIMARY/rce-marker"
   rm -f "$RCE_MARKER"
-  HOSTILE_BRANCH='feat/x$(touch${IFS}'"$RCE_MARKER"')'
-  git -C "$PRIMARY" branch "$HOSTILE_BRANCH" 2>/dev/null
+  HOSTILE_BRANCH='feat/x$(touch${IFS}rce-marker)'
+  hostile_branch_err=$(git -C "$PRIMARY" branch "$HOSTILE_BRANCH" 2>&1)
+  # Asserted, not assumed: every check below this point is meaningless if the
+  # fixture is absent, and two of them are negatives that go quiet rather than red.
+  if git -C "$PRIMARY" show-ref --verify --quiet "refs/heads/$HOSTILE_BRANCH"; then
+    ok 'the hostile branch fixture exists'
+  else
+    not_ok "the hostile branch fixture exists ($hostile_branch_err)"
+  fi
 
   hostile_completions=$(complete_for clwt branch 'feat/x')
   if [ -e "$RCE_MARKER" ]; then
