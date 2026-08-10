@@ -97,6 +97,11 @@ Two recurring causes, both worth checking directly:
 - **A fixture that works around the bug.** `clwt`'s harness pre-resolved `$HOME`, which
   hid a real path-resolution defect completely. If a fixture normalizes something, ask
   whether the code should have been the one to normalize it.
+- **A fixture that never reaches the failure under test.** `clwt pr`'s auto-force tests
+  used a "force-pushed" head built as a *child* of the old tip — a fast-forward, so the
+  checkout succeeded on its own and every assertion stayed green with the feature
+  disabled. Mutating the feature off, not just the guard, is what exposed it; where a
+  fixture must have a shape, assert that shape.
 
 When an assertion exists to catch a specific regression, say so in a comment — including
 what it would *fail* to catch.
