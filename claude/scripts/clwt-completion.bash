@@ -116,6 +116,11 @@ _clwt() {
       # branch named `feat/x$(...)` then runs on Enter. `-o filenames` makes
       # readline quote the insertion, so it arrives at clwt as literal text. Git's
       # own completion has the same exposure; this makes clwt strictly safer.
+      #
+      # The `2>/dev/null || true` is not defensive noise: under zsh's
+      # bashcompinit there is no compopt at all, and the same branch name is kept
+      # inert by zsh's own compadd quoting instead. Verified end to end in an
+      # interactive zsh — Tab expanded the hostile name, Enter did not run it.
       compopt -o filenames 2>/dev/null || true
       ;;
     open | remove)

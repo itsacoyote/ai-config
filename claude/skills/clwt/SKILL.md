@@ -65,6 +65,10 @@ branch is left untouched, and a failed checkout points at `clwt pr <n> --force` 
 explicitly. Recommend that exact command when a developer hits the refusal; see `clwt help`
 for the full wording.
 
+Tab completion autoloads in bash but not in zsh. If a zsh developer reports that `clwt <Tab>`
+does nothing, the fix is two lines in their `~/.zshrc` (see the README) — `~/.zshrc` is
+theirs to edit, so hand them the snippet rather than editing it.
+
 ## What to recommend, when
 
 - **Starting unrelated work** while on a mid-flight branch → `clwt new <type>/<slug>`. One
