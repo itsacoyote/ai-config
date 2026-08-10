@@ -17,6 +17,19 @@
 # ever run and no confirmation. Untrusted candidates go through
 # _clwt_add_matches, which only ever compares them as data.
 
+# Fills COMPREPLY from stdin. Exists instead of `mapfile -t COMPREPLY`, which is
+# bash 4+ only: macOS ships bash 3.2, where mapfile is not found, COMPREPLY stays
+# empty, and completion fails silently — including in the test suite, where every
+# completion assertion then passes or fails for that reason rather than the one
+# under test.
+_clwt_set_matches() {
+  local match
+  COMPREPLY=()
+  while IFS= read -r match; do
+    COMPREPLY+=("$match")
+  done
+}
+
 # Prefix-matches candidates from stdin into COMPREPLY without re-expanding them.
 _clwt_add_matches() {
   local cur=$1 candidate
@@ -72,7 +85,7 @@ _clwt() {
   # literal defined in this file. Do not extend them with anything from git, gh,
   # the filesystem, or the environment.
   if [[ $COMP_CWORD -le 1 ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "$subcommands" -- "$cur")
+    _clwt_set_matches < <(compgen -W "$subcommands" -- "$cur")
     return 0
   fi
 
@@ -84,7 +97,7 @@ _clwt() {
       prune) flags='--yes' ;;
       *) flags='' ;;
     esac
-    mapfile -t COMPREPLY < <(compgen -W "$flags" -- "$cur")
+    _clwt_set_matches < <(compgen -W "$flags" -- "$cur")
     return 0
   fi
 
@@ -93,7 +106,7 @@ _clwt() {
       # Type prefixes, never branch names: `new` creates a branch that does not
       # exist yet, and completing to an existing one lands you straight in its
       # "local branch already exists, use clwt branch" error.
-      mapfile -t COMPREPLY < <(compgen -W "$types" -- "$cur")
+      _clwt_set_matches < <(compgen -W "$types" -- "$cur")
       compopt -o nospace 2>/dev/null || true
       ;;
     branch)
