@@ -142,6 +142,8 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
       fi
       sed -n 's/^headRefName=//p' "$meta"
       sed -n 's/^isCrossRepository=//p' "$meta"
+      sed -n 's/^headRepositoryOwner=//p' "$meta"
+      sed -n 's/^headRepository=//p' "$meta"
       exit 0
       ;;
     *)
@@ -216,8 +218,14 @@ export CLWT_GH_STATES="$TMP/gh-states"
 export CLWT_GH_PRS="$TMP/gh-prs"
 mkdir -p "$CLWT_GH_STATES" "$CLWT_GH_PRS"
 pr_state() { printf '%s\n' "$2" >"$CLWT_GH_STATES/$(printf '%s' "$1" | tr '/' '-')"; }
+# pr_meta <number> <head-ref> <is-cross-repository> [head-owner] [head-repo] —
+# owner/repo default to the identity clwt derives from $REMOTE
+# ($HOME/remotes/owner/project.git), i.e. "origin is the pull request's own
+# repository". Override them for a pull request whose head lives somewhere else,
+# which is what a fork-workflow clone (origin=fork, upstream=base) looks like.
 pr_meta() {
-  printf 'headRefName=%s\nisCrossRepository=%s\n' "$2" "$3" >"$CLWT_GH_PRS/$1"
+  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\n' \
+    "$2" "$3" "${4:-owner}" "${5:-project}" >"$CLWT_GH_PRS/$1"
   push_pr_head "$2"
 }
 
@@ -1650,6 +1658,38 @@ check_equals 'a cross-repository pull request with a contained local branch stil
   '0' "$cross_rc"
 check_not_contains 'pr never auto-resets for a cross-repository pull request' \
   'resetting feat/pr-auto-cross' "$cross_out"
+
+# Same shape as 708 but isCrossRepository=false — the head simply lives in a
+# repository that is not origin, which is what a fork-workflow clone looks like
+# (origin=your fork, upstream=base). gh resolves the pull request against
+# upstream, so refs/remotes/origin/<branch> is a same-named branch in a
+# DIFFERENT repository and containment against it proves nothing. Only the
+# owner/repo identity check separates this fixture from an auto-reset.
+pr_meta 716 feat/pr-auto-elsewhere false other-owner project
+old_716=$(cached_object feat/pr-auto-elsewhere)
+fetch_stale_tracking_ref feat/pr-auto-elsewhere
+git -C "$PRIMARY" branch feat/pr-auto-elsewhere "$old_716" >/dev/null
+launch_reset
+elsewhere_out=$(clwt pr 716 2>&1)
+elsewhere_rc=$?
+check_equals 'a pull request whose head lives outside origin still succeeds' \
+  '0' "$elsewhere_rc"
+check_not_contains 'pr never auto-resets when origin is not the head repository' \
+  'resetting feat/pr-auto-elsewhere' "$elsewhere_out"
+
+# Same identity, different spelling: GitHub reports the canonical case while the
+# clone URL keeps whatever was typed. Without folding, the identity check would
+# withhold auto-force from every such developer permanently, and the plain path
+# would give no hint why. No force-push needed — an equal tip is contained, which
+# is all the probe requires to reach its note.
+pr_meta 717 feat/pr-auto-case false Owner Project
+old_717=$(cached_object feat/pr-auto-case)
+fetch_stale_tracking_ref feat/pr-auto-case
+git -C "$PRIMARY" branch feat/pr-auto-case "$old_717" >/dev/null
+launch_reset
+case_out=$(clwt pr 717 2>&1)
+check_contains 'pr auto-resets when the head repository differs only by case' \
+  'resetting feat/pr-auto-case' "$case_out"
 
 # Ahead: gh's plain ff-only checkout is a no-op success on its own — the
 # point is proving the fresh-worktree path ran (not reuse_or_refuse) and the

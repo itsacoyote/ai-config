@@ -790,18 +790,25 @@ cmd_pr() {
   fi
   ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'pr requires exactly one pull request number'
 
-  local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross name target
+  local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross head_owner head_repo name target
   case $number in
     '' | *[!0-9]*) die "pull request must be a number: $number" ;;
   esac
 
   require_gh pr
 
-  meta=$(gh pr view "$number" --json headRefName,isCrossRepository \
-    --jq '.headRefName, .isCrossRepository' 2>/dev/null) ||
+  meta=$(gh pr view "$number" \
+    --json headRefName,isCrossRepository,headRepositoryOwner,headRepository \
+    --jq '.headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name' 2>/dev/null) ||
     die "cannot resolve pull request #$number"
   head_ref=$(printf '%s\n' "$meta" | sed -n 1p)
   cross=$(printf '%s\n' "$meta" | sed -n 2p)
+  # Case-folded on both sides: GitHub reports the canonical spelling, while the
+  # clone URL keeps whatever the developer typed. An unfolded compare would
+  # silently withhold auto-force forever from anyone whose remote reads
+  # `ItsACoyote/…`, and the plain path gives no hint why.
+  head_owner=$(printf '%s\n' "$meta" | sed -n 3p | tr '[:upper:]' '[:lower:]')
+  head_repo=$(printf '%s\n' "$meta" | sed -n 4p | tr '[:upper:]' '[:lower:]')
   [[ -n $head_ref ]] || die "pull request #$number has no head branch"
   # head_ref is fork-controlled input, unvalidated before this point — reject a
   # malicious ref name before it reaches branch_worktree or any other git command.
@@ -829,17 +836,28 @@ cmd_pr() {
     branch_existed=1
   fi
 
-  # Three required terms, all gating the DECISION only (branch_existed itself
+  # Four required terms, all gating the DECISION only (branch_existed itself
   # stays ungated, see above): not cross-repository — a fork's head ref name
   # can coincide with an unrelated base-repo branch, so containment there
   # would prove nothing about the fork's actual head, and fork PRs always take
-  # the plain path; a pre-existing local branch to reset; and that branch
-  # provably contained in the pre-fetch origin tip. `((! force))` short-
-  # circuits the whole probe for an explicit --force, which already means
-  # reset and needs no safety check.
+  # the plain path; origin is the repository the head actually lives in; a
+  # pre-existing local branch to reset; and that branch provably contained in
+  # the pre-fetch origin tip. `((! force))` short-circuits the whole probe for
+  # an explicit --force, which already means reset and needs no safety check.
+  #
+  # The identity term is not implied by the cross-repository one. gh resolves
+  # the pull request's repository on its own, with no regard for which remote a
+  # clone happens to call origin. In a fork workflow — origin your fork,
+  # upstream the base repo — a NON-cross-repository pull request still means
+  # "head lives in upstream", and refs/remotes/origin/<branch> is then a
+  # same-named branch in a different repository entirely. Containment against
+  # it proves nothing about the pull request, and the reset would be judged
+  # against unrelated commits.
   local auto_force=0
-  if ((! force)) && [[ $cross == false ]] && ((branch_existed)) &&
-    branch_contained_in_origin "$head_ref"; then
+  if ((! force)) && [[ $cross == false ]] &&
+    [[ $head_owner == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" ]] &&
+    [[ $head_repo == "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]] &&
+    ((branch_existed)) && branch_contained_in_origin "$head_ref"; then
     auto_force=1
   fi
 
