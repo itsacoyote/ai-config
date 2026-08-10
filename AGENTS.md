@@ -83,6 +83,12 @@ script *launches* is what makes its behavior observable; `clwt`'s stub `claude` 
 `$PWD` and its environment, which is the only honest way to assert that a launched
 session really is rooted where it should be.
 
+**Target stock macOS bash 3.2** — scripts and their suites both. A bash 4+ builtin
+(`mapfile`, associative arrays) does not fail loudly here; `mapfile` left `COMPREPLY`
+empty, which kept ten completion assertions unrunnable on the only machine that runs
+them. Where a version-specific builtin is tempting, write the portable loop and pin the
+rule with a source-level check.
+
 **Mutation-test every guard: delete it, re-run, restore.** On the `clwt` branch this
 caught three guards that could be removed with the suite fully green — the destructive
 `prune` containment checks, a symlink guard whose test was rejected by a *different*

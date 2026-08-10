@@ -1884,6 +1884,18 @@ else
   ok 'the completion script makes no network calls'
 fi
 
+# macOS ships bash 3.2, where `mapfile` does not exist: it leaves COMPREPLY empty
+# and every completion assertion below then passes or fails for that reason
+# instead of the one under test. A static check, because the behavioral checks
+# cannot catch this — reintroducing mapfile keeps them green on a bash 4 machine
+# and silently blinds them on a stock Mac, which is how 10 of them sat unrunnable
+# here for months.
+if sed 's/#.*//' "$COMPLETION" | grep -qE '\b(mapfile|readarray)\b'; then
+  not_ok 'the completion script avoids bash 4-only builtins'
+else
+  ok 'the completion script avoids bash 4-only builtins'
+fi
+
 # Source-level assertions, because these two mitigations cannot be exercised
 # through the COMP_WORDS harness — `compopt` errors outside a real completion,
 # and `compgen -W` re-expansion is a generation-time property. Without them the
