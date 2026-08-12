@@ -13,10 +13,11 @@ content was duplicated at porting time and diverges freely (see
 | `.agents/skills/git-commit/SKILL.md` | Commit-message conventions |
 | `.agents/skills/branch-names/SKILL.md` | Branch naming |
 | `.agents/skills/create-pr/SKILL.md` | PR titles, bodies, and the pre-PR checklist |
+| `.agents/skills/writing-skills/` | Codex-native Agent Skill authoring, porting, testing, and validation |
 
 The skills use Codex's native Agent Skills layout — Codex invokes them implicitly when the
 task matches a skill's description, or explicitly via `$git-commit`, `$branch-names`,
-`$create-pr`.
+`$create-pr`, `$writing-skills`.
 
 ## Install into a project
 
@@ -48,7 +49,7 @@ cp -R codex/.agents/skills/. ~/.agents/skills/
 
 This overwrites same-named skills already in `~/.agents/skills` — check with
 `ls ~/.agents/skills` first and merge by hand if `git-commit`, `branch-names`, or
-`create-pr` already exist there.
+`create-pr`, or `writing-skills` already exist there.
 
 `AGENTS.md` remains per-project — copy (or merge) it into each repository where the
 conventions should apply.

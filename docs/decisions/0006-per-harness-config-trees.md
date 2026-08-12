@@ -2,7 +2,7 @@
 
 Date: 2026-08-03
 
-Status: Accepted
+Status: Accepted (subagent restriction superseded by [ADR 0009](0009-codex-subagent-skill-testing.md))
 
 Amends: [ADR 0004](0004-revert-agent-agnostic-library.md)
 
@@ -39,14 +39,17 @@ Add two self-contained top-level trees, `codex/` and `pi/`, beside `.claude/`:
 - Each tree is a complete, copy-paste-able unit for its harness; installing one drags
   nothing else along. `AGENTS.md` files are templates copied to a target project's root.
 - Content is **duplicated at porting time and never synced**. There is no manifest, no
-  checksums, no catalog, no validator, no parity obligation, and no instruction anywhere
-  to keep the trees aligned. Editing `.claude/` never obligates touching `codex/` or `pi/`,
-  and vice versa.
+  checksums, no catalog, no cross-tree validator, no parity obligation, and no instruction
+  anywhere to keep the trees aligned. A harness-local authoring validator may check its own
+  skills without comparing sibling trees. Editing `.claude/` never obligates touching
+  `codex/` or `pi/`, and vice versa.
 - Porting a skill means rewriting it for the target harness: for Codex, a
   `.agents/skills/<name>/SKILL.md` with `name`/`description` frontmatter and no Claude
   mechanics (`Skill()` invocation, subagent references, Claude tool syntax, `.claude/`
   paths); keep the methodology. Substance the Claude version pulls from other skills,
   rules, scripts, or templates is inlined, since none of those travel.
+  [ADR 0009](0009-codex-subagent-skill-testing.md) later supersedes only the prohibition on
+  subagent references now that Codex has a native equivalent.
 - The first pass is minimal: `codex/` gets AGENTS.md, a README, and the three git skills;
   `pi/` gets only AGENTS.md. The Pi workflow is deliberately deferred to its own feature —
   Pi's minimalism demands its own design, not a copy of Codex's.
