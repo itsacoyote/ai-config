@@ -350,7 +350,7 @@ derived from another:
 - **[`claude/`](claude/)** — the full workflow library for Claude Code, installed
   **globally** via `claude/install.sh` (see [Installing the library](#installing-the-library)).
 - **[`codex/`](codex/)** — for the Codex CLI: an `AGENTS.md` conventions file plus the
-  `git-commit`, `branch-names`, and `create-pr` skills in Codex's native
+  `git-commit`, `branch-names`, `create-pr`, and `writing-skills` skills in Codex's native
   `.agents/skills/` layout, copied **per project**. Install steps in
   [`codex/README.md`](codex/README.md).
 - **[`pi/`](pi/)** — for [Pi](https://pi.dev): a **personal global context file**
