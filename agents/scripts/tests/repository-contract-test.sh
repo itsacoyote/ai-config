@@ -23,6 +23,25 @@ $REPO_ROOT/codex/AGENTS.md
 $REPO_ROOT/docs/decisions/0010-shared-agent-skills-library.md
 "
 
+LINK_DOCS="$ACTIVE_DOCS
+$REPO_ROOT/docs/decisions/0006-per-harness-config-trees.md
+$REPO_ROOT/docs/decisions/0008-pi-global-only-config.md
+"
+
+docs_exist=1
+printf '%s' "$LINK_DOCS" | while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  if [ ! -f "$file" ]; then
+    printf 'missing required documentation: %s\n' "$file" >&2
+    exit 1
+  fi
+done || docs_exist=0
+if [ "$docs_exist" -eq 1 ]; then
+  ok 'every audited documentation file exists'
+else
+  not_ok 'every audited documentation file exists'
+fi
+
 find "$REPO_ROOT/agents/skills" -mindepth 1 -maxdepth 1 -type d -print |
   sed "s|^$REPO_ROOT/agents/skills/||" | sort >"$TMP/actual-skills"
 printf '%s\n' branch-names create-pr git-commit writing-skills >"$TMP/expected-skills"
@@ -54,6 +73,7 @@ fi
 if printf '%s' "$ACTIVE_DOCS" | (
   while IFS= read -r file; do
     [ -n "$file" ] || continue
+    [ -f "$file" ] || continue
     grep -nE 'codex/\.agents/skills' "$file" && exit 0
   done
   exit 1
@@ -66,6 +86,7 @@ fi
 if printf '%s' "$ACTIVE_DOCS" | (
   while IFS= read -r file; do
     [ -n "$file" ] || continue
+    [ -f "$file" ] || continue
     grep -nE 'cp[[:space:]]+[^[:space:]]*AGENTS\.md' "$file" && exit 0
   done
   exit 1
@@ -73,6 +94,17 @@ if printf '%s' "$ACTIVE_DOCS" | (
   not_ok 'installer documentation contains no AGENTS.md copy command'
 else
   ok 'installer documentation contains no AGENTS.md copy command'
+fi
+
+AGENTS_README="$REPO_ROOT/agents/README.md"
+if [ -f "$AGENTS_README" ] && grep -Fq 'agents/skills/' "$AGENTS_README" && \
+  grep -Fq 'harness-specific configuration under `codex/` or `pi/`' "$AGENTS_README" && \
+  grep -Fq 'personal additive install' "$AGENTS_README" && \
+  grep -Fq 'yourself from the repository checkout' "$AGENTS_README" && \
+  grep -Fq 'never reads, installs, merges, or modifies `AGENTS.md`, `~/.codex`, or Pi configuration' "$AGENTS_README"; then
+  ok 'agents README documents shared authorship and manual install boundaries'
+else
+  not_ok 'agents README documents shared authorship and manual install boundaries'
 fi
 
 AUTHORING_REF="$REPO_ROOT/agents/skills/writing-skills/references/agent-skills-authoring.md"
@@ -105,13 +137,10 @@ else
   not_ok 'Pi port landing order and destination split are explicit'
 fi
 
-LINK_DOCS="$ACTIVE_DOCS
-$REPO_ROOT/docs/decisions/0006-per-harness-config-trees.md
-$REPO_ROOT/docs/decisions/0008-pi-global-only-config.md
-"
 links_ok=1
 printf '%s' "$LINK_DOCS" | while IFS= read -r source_md; do
   [ -n "$source_md" ] || continue
+  [ -f "$source_md" ] || continue
   grep -oE '\]\([^)]+\)' "$source_md" 2>/dev/null |
     sed 's/^](//; s/)$//' >"$TMP/links" || true
   while IFS= read -r link; do
