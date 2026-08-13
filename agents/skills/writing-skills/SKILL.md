@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Use when creating, editing, porting, or validating Agent Skills for Codex, especially when SKILL.md discovery, structure, supporting resources, or behavior needs review.
+description: Use when creating, editing, porting, or validating portable Agent Skills for Codex or Pi, especially when SKILL.md discovery, structure, resources, or behavior needs review.
 ---
 
 # Writing Skills
@@ -14,9 +14,9 @@ then test again and close the loopholes the agent actually finds.
 **Core principle:** If you did not observe the baseline behavior, you do not know whether
 the skill teaches the right thing.
 
-Codex discovers repository skills under `.agents/skills/` and personal skills under
-`~/.agents/skills/`. This library ships portable copies under `agents/skills/`; keep every
-shared skill self-contained inside that tree.
+Codex and Pi both discover repository skills under `.agents/skills/` and personal skills
+under `~/.agents/skills/`. This library ships portable copies under `agents/skills/`; keep
+every shared skill self-contained inside that tree.
 
 ## When to create a skill
 
@@ -25,7 +25,7 @@ across tasks. Good candidates include:
 
 - a technique that is easy to apply incorrectly;
 - a repeatable workflow with meaningful decisions;
-- a durable pattern future Codex sessions should recognize;
+- a durable pattern future agent sessions should recognize;
 - a reference needing task-specific retrieval or application guidance.
 
 Do not create a skill for:
@@ -33,23 +33,23 @@ Do not create a skill for:
 - a one-off solution;
 - a project convention that belongs in `AGENTS.md`;
 - a mechanical rule better enforced by a formatter, linter, or script;
-- generic knowledge Codex already has and can verify from current official docs.
+- generic knowledge the target agent already has and can verify from current primary docs.
 
-## Porting a skill to Codex
+## Porting a skill across harnesses
 
 A port is a semantic rewrite, not a search-and-replace exercise.
 
 1. Inventory the source `SKILL.md`, references, scripts, assets, and dependencies.
 2. Separate durable methodology from source-harness mechanics.
-3. Re-derive discovery, invocation, tools, paths, permissions, and delegation for Codex
-   from current official documentation.
+3. Re-derive discovery, invocation, tools, paths, permissions, and delegation for each
+   target harness from current primary documentation.
 4. Inline required guidance that will not travel with the target tree; otherwise bundle it.
 5. Remove source-harness terminology, paths, commands, metadata, and stale examples.
 6. Run a RED baseline before writing the port, then run the same scenarios with the port.
 7. Validate the complete target directory, links, and bundled scripts.
 
 Do not preserve a source file merely because it exists. Keep it only when it still teaches
-or enables something the Codex skill needs.
+or enables something the target skill needs.
 
 ## RED → GREEN → REFACTOR
 
@@ -58,7 +58,7 @@ or enables something the Codex skill needs.
 Before writing or editing behavioral guidance:
 
 1. Create representative prompts that make the missing behavior matter.
-2. Run them in fresh Codex subagents without the new skill.
+2. Run them in fresh isolated agents or clean sessions without the new skill.
 3. Capture the exact choices, omissions, and rationalizations.
 4. Identify the smallest set of failures the skill must correct.
 
@@ -68,7 +68,8 @@ discipline violation. The requirement is evidence of a gap, not artificial press
 ### GREEN: write the minimum effective skill
 
 Write only enough guidance and resources to address observed failures. Re-run the same
-prompts in fresh subagents that receive the skill path and are told to read it completely.
+prompts in fresh isolated agents or clean sessions that receive the skill path and are told
+to read it completely.
 
 The skill is GREEN when agents consistently produce the expected behavior and can find the
 resources they need without unrelated context.
@@ -82,7 +83,7 @@ When an agent finds a new loophole or misses a resource:
 - remove content that did not influence behavior;
 - re-run the affected baseline/with-skill pair.
 
-Read [testing skills with Codex subagents](references/testing-with-subagents.md) before
+Read [testing skills with isolated agents](references/testing-with-isolated-agents.md) before
 designing or running a full evaluation campaign.
 
 ## Open Agent Skills structure
@@ -96,7 +97,7 @@ skill-name/
 ├── references/           # optional documentation loaded on demand
 ├── assets/               # optional templates and static resources
 └── agents/
-    └── openai.yaml       # optional Codex/OpenAI extension
+    └── openai.yaml       # optional OpenAI client extension
 ```
 
 `agents/openai.yaml` is not part of the base Open Agent Skills specification. Add it only
@@ -127,19 +128,22 @@ description: Use when tests depend on timing, race intermittently, or rely on fi
 Do not impose a 1024-character limit on the entire frontmatter block. That limit belongs to
 the `description` field.
 
-## Codex discovery and invocation
+## Shared discovery and invocation
 
-Codex loads skill metadata first and reads the full `SKILL.md` only after selection.
+Codex and Pi both support the standard personal and repository locations. Invocation differs:
 
-| Scope | Location | Use |
+| Capability | Codex | Pi |
 |---|---|---|
-| Repository | `$REPO_ROOT/.agents/skills/<name>/` | Commit skills teammates should use in that repository |
-| Personal | `~/.agents/skills/<name>/` | Skills available across repositories |
-| Explicit | `$skill-name` in a prompt | Force selection for the current task |
-| Implicit | Description matches the task | Let Codex select the skill automatically |
+| Repository | `.agents/skills/<name>/` from the working directory toward the repository root | `.agents/skills/<name>/` from the working directory toward the repository root |
+| Personal | `~/.agents/skills/<name>/` | `~/.agents/skills/<name>/` |
+| Explicit | Mention `$skill-name` or select through `/skills` | Invoke `/skill:name` |
+| Implicit | Description matches the task | Description matches the task |
 
-Codex follows symlinked skill directories and normally detects skill edits automatically.
-If an edit does not appear, restart Codex.
+Both harnesses also have native locations or extensions beyond this portable library. Keep
+shared installation guidance on `.agents/skills` and `~/.agents/skills`; document a native
+location only when a skill intentionally targets one harness. Read
+[Agent Skills authoring across harnesses](references/agent-skills-authoring.md) before
+depending on client-specific behavior.
 
 ### Write descriptions for discovery
 
@@ -147,7 +151,7 @@ This repository uses a stricter trigger-led convention than the base specificati
 
 - start with `Use when...`;
 - describe concrete situations, symptoms, file types, tools, or user intents;
-- front-load the most important trigger words because Codex may shorten descriptions when
+- front-load the most important trigger words because clients may shorten descriptions when
   many skills are installed;
 - keep workflow steps out of the description so metadata does not become a shortcut around
   reading the body;
@@ -164,7 +168,7 @@ description: Helps write docs.
 description: Use for skill TDD by running a baseline, writing instructions, and retesting.
 
 # Good: concrete trigger conditions
-description: Use when creating, editing, porting, or validating Agent Skills for Codex.
+description: Use when creating, editing, porting, or validating portable Agent Skills.
 ```
 
 Use keywords an agent encounters in the actual task: relevant errors, symptoms, commands,
@@ -230,7 +234,7 @@ agents/skills/writing-skills/scripts/check-skill.sh \
 agents/skills/writing-skills/scripts/check-skill.sh --all
 ```
 
-It checks deterministic conventions used by this Codex tree: required frontmatter,
+It checks deterministic conventions used by this shared tree: required frontmatter,
 identifier rules, directory/name agreement, field lengths, trigger-led descriptions, and
 relative links. It supports plain single-line frontmatter values rather than claiming to be
 a complete YAML parser.
@@ -253,7 +257,7 @@ Do not install validation tooling or access the network without user authorizati
 
 | Mistake | Correction |
 |---|---|
-| Mechanically replacing vendor names | Re-derive Codex paths, tools, permissions, invocation, and delegation |
+| Mechanically replacing vendor names | Re-derive each target's paths, tools, permissions, invocation, and delegation |
 | Writing before RED | Run a fresh baseline and capture actual failures first |
 | Description summarizes the workflow | Describe concrete trigger conditions instead |
 | Main file contains every detail | Route optional detail through direct references |
@@ -264,7 +268,7 @@ Do not install validation tooling or access the network without user authorizati
 
 ## Completion checklist
 
-Track these items with Codex's current plan mechanism for any non-trivial skill change.
+Track these items with the current harness's plan mechanism for any non-trivial skill change.
 
 ### RED
 
@@ -279,7 +283,7 @@ Track these items with Codex's current plan mechanism for any non-trivial skill 
 - [ ] Description is trigger-led and specific
 - [ ] Main instructions are focused and under 500 lines
 - [ ] Supporting files use standard directories and direct links
-- [ ] Codex mechanics replace source-harness assumptions
+- [ ] Target-harness mechanics replace source-harness assumptions
 - [ ] Same scenarios pass with the skill loaded
 
 ### REFACTOR AND VERIFY
@@ -287,16 +291,16 @@ Track these items with Codex's current plan mechanism for any non-trivial skill 
 - [ ] New loopholes or navigation failures addressed
 - [ ] Unused or duplicated content removed
 - [ ] Bundled scripts exercised on success and failure cases
-- [ ] `check-skill.sh` passes for the skill and Codex tree
+- [ ] `check-skill.sh` passes for the skill and shared tree
 - [ ] `skills-ref validate` passes when the tool is available
 - [ ] No dead links or stale harness terminology remain
 - [ ] README or architecture decisions updated when discovery or capabilities changed
 
 ## References
 
-- Read [Codex and Open Agent Skills authoring](references/codex-authoring.md) when a
+- Read [Agent Skills authoring across harnesses](references/agent-skills-authoring.md) when a
   platform behavior, location, metadata field, or portability decision affects the skill.
-- Read [testing skills with Codex subagents](references/testing-with-subagents.md) before
+- Read [testing skills with isolated agents](references/testing-with-isolated-agents.md) before
   designing evaluations or changing discipline-enforcing guidance.
 - Read [persuasion principles](references/persuasion-principles.md) only when a skill must
   resist rationalization under pressure; ordinary reference skills need clarity, not force.
