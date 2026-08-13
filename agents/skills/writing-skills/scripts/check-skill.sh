@@ -1,5 +1,5 @@
 #!/bin/sh
-# check-skill.sh — lightweight validation for Agent Skills in this library.
+# check-skill.sh — lightweight validation for portable Agent Skills in the shared tree.
 #
 # It validates the plain, single-line frontmatter style used by this repository. It is not a
 # complete YAML parser; use skills-ref validate as well when that tool is already present.

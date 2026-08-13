@@ -3,7 +3,8 @@
 set -u
 
 SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
-VALIDATOR="$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)/check-skill.sh"
+DEFAULT_VALIDATOR="$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)/check-skill.sh"
+VALIDATOR="${VALIDATOR_UNDER_TEST:-$DEFAULT_VALIDATOR}"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/check-skill-test.XXXXXX")"
 PASS=0
 FAIL=0
@@ -224,6 +225,15 @@ mkdir -p "$INSTALLED_REPO/.agents/skills"
 git init -q "$INSTALLED_REPO"
 write_skill "$INSTALLED_REPO/.agents/skills/valid" "valid" "Use when testing a project-installed skill."
 expect_success "--all scans a project-installed .agents tree" run_from "$INSTALLED_REPO" "$VALIDATOR" --all
+
+# Regression: the retired Codex source layout must not win discovery. If this fixture is
+# scanned, its deliberately invalid name makes the validator fail instead of using the
+# bundled shared skill root.
+LEGACY_REPO="$TEST_ROOT/legacy-repo"
+mkdir -p "$LEGACY_REPO/codex/.agents/skills"
+git init -q "$LEGACY_REPO"
+write_skill "$LEGACY_REPO/codex/.agents/skills/bad--name" "bad--name" "Use when testing a retired source layout."
+expect_success "--all ignores the retired codex source tree" run_from "$LEGACY_REPO" "$VALIDATOR" --all
 
 EMPTY_REPO="$TEST_ROOT/empty-repo"
 mkdir -p "$EMPTY_REPO/agents/skills"
