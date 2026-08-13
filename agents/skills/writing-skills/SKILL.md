@@ -15,8 +15,8 @@ then test again and close the loopholes the agent actually finds.
 the skill teaches the right thing.
 
 Codex discovers repository skills under `.agents/skills/` and personal skills under
-`~/.agents/skills/`. This library ships repository-ready copies under
-`codex/.agents/skills/`; keep every port self-contained inside that tree.
+`~/.agents/skills/`. This library ships portable copies under `agents/skills/`; keep every
+shared skill self-contained inside that tree.
 
 ## When to create a skill
 
@@ -224,10 +224,10 @@ For quality-critical output:
 Run the bundled lightweight validator from the repository root:
 
 ```sh
-codex/.agents/skills/writing-skills/scripts/check-skill.sh \
-  codex/.agents/skills/<skill-name>
+agents/skills/writing-skills/scripts/check-skill.sh \
+  agents/skills/<skill-name>
 
-codex/.agents/skills/writing-skills/scripts/check-skill.sh --all
+agents/skills/writing-skills/scripts/check-skill.sh --all
 ```
 
 It checks deterministic conventions used by this Codex tree: required frontmatter,
@@ -238,13 +238,13 @@ a complete YAML parser.
 After changing the validator, run its self-contained regression suite:
 
 ```sh
-bash codex/.agents/skills/writing-skills/scripts/tests/check-skill-test.sh
+bash agents/skills/writing-skills/scripts/tests/check-skill-test.sh
 ```
 
 When `skills-ref` is already available, also run:
 
 ```sh
-skills-ref validate codex/.agents/skills/<skill-name>
+skills-ref validate agents/skills/<skill-name>
 ```
 
 Do not install validation tooling or access the network without user authorization.
@@ -259,7 +259,7 @@ Do not install validation tooling or access the network without user authorizati
 | Main file contains every detail | Route optional detail through direct references |
 | Reference chain is multiple levels deep | Link every required resource directly from `SKILL.md` |
 | Script leaves errors for the agent to guess | Return specific, actionable errors and non-zero status |
-| Port depends on files outside `codex/` | Inline or bundle every required dependency |
+| Shared skill depends on files outside `agents/skills/` | Inline or bundle every required dependency |
 | Testing only happy paths | Include near-miss triggers, edge cases, and pressure where relevant |
 
 ## Completion checklist

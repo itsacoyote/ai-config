@@ -211,13 +211,13 @@ printf '%s\n' '---' 'name: no-description' '---' >"$NO_DESCRIPTION/SKILL.md"
 expect_failure_matching "rejects a missing description" "missing 'description:'" "$VALIDATOR" "$NO_DESCRIPTION"
 
 ALL_REPO="$TEST_ROOT/all-repo"
-mkdir -p "$ALL_REPO/codex/.agents/skills"
+mkdir -p "$ALL_REPO/agents/skills"
 git init -q "$ALL_REPO"
-write_skill "$ALL_REPO/codex/.agents/skills/valid" "valid" "Use when testing all valid skills."
-expect_success "--all scans the Codex source tree" run_from "$ALL_REPO" "$VALIDATOR" --all
+write_skill "$ALL_REPO/agents/skills/valid" "valid" "Use when testing all valid skills."
+expect_success "--all scans the shared agents source tree" run_from "$ALL_REPO" "$VALIDATOR" --all
 
-write_skill "$ALL_REPO/codex/.agents/skills/bad--name" "bad--name" "Use when testing an invalid tree."
-expect_failure "--all fails when any Codex skill is invalid" run_from "$ALL_REPO" "$VALIDATOR" --all
+write_skill "$ALL_REPO/agents/skills/bad--name" "bad--name" "Use when testing an invalid tree."
+expect_failure "--all fails when any shared skill is invalid" run_from "$ALL_REPO" "$VALIDATOR" --all
 
 INSTALLED_REPO="$TEST_ROOT/installed-repo"
 mkdir -p "$INSTALLED_REPO/.agents/skills"
@@ -226,7 +226,7 @@ write_skill "$INSTALLED_REPO/.agents/skills/valid" "valid" "Use when testing a p
 expect_success "--all scans a project-installed .agents tree" run_from "$INSTALLED_REPO" "$VALIDATOR" --all
 
 EMPTY_REPO="$TEST_ROOT/empty-repo"
-mkdir -p "$EMPTY_REPO/codex/.agents/skills"
+mkdir -p "$EMPTY_REPO/agents/skills"
 git init -q "$EMPTY_REPO"
 expect_failure "--all rejects an empty selected skill root" run_from "$EMPTY_REPO" "$VALIDATOR" --all
 

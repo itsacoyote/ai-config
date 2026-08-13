@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Guidance for working **in this repository**, whichever agent you are. This repo ships three
-self-contained harness libraries as siblings — `claude/` (Claude Code), `codex/` (Codex
-CLI), `pi/` (Pi) — of development workflows, skills, rules, and references. Codex and Pi
+Guidance for working **in this repository**, whichever agent you are. This repo ships
+harness-specific configuration under `claude/`, `codex/`, and `pi/`, plus portable Agent
+Skills under `agents/skills/`. Codex and Pi
 read this file natively; Claude Code reads it through the `CLAUDE.md` symlink. This file
 documents how to maintain the libraries — it does **not** travel to other projects.
 
@@ -29,8 +29,10 @@ For the catalog of skills/agents and the feature workflow they implement, see
 - `claude/settings.json` — the settings **template** the installer's merge report diffs
   against. It is not live config; this repo carries no project-level Claude config
   directory.
-- `codex/`, `pi/` — the other harnesses' trees, each fully self-contained. See
-  `codex/README.md` and the root README's "The three harness trees" section.
+- `agents/skills/<name>/SKILL.md` — portable Open Agent Skills shared by Codex and Pi.
+  New cross-harness skills belong here; harness-specific behavior stays in its own tree.
+- `codex/`, `pi/` — harness-specific configuration and guidance. See `codex/README.md`
+  and the root README's distribution section.
 - `docs/decisions/` — architectural decisions and their rationale.
 
 Decide by intent: a discoverable technique → **skill**; an always-on convention →
@@ -122,8 +124,11 @@ The three trees install differently — this is the crux of what each tree *is*:
   into `~/.claude`, where every Claude session on the machine loads them. There is no
   per-project copy of this library; this repo itself runs off the same global install.
   The installer never touches the global settings files — it prints a merge report.
-- **`codex/` is a per-project copy.** Self-contained and copied into a target project
-  (see `codex/README.md`); Codex's project-scoped discovery is the point there.
+- **`agents/skills/` is shared by Codex and Pi.** Copy skills into a target project's
+  `.agents/skills/` or install them personally under `~/.agents/skills/`. It never manages
+  an `AGENTS.md` file.
+- **`codex/` contains Codex-specific guidance.** Its `AGENTS.md` remains a manually merged
+  project template; portable skills no longer live in this tree.
 - **`pi/` is a personal global file, never copied into a project.** `pi/AGENTS.md`
   installs once to `~/.pi/agent/AGENTS.md` (`mkdir -p ~/.pi/agent && cp pi/AGENTS.md
   ~/.pi/agent/AGENTS.md`) and applies in every repo

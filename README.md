@@ -342,17 +342,16 @@ the `setup-beads` skill to install and initialize it. See
 
 ---
 
-## The three harness trees
+## Harness configuration and shared skills
 
-This repo ships three self-contained libraries, one per harness — none of them is
-derived from another:
+This repo ships harness-specific configuration plus a portable Agent Skills library:
 
 - **[`claude/`](claude/)** — the full workflow library for Claude Code, installed
   **globally** via `claude/install.sh` (see [Installing the library](#installing-the-library)).
-- **[`codex/`](codex/)** — for the Codex CLI: an `AGENTS.md` conventions file plus the
-  `git-commit`, `branch-names`, `create-pr`, and `writing-skills` skills in Codex's native
-  `.agents/skills/` layout, copied **per project**. Install steps in
-  [`codex/README.md`](codex/README.md).
+- **[`agents/`](agents/)** — portable Open Agent Skills shared by Codex and Pi, authored in
+  `agents/skills/` and copied to project `.agents/skills/` or personal `~/.agents/skills/`.
+- **[`codex/`](codex/)** — Codex-specific `AGENTS.md` guidance, manually merged into a
+  project when wanted. Skill installation is documented in [`codex/README.md`](codex/README.md).
 - **[`pi/`](pi/)** — for [Pi](https://pi.dev): a **personal global context file**
   (communication rules, conventions, workflow, change gate, execution guardrails),
   installed once and active in every repo —
@@ -400,7 +399,8 @@ claude/
 ├── scripts/               # clwt, worktree-status.sh, and their tests
 ├── settings.json          # settings TEMPLATE the merge report diffs against (not live config)
 └── statusline-command.sh  # statusline script, installed to ~/.claude
-codex/             # Codex CLI config: AGENTS.md + native skills (not synced with claude/)
+agents/            # portable Open Agent Skills shared by Codex and Pi
+codex/             # Codex-specific AGENTS.md guidance
 pi/                # Pi config: personal global AGENTS.md, installed to ~/.pi/agent (not synced)
 archive/           # the previous automated pipeline, kept for reference
 AGENTS.md          # how to work IN this repo (read by all three harnesses)
