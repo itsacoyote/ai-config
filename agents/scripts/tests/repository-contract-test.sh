@@ -91,6 +91,12 @@ else
   not_ok 'client-specific invocation details live only in the authoring reference'
 fi
 
+if grep -Fq 'skills-ref validate <target-skill-dir>' "$MAIN_SKILL"; then
+  ok 'optional standard validation uses the actual target skill path'
+else
+  not_ok 'optional standard validation uses the actual target skill path'
+fi
+
 ADR="$REPO_ROOT/docs/decisions/0010-shared-agent-skills-library.md"
 if grep -Fq 'feat/pi-skills' "$ADR" && grep -Fq 'portable skills move to `agents/skills/`' "$ADR" && \
   grep -Fq 'Pi-only skills and configuration stay under `pi/`' "$ADR"; then

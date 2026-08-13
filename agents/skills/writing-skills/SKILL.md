@@ -249,7 +249,7 @@ Maintainers working in this source repository may use
 When `skills-ref` is already available, also run:
 
 ```sh
-skills-ref validate agents/skills/<skill-name>
+skills-ref validate <target-skill-dir>
 ```
 
 Do not install validation tooling or access the network without user authorization.
