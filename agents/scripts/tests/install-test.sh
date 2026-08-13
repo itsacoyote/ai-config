@@ -106,6 +106,17 @@ else
   not_ok 'installed inventory contains only regular source skill files'
 fi
 
+H1_DRY="$TMP/h1-dry"
+mkdir -p "$H1_DRY"
+find "$H1_DRY" -print | sort >"$TMP/dry-before"
+run_install "$H1_DRY" --dry-run
+find "$H1_DRY" -print | sort >"$TMP/dry-after"
+if [ "$STATUS" -eq 0 ] && cmp -s "$TMP/dry-before" "$TMP/dry-after"; then
+  ok 'fresh-home dry-run creates no files or directories'
+else
+  not_ok 'fresh-home dry-run creates no files or directories'
+fi
+
 section 'existing global state is preserved'
 
 H2="$TMP/h2"
@@ -120,9 +131,12 @@ printf '%s\n' 'personal pi config' >"$H2/.pi/agent/AGENTS.md"
 cp "$H2/.agents/AGENTS.md" "$TMP/agents-before"
 cp "$H2/.codex/config.toml" "$TMP/codex-before"
 cp "$H2/.pi/agent/AGENTS.md" "$TMP/pi-before"
-chmod 000 "$H2/.codex/private"
+chmod 000 "$H2/.agents/AGENTS.md" "$H2/.codex/config.toml" \
+  "$H2/.codex/private" "$H2/.pi/agent/AGENTS.md"
 
 run_install "$H2"
+chmod 600 "$H2/.agents/AGENTS.md" "$H2/.codex/config.toml" "$H2/.pi/agent/AGENTS.md"
+chmod 700 "$H2/.codex/private"
 if [ "$STATUS" -eq 0 ] && cmp -s "$H2/.agents/AGENTS.md" "$TMP/agents-before" && \
   cmp -s "$H2/.codex/config.toml" "$TMP/codex-before" && \
   cmp -s "$H2/.pi/agent/AGENTS.md" "$TMP/pi-before"; then
@@ -136,7 +150,6 @@ if [ "$STATUS" -eq 0 ]; then
 else
   not_ok 'unreadable unrelated configuration does not affect installation'
 fi
-chmod 700 "$H2/.codex/private"
 
 if [ -f "$H2/.agents/skills/local-only/SKILL.md" ] && \
   [ "$(cat "$H2/.agents/skills/local-note.md")" = 'local loose file' ]; then

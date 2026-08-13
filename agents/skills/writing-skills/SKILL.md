@@ -128,20 +128,11 @@ description: Use when tests depend on timing, race intermittently, or rely on fi
 Do not impose a 1024-character limit on the entire frontmatter block. That limit belongs to
 the `description` field.
 
-## Shared discovery and invocation
+## Shared discovery contract
 
-Codex and Pi both support the standard personal and repository locations. Invocation differs:
-
-| Capability | Codex | Pi |
-|---|---|---|
-| Repository | `.agents/skills/<name>/` from the working directory toward the repository root | `.agents/skills/<name>/` from the working directory toward the repository root |
-| Personal | `~/.agents/skills/<name>/` | `~/.agents/skills/<name>/` |
-| Explicit | Mention `$skill-name` or select through `/skills` | Invoke `/skill:name` |
-| Implicit | Description matches the task | Description matches the task |
-
-Both harnesses also have native locations or extensions beyond this portable library. Keep
-shared installation guidance on `.agents/skills` and `~/.agents/skills`; document a native
-location only when a skill intentionally targets one harness. Read
+Portable skills use the standard repository `.agents/skills/` and personal
+`~/.agents/skills/` locations. Harness invocation, native locations, metadata extensions,
+and isolation capabilities differ. Read
 [Agent Skills authoring across harnesses](references/agent-skills-authoring.md) before
 depending on client-specific behavior.
 
@@ -225,13 +216,19 @@ For quality-critical output:
 
 ## Mechanical validation
 
-Run the bundled lightweight validator from the repository root:
+Resolve `scripts/check-skill.sh` relative to this loaded skill's directory, then execute its
+absolute path against the actual target skill directory. This works whether `writing-skills`
+is project-local, installed personally, or loaded from this library's source tree:
 
 ```sh
-agents/skills/writing-skills/scripts/check-skill.sh \
-  agents/skills/<skill-name>
+<resolved-writing-skills-dir>/scripts/check-skill.sh <target-skill-dir>
+```
 
-agents/skills/writing-skills/scripts/check-skill.sh --all
+Use `--all` only when the validator should select the current repository's shared source or
+project-installed tree, falling back to the installed tree containing the validator:
+
+```sh
+<resolved-writing-skills-dir>/scripts/check-skill.sh --all
 ```
 
 It checks deterministic conventions used by this shared tree: required frontmatter,
@@ -239,11 +236,15 @@ identifier rules, directory/name agreement, field lengths, trigger-led descripti
 relative links. It supports plain single-line frontmatter values rather than claiming to be
 a complete YAML parser.
 
-After changing the validator, run its self-contained regression suite:
+After changing the validator, resolve and run its self-contained regression suite the same
+way:
 
 ```sh
-bash agents/skills/writing-skills/scripts/tests/check-skill-test.sh
+bash <resolved-writing-skills-dir>/scripts/tests/check-skill-test.sh
 ```
+
+Maintainers working in this source repository may use
+`agents/skills/writing-skills/scripts/check-skill.sh` as the resolved validator path.
 
 When `skills-ref` is already available, also run:
 

@@ -28,3 +28,16 @@ Keep personal `~/.agents/AGENTS.md` and harness-native configuration under manua
 
 For a project-local install, copy the desired skill directories into that project's
 `.agents/skills/` and review conflicts by hand.
+
+## Verify changes
+
+Run the self-contained Bash suites from the repository root:
+
+```sh
+bash agents/skills/writing-skills/scripts/tests/check-skill-test.sh
+bash agents/scripts/tests/install-test.sh
+bash agents/scripts/tests/repository-contract-test.sh
+```
+
+The contract suite pins the canonical four-skill inventory, retired-path removal, portable
+Codex/Pi guidance, documentation links, and the Pi-port landing split.

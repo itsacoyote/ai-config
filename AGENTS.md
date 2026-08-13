@@ -81,6 +81,7 @@ bash claude/scripts/tests/clwt-test.sh        # exits non-zero on any failure
 bash claude/scripts/tests/beads-gate-test.sh
 bash claude/scripts/tests/install-test.sh
 bash agents/scripts/tests/install-test.sh
+bash agents/scripts/tests/repository-contract-test.sh
 ```
 
 Build the world the script needs under `mktemp -d` with a fake `$HOME` — a bare remote,
