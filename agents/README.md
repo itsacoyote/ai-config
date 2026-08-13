@@ -10,6 +10,21 @@ The source layout mirrors the personal discovery location:
 agents/skills/<name>/SKILL.md  ->  ~/.agents/skills/<name>/SKILL.md
 ```
 
-Until the installer lands, copy a skill directory into a project's `.agents/skills/` or
-the personal `~/.agents/skills/` location. Never copy either harness's `AGENTS.md` as part
-of installing this shared library.
+Codex and Pi both discover the standard project `.agents/skills/` and personal
+`~/.agents/skills/` locations automatically. For a personal additive install, run this
+yourself from the repository checkout:
+
+```sh
+agents/install.sh
+agents/install.sh --dry-run
+```
+
+The installer manages only regular files below `agents/skills/`. It preserves and reports
+personal files already below `~/.agents/skills/`, skips source symlinks, and refuses unsafe
+destination links before writing.
+
+It never reads, installs, merges, or modifies `AGENTS.md`, `~/.codex`, or Pi configuration.
+Keep personal `~/.agents/AGENTS.md` and harness-native configuration under manual control.
+
+For a project-local install, copy the desired skill directories into that project's
+`.agents/skills/` and review conflicts by hand.

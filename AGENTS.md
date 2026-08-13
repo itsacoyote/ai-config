@@ -2,9 +2,9 @@
 
 Guidance for working **in this repository**, whichever agent you are. This repo ships
 harness-specific configuration under `claude/`, `codex/`, and `pi/`, plus portable Agent
-Skills under `agents/skills/`. Codex and Pi
-read this file natively; Claude Code reads it through the `CLAUDE.md` symlink. This file
-documents how to maintain the libraries — it does **not** travel to other projects.
+Skills under `agents/skills/`. Codex and Pi read this file natively; Claude Code reads it
+through the `CLAUDE.md` symlink. This file documents how to maintain the libraries — it does
+**not** travel to other projects.
 
 For the catalog of skills/agents and the feature workflow they implement, see
 [README.md](README.md).
@@ -42,8 +42,9 @@ Decide by intent: a discoverable technique → **skill**; an always-on conventio
 A script that a human runs directly is worth calling out, because an agent cannot always
 invoke one. `clwt`'s launching subcommands `cd` into a worktree and `exec claude` — only a
 process outside the agent can do that. `claude/install.sh` is the same: it writes into
-`~/.claude`, which agents are denied. When a script has that shape, say so in its skill or
-README so agents recommend the command instead of trying to run it.
+`~/.claude`, which agents are denied. `agents/install.sh` likewise writes only shared skills
+into `~/.agents/skills/` and is human-run. When a script has that shape, say so in its skill
+or README so agents recommend the command instead of trying to run it.
 
 ## Authoring conventions
 
@@ -64,8 +65,10 @@ When creating or editing skills, follow the `writing-skills` skill, and:
   `code-review`, `security-review`, `review`, `verify`, `init`, `run`. (That's why this
   repo uses `senior-review` and `security-scan`.)
 
-The three harness trees are **never synced** — content was duplicated at porting time and
-diverges freely (ADR 0006). Editing one tree carries no obligation to touch the others.
+Harness-specific trees are **never synced** — content duplicated at porting time diverges
+freely (ADR 0006). `agents/skills/` is different: it is one canonical portable source loaded
+by Codex and Pi, not synchronized copies. Editing a harness tree still carries no obligation
+to touch another tree.
 
 ## Testing scripts
 
@@ -77,6 +80,7 @@ There is no CI, no package manager, and no test runner here. A script under
 bash claude/scripts/tests/clwt-test.sh        # exits non-zero on any failure
 bash claude/scripts/tests/beads-gate-test.sh
 bash claude/scripts/tests/install-test.sh
+bash agents/scripts/tests/install-test.sh
 ```
 
 Build the world the script needs under `mktemp -d` with a fake `$HOME` — a bare remote,
@@ -124,14 +128,14 @@ The three trees install differently — this is the crux of what each tree *is*:
   into `~/.claude`, where every Claude session on the machine loads them. There is no
   per-project copy of this library; this repo itself runs off the same global install.
   The installer never touches the global settings files — it prints a merge report.
-- **`agents/skills/` is shared by Codex and Pi.** Copy skills into a target project's
-  `.agents/skills/` or install them personally under `~/.agents/skills/`. It never manages
-  an `AGENTS.md` file.
+- **`agents/skills/` is shared by Codex and Pi.** Both harnesses discover project
+  `.agents/skills/` and personal `~/.agents/skills/` automatically. The human-run
+  `agents/install.sh` additively installs only this skill tree into the personal location;
+  it never reads or manages `AGENTS.md`, `~/.codex`, or Pi configuration.
 - **`codex/` contains Codex-specific guidance.** Its `AGENTS.md` remains a manually merged
   project template; portable skills no longer live in this tree.
 - **`pi/` is a personal global file, never copied into a project.** `pi/AGENTS.md`
-  installs once to `~/.pi/agent/AGENTS.md` (`mkdir -p ~/.pi/agent && cp pi/AGENTS.md
-  ~/.pi/agent/AGENTS.md`) and applies in every repo
+  is manually installed once as `~/.pi/agent/AGENTS.md` and applies in every repo
   ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). It carries personal
   accommodations — copying it into a shared repo is the failure mode.
 

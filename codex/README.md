@@ -16,18 +16,17 @@ task matches a skill's description, or explicitly via `$git-commit`, `$branch-na
 
 ## Install into a project
 
-Install the guidance and portable skills separately from this repo's root:
+Install portable skills from this repo's root:
 
 ```sh
-cp codex/AGENTS.md <target>/
 mkdir -p <target>/.agents/skills
 cp -R agents/skills/. <target>/.agents/skills/
 ```
 
 Rules:
 
-- If the target already has an `AGENTS.md`, **merge this file's content into it by hand —
-  never overwrite** the project's own guidance.
+- `codex/AGENTS.md` is optional project guidance. Merge relevant sections into the target's
+  existing `AGENTS.md` by hand; never overwrite project or personal instructions.
 - Portable skills stay under `.agents/skills/` — never flatten them into the project root.
 - If the target already has `.agents/skills/<name>/` directories, merge or rename per
   skill rather than overwriting.
@@ -37,13 +36,12 @@ Rules:
 Codex also discovers skills in `~/.agents/skills` across every project:
 
 ```sh
-mkdir -p ~/.agents/skills
-cp -R agents/skills/. ~/.agents/skills/
+agents/install.sh
+agents/install.sh --dry-run
 ```
 
-This overwrites same-named skills already in `~/.agents/skills` — check with
-`ls ~/.agents/skills` first and merge by hand if `git-commit`, `branch-names`, or
-`create-pr`, or `writing-skills` already exist there.
+Run the installer yourself from the repository checkout. It additively creates or updates
+the shared skill files and reports personal paths it leaves untouched.
 
-`AGENTS.md` remains per-project — copy (or merge) it into each repository where the
-conventions should apply.
+The installer never handles `AGENTS.md`, `~/.codex`, or Pi configuration. Project and
+personal instructions remain manually managed.
