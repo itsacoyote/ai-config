@@ -3,7 +3,8 @@
 set -u
 
 SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
-VALIDATOR="$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)/check-skill.sh"
+DEFAULT_VALIDATOR="$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)/check-skill.sh"
+VALIDATOR="${VALIDATOR_UNDER_TEST:-$DEFAULT_VALIDATOR}"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/check-skill-test.XXXXXX")"
 PASS=0
 FAIL=0
@@ -211,13 +212,13 @@ printf '%s\n' '---' 'name: no-description' '---' >"$NO_DESCRIPTION/SKILL.md"
 expect_failure_matching "rejects a missing description" "missing 'description:'" "$VALIDATOR" "$NO_DESCRIPTION"
 
 ALL_REPO="$TEST_ROOT/all-repo"
-mkdir -p "$ALL_REPO/codex/.agents/skills"
+mkdir -p "$ALL_REPO/agents/skills"
 git init -q "$ALL_REPO"
-write_skill "$ALL_REPO/codex/.agents/skills/valid" "valid" "Use when testing all valid skills."
-expect_success "--all scans the Codex source tree" run_from "$ALL_REPO" "$VALIDATOR" --all
+write_skill "$ALL_REPO/agents/skills/valid" "valid" "Use when testing all valid skills."
+expect_success "--all scans the shared agents source tree" run_from "$ALL_REPO" "$VALIDATOR" --all
 
-write_skill "$ALL_REPO/codex/.agents/skills/bad--name" "bad--name" "Use when testing an invalid tree."
-expect_failure "--all fails when any Codex skill is invalid" run_from "$ALL_REPO" "$VALIDATOR" --all
+write_skill "$ALL_REPO/agents/skills/bad--name" "bad--name" "Use when testing an invalid tree."
+expect_failure "--all fails when any shared skill is invalid" run_from "$ALL_REPO" "$VALIDATOR" --all
 
 INSTALLED_REPO="$TEST_ROOT/installed-repo"
 mkdir -p "$INSTALLED_REPO/.agents/skills"
@@ -225,8 +226,17 @@ git init -q "$INSTALLED_REPO"
 write_skill "$INSTALLED_REPO/.agents/skills/valid" "valid" "Use when testing a project-installed skill."
 expect_success "--all scans a project-installed .agents tree" run_from "$INSTALLED_REPO" "$VALIDATOR" --all
 
+# Regression: the retired Codex source layout must not win discovery. If this fixture is
+# scanned, its deliberately invalid name makes the validator fail instead of using the
+# bundled shared skill root.
+LEGACY_REPO="$TEST_ROOT/legacy-repo"
+mkdir -p "$LEGACY_REPO/codex/.agents/skills"
+git init -q "$LEGACY_REPO"
+write_skill "$LEGACY_REPO/codex/.agents/skills/bad--name" "bad--name" "Use when testing a retired source layout."
+expect_success "--all ignores the retired codex source tree" run_from "$LEGACY_REPO" "$VALIDATOR" --all
+
 EMPTY_REPO="$TEST_ROOT/empty-repo"
-mkdir -p "$EMPTY_REPO/codex/.agents/skills"
+mkdir -p "$EMPTY_REPO/agents/skills"
 git init -q "$EMPTY_REPO"
 expect_failure "--all rejects an empty selected skill root" run_from "$EMPTY_REPO" "$VALIDATOR" --all
 

@@ -63,8 +63,7 @@ would understand the code without the comment, delete the comment.
 
 ## Skills
 
-Four skills accompany these conventions: the git skills `git-commit`, `branch-names`,
-and `create-pr`, plus `writing-skills` for authoring and porting Codex Agent Skills. If
-they are installed in this repository's `.agents/skills/` or in personal
-`~/.agents/skills`, Codex loads them automatically when the task matches;
-`$writing-skills` (and friends) invokes one explicitly.
+Portable skills may accompany these conventions from the shared `agents/skills/` library,
+including `git-commit`, `branch-names`, `create-pr`, and `writing-skills`. If installed in
+this repository's `.agents/skills/` or in personal `~/.agents/skills`, Codex loads them
+automatically when the task matches; `$writing-skills` (and friends) invokes one explicitly.

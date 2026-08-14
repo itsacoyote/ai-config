@@ -2,7 +2,9 @@
 
 Date: 2026-08-03
 
-Status: Accepted (subagent restriction superseded by [ADR 0009](0009-codex-subagent-skill-testing.md))
+Status: Accepted for harness-specific configuration (portable-skill duplication superseded
+by [ADR 0010](0010-shared-agent-skills-library.md); subagent restriction superseded by
+[ADR 0009](0009-codex-subagent-skill-testing.md))
 
 Amends: [ADR 0004](0004-revert-agent-agnostic-library.md)
 

@@ -2,7 +2,8 @@
 
 Date: 2026-08-04
 
-Status: Accepted
+Status: Accepted for Pi context configuration (the no-skill-autoload premise is superseded
+by [ADR 0010](0010-shared-agent-skills-library.md))
 
 Amends: [ADR 0007](0007-claude-tree-global-install.md) (its "codex/ and pi/ are
 per-project copies" statement, for pi/ only)

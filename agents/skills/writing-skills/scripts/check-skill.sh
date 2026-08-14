@@ -1,5 +1,5 @@
 #!/bin/sh
-# check-skill.sh — lightweight validation for Codex Agent Skills in this library.
+# check-skill.sh — lightweight validation for portable Agent Skills in the shared tree.
 #
 # It validates the plain, single-line frontmatter style used by this repository. It is not a
 # complete YAML parser; use skills-ref validate as well when that tool is already present.
@@ -156,7 +156,7 @@ check_one() {
 
       case "$target" in
         /*) path="$ROOT/${target#/}" ;;
-        .agents/*|codex/.agents/*) path="$ROOT/$target" ;;
+        .agents/*|agents/*) path="$ROOT/$target" ;;
         *) path="$(dirname "$source_md")/$target" ;;
       esac
 
@@ -188,8 +188,8 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 fi
 
 if [ "${1:-}" = "--all" ]; then
-  if [ -d "$ROOT/codex/.agents/skills" ]; then
-    skills_root="$ROOT/codex/.agents/skills"
+  if [ -d "$ROOT/agents/skills" ]; then
+    skills_root="$ROOT/agents/skills"
   elif [ -d "$ROOT/.agents/skills" ]; then
     skills_root="$ROOT/.agents/skills"
   else

@@ -342,28 +342,31 @@ the `setup-beads` skill to install and initialize it. See
 
 ---
 
-## The three harness trees
+## Harness configuration and shared skills
 
-This repo ships three self-contained libraries, one per harness — none of them is
-derived from another:
+This repo ships harness-specific configuration plus a portable Agent Skills library:
 
 - **[`claude/`](claude/)** — the full workflow library for Claude Code, installed
   **globally** via `claude/install.sh` (see [Installing the library](#installing-the-library)).
-- **[`codex/`](codex/)** — for the Codex CLI: an `AGENTS.md` conventions file plus the
-  `git-commit`, `branch-names`, `create-pr`, and `writing-skills` skills in Codex's native
-  `.agents/skills/` layout, copied **per project**. Install steps in
-  [`codex/README.md`](codex/README.md).
+- **[`agents/`](agents/)** — portable Open Agent Skills shared by Codex and Pi, authored in
+  `agents/skills/`. Both harnesses auto-discover project `.agents/skills/` and personal
+  `~/.agents/skills/`; use the human-run `agents/install.sh` for an additive personal install.
+- **[`codex/`](codex/)** — Codex-specific `AGENTS.md` guidance, manually merged into a
+  project when wanted. Skill installation is documented in [`codex/README.md`](codex/README.md).
 - **[`pi/`](pi/)** — for [Pi](https://pi.dev): a **personal global context file**
   (communication rules, conventions, workflow, change gate, execution guardrails),
-  installed once and active in every repo —
-  `mkdir -p ~/.pi/agent && cp pi/AGENTS.md ~/.pi/agent/AGENTS.md`
-  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). The Pi workflow skills are
-  a future feature.
+  manually installed once as `~/.pi/agent/AGENTS.md` and active in every repo
+  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). Pi also auto-discovers the
+  shared Agent Skills locations
+  ([official Pi skills documentation](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md)).
 
-There is **no sync** between the trees: content was duplicated at porting time and
-diverges freely ([ADR 0006](docs/decisions/0006-per-harness-config-trees.md),
-[ADR 0007](docs/decisions/0007-claude-tree-global-install.md)). `claude/` is canonical
-for this repo's own work.
+The shared `agents/skills/` tree is one portable source, not synchronized harness copies.
+Harness-specific content still diverges freely ([ADR 0006](docs/decisions/0006-per-harness-config-trees.md),
+[ADR 0010](docs/decisions/0010-shared-agent-skills-library.md)). `claude/` remains canonical
+for the Claude workflow used by this repo.
+
+Run `agents/install.sh` yourself. It manages only `~/.agents/skills/`; it never reads,
+copies, merges, or modifies `AGENTS.md`, `~/.codex`, or Pi configuration.
 
 This repo's own guidance lives in `AGENTS.md` (read natively by Codex and Pi);
 `CLAUDE.md` is a **symlink** to it, which is how Claude Code reads the same file. Two
@@ -400,7 +403,8 @@ claude/
 ├── scripts/               # clwt, worktree-status.sh, and their tests
 ├── settings.json          # settings TEMPLATE the merge report diffs against (not live config)
 └── statusline-command.sh  # statusline script, installed to ~/.claude
-codex/             # Codex CLI config: AGENTS.md + native skills (not synced with claude/)
+agents/            # shared skills + human-run additive installer for ~/.agents/skills
+codex/             # Codex-specific AGENTS.md guidance
 pi/                # Pi config: personal global AGENTS.md, installed to ~/.pi/agent (not synced)
 archive/           # the previous automated pipeline, kept for reference
 AGENTS.md          # how to work IN this repo (read by all three harnesses)
