@@ -29,6 +29,8 @@ For the catalog of skills/agents and the feature workflow they implement, see
 - `claude/settings.json` — the settings **template** the installer's merge report diffs
   against. It is not live config; this repo carries no project-level Claude config
   directory.
+- `codex/scripts/<name>` — Codex-specific executable tooling. `cwt` is a developer-facing
+  CLI with its completion beside it and tests under `codex/scripts/tests/`.
 - `agents/skills/<name>/SKILL.md` — portable Open Agent Skills shared by Codex and Pi.
   New cross-harness skills belong here; harness-specific behavior stays in its own tree.
 - `codex/`, `pi/` — harness-specific configuration and guidance. See `codex/README.md`
@@ -40,8 +42,8 @@ Decide by intent: a discoverable technique → **skill**; an always-on conventio
 **reference**; something that must *run* → **script**.
 
 A script that a human runs directly is worth calling out, because an agent cannot always
-invoke one. `clwt`'s launching subcommands `cd` into a worktree and `exec claude` — only a
-process outside the agent can do that. `claude/install.sh` is the same: it writes into
+invoke one. `clwt` and `cwt` launch their harnesses by replacing the current process — only
+a process outside the active agent can do that. `claude/install.sh` is the same: it writes into
 `~/.claude`, which agents are denied. `agents/install.sh` likewise writes only shared skills
 into `~/.agents/skills/` and is human-run. When a script has that shape, say so in its skill
 or README so agents recommend the command instead of trying to run it.
@@ -78,6 +80,7 @@ There is no CI, no package manager, and no test runner here. A script under
 
 ```bash
 bash claude/scripts/tests/clwt-test.sh        # exits non-zero on any failure
+bash codex/scripts/tests/cwt-test.sh
 bash claude/scripts/tests/beads-gate-test.sh
 bash claude/scripts/tests/install-test.sh
 bash agents/scripts/tests/install-test.sh
@@ -86,9 +89,9 @@ bash agents/scripts/tests/repository-contract-test.sh
 
 Build the world the script needs under `mktemp -d` with a fake `$HOME` — a bare remote,
 a clone, stub binaries on `PATH` that log how they were invoked. Stubbing the thing the
-script *launches* is what makes its behavior observable; `clwt`'s stub `claude` records
-`$PWD` and its environment, which is the only honest way to assert that a launched
-session really is rooted where it should be.
+script *launches* is what makes its behavior observable; the `clwt` and `cwt` suites stub
+`claude` and `codex` respectively, recording `$PWD`, arguments, and environment. That is
+the only honest way to assert that a launched session really is rooted where it should be.
 
 **Target stock macOS bash 3.2** — scripts and their suites both. A bash 4+ builtin
 (`mapfile`, associative arrays) does not fail loudly here; `mapfile` left `COMPREPLY`
