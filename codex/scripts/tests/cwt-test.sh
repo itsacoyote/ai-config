@@ -2012,7 +2012,8 @@ fi
 # A completion that reaches the network freezes the terminal on Tab. Hard rule.
 # Comments are stripped first — the file explains at length *why* it avoids `gh`,
 # and matching that prose would fail the check for saying the right thing.
-if sed 's/#.*//' "$COMPLETION" | grep -qE '\b(gh|curl|wget|nc)\b'; then
+if sed 's/#.*//' "$COMPLETION" |
+  grep -qE '\b(gh|curl|wget|nc)\b|git[[:space:]]+(fetch|pull|ls-remote)([[:space:]]|$)'; then
   not_ok 'the completion script makes no network calls'
 else
   ok 'the completion script makes no network calls'
