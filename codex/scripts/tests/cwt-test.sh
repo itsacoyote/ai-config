@@ -12,7 +12,7 @@
 set -uo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)
-CWT="$REPO_ROOT/codex/scripts/cwt"
+CWT=${CWT_UNDER_TEST:-"$REPO_ROOT/codex/scripts/cwt"}
 
 pass=0
 fail=0
@@ -65,7 +65,16 @@ check_not_contains() {
   if printf '%s\n' "$text" | grep -qF -- "$needle"; then not_ok "$label"; else ok "$label"; fi
 }
 
-section() { printf '\n%s\n' "$1"; }
+current_section=''
+section() {
+  if [ -n "${CWT_TEST_STOP_AFTER:-}" ] && [ "$current_section" = "$CWT_TEST_STOP_AFTER" ]; then
+    printf '\nmutation checkpoint: %d passed, %d failed\n' "$pass" "$fail"
+    [ "$fail" -eq 0 ]
+    exit
+  fi
+  current_section=$1
+  printf '\n%s\n' "$1"
+}
 
 # ---------------------------------------------------------------- world setup
 
@@ -602,6 +611,12 @@ done
 check 'no side effect ran from a command-substitution remote' \
   test ! -e "$PRIMARY/pwned"
 
+credentialed_out=$(probe_remote 'https://user:supersecret@host/owner/re;po' || true)
+check_not_contains 'a malformed credentialed remote is not echoed in an error' \
+  'user:supersecret' "$credentialed_out"
+check_contains 'a malformed credentialed remote still gives a useful error' \
+  'cannot derive repository from origin remote' "$credentialed_out"
+
 (cd "$PRIMARY" && git remote set-url origin "$REMOTE")
 
 # ----------------------------------------------------------------------- list
@@ -797,9 +812,18 @@ check 'no traversal escaped to the home directory' test ! -e "$HOME/evil"
 mkdir -p "$MANAGED/feat-occupied"
 check_fails 'new refuses when the target path exists but is not a registered worktree' \
   cwt new feat/occupied
-check_output 'new explains that the target path is occupied' \
-  'exists' cwt new feat/occupied
+check_output 'new explains that the occupied target is not a registered worktree' \
+  'not a registered worktree' cwt new feat/occupied
 rmdir "$MANAGED/feat-occupied"
+
+# Point the target at a valid sibling so containment cannot reject it first.
+# This pins ensure_available_path's own symlink guard rather than an incidental
+# failure from git worktree add.
+ln -s "$MANAGED/feat-alpha" "$MANAGED/feat-symlink-target"
+check_fails 'new refuses a symlink at its target path' cwt new feat/symlink-target
+check_output 'new says its target path must not be a symlink' \
+  'target path must not be a symlink' cwt new feat/symlink-target
+rm -f "$MANAGED/feat-symlink-target"
 
 # An existing local branch that is not checked out anywhere is `branch`'s job.
 git -C "$PRIMARY" branch feat/dormant >/dev/null 2>&1
@@ -1081,6 +1105,18 @@ fi
 
 rm -rf "$PRIMARY/evil-link" "$PRIMARY/nested-link" "$PRIMARY/dir-dst" "$PRIMARY/.worktreeinclude"
 
+# git currently emits normalized repository-relative paths, so the escape-path
+# assertion cannot be reached through an honest fixture. Pin its presence: if
+# git's contract ever changes, this is the last cheap check before cwt writes.
+check 'copy keeps its normalized relative-path assertion' \
+  grep -qF 'refusing to copy a path that escapes the worktree' "$CWT"
+
+# The second containment check closes a race between validation and mkdir/copy.
+# Deterministically winning that race in a shell test is unreliable, so require
+# both executable warning sites. Deleting either must make the suite red.
+check_equals 'copy validates destination containment before and after mkdir' \
+  '2' "$(grep -cF 'its destination resolves outside the worktree' "$CWT")"
+
 section 'remove'
 
 # Clean worktree: removed, branch kept.
@@ -1104,6 +1140,8 @@ launch_reset
 cwt new feat/dirty-tracked >/dev/null 2>&1
 printf 'edited\n' >>"$MANAGED/feat-dirty-tracked/README.md"
 check_fails 'remove refuses a worktree with uncommitted changes' cwt remove feat/dirty-tracked
+check_output 'remove identifies uncommitted work before git rejects the deletion' \
+  'uncommitted or untracked work' cwt remove feat/dirty-tracked
 check 'the refused worktree still exists' test -d "$MANAGED/feat-dirty-tracked"
 
 # An untracked file is real work too, and plain --porcelain would miss it only
@@ -1112,6 +1150,8 @@ launch_reset
 cwt new feat/dirty-untracked >/dev/null 2>&1
 printf 'scratch\n' >"$MANAGED/feat-dirty-untracked/notes.md"
 check_fails 'remove refuses a worktree with an untracked file' cwt remove feat/dirty-untracked
+check_output 'remove identifies untracked work before git rejects the deletion' \
+  'uncommitted or untracked work' cwt remove feat/dirty-untracked
 
 # The HIGH-1 case. .env is gitignored, so a worktree holding a copied one is
 # *ignored*-dirty but not actually dirty. It must be removable — otherwise every
@@ -1212,6 +1252,11 @@ rm -f "$FAILGIT/git"
 check 'the worktree survives every simulated git failure' \
   test -f "$MANAGED/feat-failing-git/.env"
 cwt remove feat/failing-git >/dev/null 2>&1
+
+# Removal uses Git's checked delete. Switching this to -D would silently discard
+# an unmerged branch after its worktree is gone; pin the non-forcing contract.
+check 'remove never force-deletes a branch' \
+  grep -qF 'git branch -d "$branch"' "$CWT"
 
 section 'prune'
 
@@ -1324,6 +1369,16 @@ rm -rf "$MANAGED/feat-symlink-prune"
 ln -s "$MANAGED/feat-link-target" "$MANAGED/feat-symlink-prune"
 pr_state feat/symlink-prune MERGED
 
+# Git retains the lexical worktree path if an intermediate directory is later
+# moved and replaced by a symlink. The lexical path remains under managed_root,
+# but its physical path is now outside; prune must re-check after pwd -P.
+mkdir -p "$MANAGED/intermediate"
+git -C "$PRIMARY" worktree add -q -b feat/physical-escape \
+  "$MANAGED/intermediate/feat-physical-escape" 2>/dev/null
+mv "$MANAGED/intermediate" "$TMP/outside-prune"
+ln -s "$TMP/outside-prune" "$MANAGED/intermediate"
+pr_state feat/physical-escape MERGED
+
 cwt prune --yes >/dev/null 2>&1
 
 check 'prune never removes an unmanaged worktree even when its PR is merged' \
@@ -1333,9 +1388,22 @@ check 'prune never removes the primary checkout even when its branch is merged' 
 check 'prune never removes a symlinked worktree path even when its PR is merged' \
   test -L "$MANAGED/feat-symlink-prune"
 check 'the symlink target survives too' test -d "$MANAGED/feat-link-target"
+check 'prune never removes a worktree whose physical path escapes through an intermediate symlink' \
+  test -d "$TMP/outside-prune/feat-physical-escape"
+
+# This is intentionally redundant with managed-root containment, but prune is
+# the tool's only bulk-delete path. Pin the explicit primary-checkout exclusion
+# so simplifying the condition cannot silently remove the defense in depth.
+check 'prune keeps an explicit primary-checkout exclusion' \
+  grep -qF 'if [[ -n $path && -n $branch && $path != "$primary" && ! -L $path ]]; then' "$CWT"
 
 rm -f "$MANAGED/feat-symlink-prune"
+git -C "$PRIMARY" worktree remove --force \
+  "$TMP/outside-prune/feat-physical-escape" >/dev/null 2>&1
+rm -f "$MANAGED/intermediate"
+rm -rf "$TMP/outside-prune"
 rm -f "$CWT_GH_STATES/feat-stray" "$CWT_GH_STATES/feat-symlink-prune" \
+  "$CWT_GH_STATES/feat-physical-escape" \
   "$CWT_GH_STATES/$(printf '%s' "$primary_branch_now" | tr '/' '-')"
 
 # -------------------------------------------------------------------- install
@@ -1401,7 +1469,7 @@ check 'install works outside a git repository' cwt_in "$TMP/not-a-repo" install
 
 COMP_DIR="$HOME/.local/share/bash-completion/completions"
 COMP_LINK="$COMP_DIR/cwt"
-EXPECTED_COMPLETION="$REPO_ROOT/codex/scripts/cwt-completion.bash"
+EXPECTED_COMPLETION=${CWT_COMPLETION_UNDER_TEST:-"$REPO_ROOT/codex/scripts/cwt-completion.bash"}
 
 reset_install
 rm -rf "$HOME/.local/share/bash-completion"
@@ -1454,7 +1522,7 @@ check 'pr runs the worktreeinclude copy in the new worktree' \
   test -f "$MANAGED/feat-from-pr/.env"
 check_equals 'the pr worktree is on the head ref branch' \
   'feat/from-pr' "$(cd "$MANAGED/feat-from-pr" && git symbolic-ref --short HEAD 2>/dev/null)"
-if printf '%s\n' "$pr_out" | grep -qi 'fork'; then
+if printf '%s\n' "$pr_out" | grep -qF 'WARNING: pull request #101 comes from a fork'; then
   not_ok 'pr does not warn for a same-repo pull request'
 else
   ok 'pr does not warn for a same-repo pull request'
@@ -1463,7 +1531,7 @@ fi
 launch_reset
 fork_out=$(cwt pr 202 2>&1)
 check 'pr checks out a fork pull request too' test -d "$MANAGED/feat-forked"
-if printf '%s\n' "$fork_out" | grep -qi 'fork'; then
+if printf '%s\n' "$fork_out" | grep -qF 'WARNING: pull request #202 comes from a fork'; then
   ok 'pr warns before launching when the pull request head is a fork'
 else
   not_ok 'pr warns before launching when the pull request head is a fork'
@@ -1918,7 +1986,7 @@ git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-relation-held" >/dev/nu
 
 section 'bash completion'
 
-COMPLETION="$REPO_ROOT/codex/scripts/cwt-completion.bash"
+COMPLETION=${CWT_COMPLETION_UNDER_TEST:-"$REPO_ROOT/codex/scripts/cwt-completion.bash"}
 
 check 'the completion script exists' test -f "$COMPLETION"
 check 'the completion script parses as valid bash' bash -n "$COMPLETION"
