@@ -282,6 +282,24 @@ Exits non-zero on any failure.
 
 ---
 
+## `cwt` — Codex worktree CLI
+
+`codex/scripts/cwt` is an independent Codex port of `clwt`. It preserves the same ten
+commands and the shared `~/github/.worktrees/<owner>/<repo>/` managed root, but launches
+Codex, exports `CWT_REPO_ROOT`, and passes Codex's native `--yolo` flag. Run its launching
+commands from your shell, not from inside an active Codex session.
+
+```bash
+codex/scripts/cwt install
+```
+
+Installation, Bash/zsh completion, command behavior, safety boundaries, and the manual
+test command are documented in the [Codex cwt guide](codex/README.md#cwt--worktree-cli).
+The independent-port rationale is recorded in
+[ADR 0011](docs/decisions/0011-cwt-worktree-cli.md).
+
+---
+
 ## Installing the library
 
 The Claude library is consumed **globally** — one install serves every project on the
@@ -404,7 +422,7 @@ claude/
 ├── settings.json          # settings TEMPLATE the merge report diffs against (not live config)
 └── statusline-command.sh  # statusline script, installed to ~/.claude
 agents/            # shared skills + human-run additive installer for ~/.agents/skills
-codex/             # Codex-specific AGENTS.md guidance
+codex/             # Codex guidance plus cwt, completion, and tests
 pi/                # Pi config: personal global AGENTS.md, installed to ~/.pi/agent (not synced)
 archive/           # the previous automated pipeline, kept for reference
 AGENTS.md          # how to work IN this repo (read by all three harnesses)

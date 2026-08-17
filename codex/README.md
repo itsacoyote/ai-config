@@ -45,3 +45,76 @@ the shared skill files and reports personal paths it leaves untouched.
 
 The installer never handles `AGENTS.md`, `~/.codex`, or Pi configuration. Project and
 personal instructions remain manually managed.
+
+## `cwt` — worktree CLI
+
+`codex/scripts/cwt` is the Codex-specific worktree CLI. Run it from your shell, not from
+inside an active Codex session: its launching commands change directory and replace the
+current process with a new Codex session.
+
+**Prerequisites:** stock macOS Bash 3.2 or newer and Git. Authenticated `gh` is required
+only for `cwt pr` and `cwt prune`. The repository must have an `origin` remote.
+
+Install the command and Bash completion from this repository's root:
+
+```bash
+codex/scripts/cwt install
+```
+
+This creates symlinks at `~/.local/bin/cwt` and
+`~/.local/share/bash-completion/completions/cwt`. Bash-completion 2.x autoloads the
+completion by filename. zsh users must initialize its Bash-completion bridge and source
+the installed file manually after `compinit`:
+
+```zsh
+autoload -Uz bashcompinit && bashcompinit
+source ~/.local/share/bash-completion/completions/cwt
+```
+
+### Commands
+
+| Command | Purpose |
+|---|---|
+| `cwt list` | List this repository's worktrees and mark unmanaged entries. |
+| `cwt new <type>/<slug>` | Create a branch from the current origin default, create its worktree, and launch Codex. |
+| `cwt branch <branch>` | Check out an existing local or origin branch and launch Codex. |
+| `cwt open <branch>` | Launch Codex in an existing managed worktree. |
+| `cwt pr <number> [--force]` | Check out a pull request, warn for forks, and launch Codex. |
+| `cwt root` | Launch Codex in the primary checkout. |
+| `cwt remove <branch> [--delete-branch]` | Remove a clean managed worktree. |
+| `cwt prune [--yes]` | Find worktrees with merged pull requests; `--yes` applies the dry run. |
+| `cwt install` | Symlink the CLI and completion into the user paths above. |
+| `cwt help` | Show command help. |
+
+Worktrees live at
+`~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/`. `cwt` and `clwt`
+intentionally share that managed root, so either tool sees the same repository worktrees;
+each still launches only its own harness.
+
+Launching commands physically `cd` into the selected checkout and `exec codex`. They do
+not rely on Codex's native `-C` option, so startup hooks and child processes inherit the
+same real working directory. Each launched session receives `CWT_REPO_ROOT` pointing at
+the primary checkout.
+
+`--yolo` passes Codex's native `--yolo` flag, which bypasses approvals and sandboxing for
+that session. Arguments after `--` pass through to Codex unchanged. On `cwt pr`, `--force`
+allows `gh pr checkout` to reset a leftover local branch; without it, automatic reset is
+allowed only when the branch is proven to contain no local-only commits.
+
+### Untracked files and beads
+
+New worktrees copy ignored or untracked files matched by the primary checkout's
+`.worktreeinclude`, such as a local `.env`. The `.beads/` directory is always excluded:
+worktrees share the primary checkout's single issue database through Git's common
+directory, and copying it would fork that state.
+
+### Tests
+
+Run the self-contained suite manually:
+
+```bash
+bash codex/scripts/tests/cwt-test.sh
+```
+
+It builds a disposable Git world with fake `HOME`, `codex`, and `gh` fixtures. The CLI,
+completion, and suite target stock macOS Bash 3.2.

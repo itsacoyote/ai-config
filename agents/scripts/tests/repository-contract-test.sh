@@ -21,6 +21,7 @@ $REPO_ROOT/agents/README.md
 $REPO_ROOT/codex/README.md
 $REPO_ROOT/codex/AGENTS.md
 $REPO_ROOT/docs/decisions/0010-shared-agent-skills-library.md
+$REPO_ROOT/docs/decisions/0011-cwt-worktree-cli.md
 "
 
 LINK_DOCS="$ACTIVE_DOCS
@@ -56,6 +57,20 @@ if [ ! -e "$REPO_ROOT/codex/.agents/skills" ]; then
   ok 'retired codex skill source is absent'
 else
   not_ok 'retired codex skill source is absent'
+fi
+
+if [ -x "$REPO_ROOT/codex/scripts/cwt" ] && \
+  [ -f "$REPO_ROOT/codex/scripts/cwt-completion.bash" ] && \
+  [ -x "$REPO_ROOT/codex/scripts/tests/cwt-test.sh" ]; then
+  ok 'codex/scripts/cwt and its completion and suite are Codex-specific artifacts'
+else
+  not_ok 'codex/scripts/cwt and its completion and suite are Codex-specific artifacts'
+fi
+
+if [ ! -e "$REPO_ROOT/agents/skills/cwt" ]; then
+  ok 'agents/skills/cwt is absent because the developer-facing CLI is not a shared skill'
+else
+  not_ok 'agents/skills/cwt is absent because the developer-facing CLI is not a shared skill'
 fi
 
 names_match=1
