@@ -181,7 +181,7 @@ A small Bash CLI at `claude/scripts/clwt` that manages this repository's git
 worktrees and launches Claude Code inside them. **You run it from your shell, not
 from inside Claude.**
 
-**Prerequisites:** `bash` 4+ and `git`. `gh` (authenticated) is needed only by `clwt pr`
+**Prerequisites:** stock macOS `bash` 3.2+ and `git`. `gh` (authenticated) is needed only by `clwt pr`
 and `clwt prune` — both fail with a clear message rather than guessing if it is missing
 or logged out. The repository must have an `origin` remote, since the managed paths are
 derived from it.
@@ -240,6 +240,15 @@ A leftover local branch from a merged/force-pushed PR resets automatically when 
 can prove it holds no commits of its own; otherwise the branch is left untouched, and a
 checkout failure names `--force` to reset it explicitly (see `clwt help` for the exact
 wording).
+
+When that PR branch already has a managed worktree, `clwt pr` refreshes it only after
+verifying the canonical PR URL, the exact GitHub head commit, a clean working tree, and the
+last head that `clwt` verified. Safe fast-forwards happen normally; rewritten history resets
+only from that recorded head. `--force` does not bypass these checks. Ignored local files such
+as `.env` are preserved, and the refresh is refused if the new PR tree would overwrite one.
+An older markerless PR worktree can migrate only when its native Git tracking matches the PR
+and the update is a fast-forward; rewritten history is refused because no last-verified head
+exists yet.
 
 ### Why it's a CLI and not a skill
 

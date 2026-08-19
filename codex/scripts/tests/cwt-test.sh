@@ -119,12 +119,26 @@ export CWT_TEST_LOG="$TMP/launch.log"
 cat >"$BIN/codex" <<'STUB'
 #!/usr/bin/env bash
 {
+  printf 'harness=codex\n'
   printf 'pwd=%s\n' "$PWD"
   printf 'CWT_REPO_ROOT=%s\n' "${CWT_REPO_ROOT-<unset>}"
   printf 'args=%s\n' "$*"
 } >>"$CWT_TEST_LOG"
 STUB
 chmod +x "$BIN/codex"
+
+# Real cross-harness checks execute claude/scripts/clwt in this same sandbox.
+# The stub makes its launch observable without starting a nested agent session.
+cat >"$BIN/claude" <<'STUB'
+#!/usr/bin/env bash
+{
+  printf 'harness=claude\n'
+  printf 'pwd=%s\n' "$PWD"
+  printf 'CLWT_REPO_ROOT=%s\n' "${CLWT_REPO_ROOT-<unset>}"
+  printf 'args=%s\n' "$*"
+} >>"$CWT_TEST_LOG"
+STUB
+chmod +x "$BIN/claude"
 
 # Stub `gh`: canned responses driven by files the tests write.
 #
@@ -154,6 +168,8 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
       sed -n 's/^isCrossRepository=//p' "$meta"
       sed -n 's/^headRepositoryOwner=//p' "$meta"
       sed -n 's/^headRepository=//p' "$meta"
+      sed -n 's/^url=//p' "$meta"
+      sed -n 's/^headRefOid=//p' "$meta"
       exit 0
       ;;
     *)
@@ -183,9 +199,11 @@ if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
   head_ref=$(sed -n 's/^headRefName=//p' "$meta")
 
   force=0
+  detach=0
   shift 3
   for arg in "$@"; do
     [ "$arg" = "--force" ] && force=1
+    [ "$arg" = "--detach" ] && detach=1
   done
 
   # This stub models the SAME-REPO checkout only: fetch the PR head and update
@@ -198,6 +216,29 @@ if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
   if ! git fetch -q origin "+refs/heads/$head_ref:refs/remotes/origin/$head_ref" 2>/dev/null; then
     echo "fatal: couldn't find remote ref $head_ref" >&2
     exit 1
+  fi
+
+  if [ "$detach" = 1 ]; then
+    if grep -q '^checkoutOidMismatch=true$' "$meta"; then
+      git checkout -q --detach HEAD
+    else
+      git checkout -q --detach "refs/remotes/origin/$head_ref"
+    fi
+    exit $?
+  fi
+
+  if grep -q '^checkoutOidMismatch=true$' "$meta"; then
+    if git show-ref --verify --quiet "refs/heads/$head_ref"; then
+      git checkout -q "$head_ref"
+    else
+      git checkout -q -b "$head_ref" HEAD
+    fi
+    exit $?
+  fi
+
+  if grep -q '^checkoutWrongBranch=true$' "$meta"; then
+    git checkout -q -b "wrong-$head_ref" "refs/remotes/origin/$head_ref"
+    exit $?
   fi
 
   if ! git show-ref --verify --quiet "refs/heads/$head_ref"; then
@@ -234,9 +275,30 @@ pr_state() { printf '%s\n' "$2" >"$CWT_GH_STATES/$(printf '%s' "$1" | tr '/' '-'
 # repository". Override them for a pull request whose head lives somewhere else,
 # which is what a fork-workflow clone (origin=fork, upstream=base) looks like.
 pr_meta() {
-  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\n' \
-    "$2" "$3" "${4:-owner}" "${5:-project}" >"$CWT_GH_PRS/$1"
-  push_pr_head "$2"
+  local oid
+  oid=$(push_pr_head "$2") || return 1
+  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
+    "$2" "$3" "${4:-owner}" "${5:-project}" \
+    "https://github.com/owner/project/pull/$1" "$oid" >"$CWT_GH_PRS/$1"
+}
+
+sync_pr_metadata_oid() {
+  local branch=$1 oid=$2 meta tmp
+  for meta in "$CWT_GH_PRS"/*; do
+    [ -f "$meta" ] || continue
+    [ "$(sed -n 's/^headRefName=//p' "$meta")" = "$branch" ] || continue
+    tmp="$meta.tmp"
+    sed "s/^headRefOid=.*/headRefOid=$oid/" "$meta" >"$tmp" || return 1
+    mv "$tmp" "$meta" || return 1
+  done
+}
+
+assert_pr_oid_matches_remote() {
+  local number=$1 branch expected actual
+  branch=$(sed -n 's/^headRefName=//p' "$CWT_GH_PRS/$number")
+  expected=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/$number")
+  actual=$(git -C "$PRIMARY" ls-remote origin "refs/heads/$branch" | cut -f1)
+  check_equals "fixture PR #$number metadata OID matches its remote head" "$actual" "$expected"
 }
 
 # ensure_scratch_push — a clone of $REMOTE used exclusively for creating and
@@ -278,6 +340,7 @@ push_pr_head() {
   sha=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse HEAD^{tree})" \
     -p HEAD -m "initial head for $branch ($RANDOM$RANDOM)")
   git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
+  printf '%s\n' "$sha"
 }
 
 # force_advance_pr_head <branch> — force-moves an EXISTING PR head on $REMOTE
@@ -296,6 +359,7 @@ force_advance_pr_head() {
   new_sha=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse "$old_tip^{tree}")" \
     -p "$old_tip" -m "force-push $branch ($RANDOM$RANDOM)")
   git -C "$SCRATCH_PUSH" push -q -f origin "$new_sha:refs/heads/$branch"
+  sync_pr_metadata_oid "$branch" "$new_sha" || return 1
   printf '%s\n' "$new_sha"
 }
 
@@ -339,7 +403,44 @@ rewrite_pr_head() {
     return 1
   fi
   git -C "$SCRATCH_PUSH" push -q -f origin "$new_sha:refs/heads/$branch"
+  sync_pr_metadata_oid "$branch" "$new_sha" || return 1
   printf '%s\n' "$new_sha"
+}
+
+# push_pr_tree_shape <number> <branch> <exact-file|file-ancestor|directory> —
+# replaces the PR head with a commit whose tracked .env shape collides with an
+# ignored local path in a different way. A throwaway clone keeps fixture files
+# out of both the primary checkout and the shared scratch push checkout.
+push_pr_tree_shape() {
+  local number=$1 branch=$2 shape=$3 clone oid
+  clone="$TMP/tree-shape-$number"
+  git clone -q "$REMOTE" "$clone" >/dev/null 2>&1 || return 1
+  git -C "$clone" fetch -q origin "refs/heads/$branch" || return 1
+  git -C "$clone" checkout -q --detach FETCH_HEAD || return 1
+  case $shape in
+    exact-file | file-ancestor)
+      printf 'tracked by pull request\n' >"$clone/.env"
+      git -C "$clone" add -f .env || return 1
+      ;;
+    symlink-ancestor)
+      ln -s tracked-target "$clone/.env"
+      git -C "$clone" add -f .env || return 1
+      ;;
+    directory)
+      mkdir -p "$clone/.env"
+      printf 'tracked by pull request\n' >"$clone/.env/child"
+      git -C "$clone" add -f .env/child || return 1
+      ;;
+    *)
+      echo "push_pr_tree_shape: unknown shape: $shape" >&2
+      return 1
+      ;;
+  esac
+  git -C "$clone" -c commit.gpgsign=false commit -qm "change .env tree shape for $branch" || return 1
+  oid=$(git -C "$clone" rev-parse HEAD) || return 1
+  git -C "$clone" push -q -f origin "$oid:refs/heads/$branch" || return 1
+  sync_pr_metadata_oid "$branch" "$oid" || return 1
+  printf '%s\n' "$oid"
 }
 
 # new_commit_on <parent-sha> <label> — a new LOCAL commit in $PRIMARY on top of
@@ -451,6 +552,8 @@ cwt_in() {
   (cd "$dir" && "$CWT" "$@")
 }
 cwt() { cwt_in "$PRIMARY" "$@"; }
+REAL_CLWT="$REPO_ROOT/claude/scripts/clwt"
+clwt_real() { (cd "$PRIMARY" && "$REAL_CLWT" "$@"); }
 
 printf 'cwt test suite\n'
 printf 'script:  %s\n' "$CWT"
@@ -1592,19 +1695,17 @@ check 'pr --force succeeds when no leftover local branch exists' \
 check_equals 'pr --force still launches codex in the new worktree' \
   "$MANAGED/feat-pr-force-fresh" "$(launched pwd)"
 
-# "ahead" so the plain (non-forced) checkout the gh stub performs here succeeds
-# on its own — the point is to prove --force after `--` never reaches gh at
-# all, not to also exercise a forced reset.
+# A fresh branch keeps the checkout exact. The point is to prove --force after
+# `--` reaches Codex and is never interpreted as a checkout reset.
 pr_meta 703 feat/pr-force-passthrough false
-seed_leftover_branch feat/pr-force-passthrough ahead
-passthrough_before=$(git -C "$PRIMARY" rev-parse feat/pr-force-passthrough)
+passthrough_expected=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/703")
 launch_reset
 check 'pr passes --force after -- through to codex untouched' \
   cwt pr 703 -- --force
 check_equals 'the literal --force argument reaches codex' \
   '--force' "$(launched args)"
 check_equals 'a --force after -- never reaches gh, so the branch tip is unchanged' \
-  "$passthrough_before" "$(git -C "$PRIMARY" rev-parse feat/pr-force-passthrough)"
+  "$passthrough_expected" "$(git -C "$PRIMARY" rev-parse feat/pr-force-passthrough)"
 
 # Reuses PR 303 (feat/deleted-head, checkoutFails=true) from the plain-pr
 # checks above: the failure is unconditional in the gh stub, so it also
@@ -1624,8 +1725,8 @@ launch_reset
 cwt pr 704 >/dev/null 2>&1
 reuse_before=$(git -C "$PRIMARY" rev-parse feat/pr-force-reuse)
 launch_reset
-check_output 'pr --force on a reused worktree notes the branch was not reset' \
-  'not reset' cwt pr 704 --force
+check_output 'pr --force on a reused worktree reports verified reuse' \
+  'reusing existing worktree' cwt pr 704 --force
 check_equals 'a reused worktree leaves the branch tip untouched by --force' \
   "$reuse_before" "$(git -C "$PRIMARY" rev-parse feat/pr-force-reuse)"
 check_equals 'pr --force on a reused worktree still relaunches codex there' \
@@ -1638,6 +1739,360 @@ check_fails 'root rejects --force as an unknown option' cwt root --force
 # alone would keep this green with the whole paragraph deleted.
 check_output 'help documents --force' 'resetting a leftover' cwt help
 check_output 'help documents the no-flag auto-reset' 'provably contained' cwt help
+
+section 'pr reused worktree refresh safety'
+
+pr_marker() {
+  git -C "$PRIMARY" config --get "branch.$1.$2" 2>/dev/null || true
+}
+
+# The ignored file is copied only for the initial checkout. Later refreshes must
+# preserve this exact local content even when the PR head is rewritten.
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+printf 'REUSE_SECRET=keep-me\n' >"$PRIMARY/.env"
+pr_meta 801 feat/pr-reuse-refresh false
+assert_pr_oid_matches_remote 801
+launch_reset
+check 'initial PR checkout succeeds before reuse refresh tests' cwt pr 801
+check_equals 'initial PR checkout records its canonical URL marker' \
+  'https://github.com/owner/project/pull/801' \
+  "$(pr_marker feat/pr-reuse-refresh worktree-pr-url)"
+check_equals 'initial PR checkout records its exact head marker' \
+  "$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/801")" \
+  "$(pr_marker feat/pr-reuse-refresh worktree-pr-head)"
+check_equals 'initial PR checkout copied the ignored local file' \
+  'REUSE_SECRET=keep-me' "$(cat "$MANAGED/feat-pr-reuse-refresh/.env")"
+rm -f "$PRIMARY/.worktreeinclude"
+
+force_advance_pr_head feat/pr-reuse-refresh >/dev/null
+assert_pr_oid_matches_remote 801
+launch_reset
+check 'pr refreshes a clean reused worktree after a fast-forward' cwt pr 801
+check_equals 'fast-forward reuse launches the exact current PR head' \
+  "$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/801")" \
+  "$(git -C "$MANAGED/feat-pr-reuse-refresh" rev-parse HEAD)"
+check_equals 'fast-forward reuse preserves ignored local content' \
+  'REUSE_SECRET=keep-me' "$(cat "$MANAGED/feat-pr-reuse-refresh/.env")"
+
+rewrite_pr_head feat/pr-reuse-refresh >/dev/null
+assert_pr_oid_matches_remote 801
+launch_reset
+check 'pr refreshes a rewritten head from its last verified commit' cwt pr 801
+check_equals 'rewritten reuse launches the exact current PR head' \
+  "$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/801")" \
+  "$(git -C "$MANAGED/feat-pr-reuse-refresh" rev-parse HEAD)"
+check_equals 'rewritten reuse preserves ignored local content' \
+  'REUSE_SECRET=keep-me' "$(cat "$MANAGED/feat-pr-reuse-refresh/.env")"
+
+pr_meta 802 feat/pr-reuse-dirty false
+cwt pr 802 >/dev/null 2>&1
+dirty_head=$(git -C "$MANAGED/feat-pr-reuse-dirty" rev-parse HEAD)
+dirty_tracking_head=$(git -C "$PRIMARY" rev-parse refs/remotes/origin/feat/pr-reuse-dirty)
+printf 'dirty\n' >>"$MANAGED/feat-pr-reuse-dirty/README.md"
+force_advance_pr_head feat/pr-reuse-dirty >/dev/null
+assert_pr_oid_matches_remote 802
+launch_reset
+check_fails 'pr refuses a dirty reused worktree before refresh' cwt pr 802
+check_equals 'dirty refusal preserves the worktree head' "$dirty_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-dirty" rev-parse HEAD)"
+check_equals 'dirty refusal preserves the last verified head marker' "$dirty_head" \
+  "$(pr_marker feat/pr-reuse-dirty worktree-pr-head)"
+check_equals 'dirty refusal happens before the disposable PR fetch' "$dirty_tracking_head" \
+  "$(git -C "$PRIMARY" rev-parse refs/remotes/origin/feat/pr-reuse-dirty)"
+check 'dirty refusal preserves the tracked local edit' \
+  grep -q '^dirty$' "$MANAGED/feat-pr-reuse-dirty/README.md"
+check_equals 'dirty refusal never launches codex' '' "$(launched pwd)"
+
+pr_meta 803 feat/pr-reuse-local-commit false
+cwt pr 803 >/dev/null 2>&1
+printf 'local\n' >"$MANAGED/feat-pr-reuse-local-commit/local.txt"
+git -C "$MANAGED/feat-pr-reuse-local-commit" add local.txt
+git -C "$MANAGED/feat-pr-reuse-local-commit" -c commit.gpgsign=false commit -qm 'local work'
+local_head=$(git -C "$MANAGED/feat-pr-reuse-local-commit" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-local-commit >/dev/null
+assert_pr_oid_matches_remote 803
+launch_reset
+check_fails 'pr refuses local commits in a reused worktree even with --force' \
+  cwt pr 803 --force
+check_equals 'local-commit refusal preserves the branch head' "$local_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-local-commit" rev-parse HEAD)"
+check 'local-commit refusal preserves the committed file' \
+  test -f "$MANAGED/feat-pr-reuse-local-commit/local.txt"
+check_equals 'local-commit refusal never launches codex' '' "$(launched pwd)"
+
+pr_meta 804 feat/pr-reuse-fork-name true fork-one project
+cwt pr 804 >/dev/null 2>&1
+pr_meta 805 feat/pr-reuse-fork-name true fork-two project
+assert_pr_oid_matches_remote 805
+fork_head=$(git -C "$MANAGED/feat-pr-reuse-fork-name" rev-parse HEAD)
+launch_reset
+check_fails 'pr refuses a same-named reused branch from a different fork PR' cwt pr 805
+check_equals 'wrong-fork refusal preserves the original branch head' "$fork_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-fork-name" rev-parse HEAD)"
+check_equals 'wrong-fork refusal preserves the original PR URL marker' \
+  'https://github.com/owner/project/pull/804' \
+  "$(pr_marker feat/pr-reuse-fork-name worktree-pr-url)"
+check_equals 'wrong-fork refusal never launches codex' '' "$(launched pwd)"
+
+pr_meta 806 feat/pr-reuse-unverified false
+unverified_oid=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/806")
+git -C "$PRIMARY" fetch -q origin "$unverified_oid"
+git -C "$PRIMARY" branch feat/pr-reuse-unverified "$unverified_oid" >/dev/null
+git -C "$PRIMARY" worktree add -q "$MANAGED/feat-pr-reuse-unverified" feat/pr-reuse-unverified
+launch_reset
+check_fails 'pr refuses a markerless reused worktree with no tracking identity' cwt pr 806
+check_equals 'unverified identity refusal never launches codex' '' "$(launched pwd)"
+
+pr_meta 807 feat/pr-invalid-oid false
+sed 's/^headRefOid=.*/headRefOid=not-an-object/' "$CWT_GH_PRS/807" >"$CWT_GH_PRS/807.tmp"
+mv "$CWT_GH_PRS/807.tmp" "$CWT_GH_PRS/807"
+launch_reset
+check_fails 'pr refuses malformed headRefOid metadata' cwt pr 807
+check_equals 'malformed OID refusal never launches codex' '' "$(launched pwd)"
+
+pr_meta 808 feat/pr-oid-mismatch false
+printf 'checkoutOidMismatch=true\n' >>"$CWT_GH_PRS/808"
+launch_reset
+check_fails 'pr refuses launch when checkout HEAD differs from headRefOid' cwt pr 808
+check_equals 'checkout OID mismatch never launches codex' '' "$(launched pwd)"
+check_equals 'checkout OID mismatch writes no PR URL marker' '' \
+  "$(pr_marker feat/pr-oid-mismatch worktree-pr-url)"
+
+pr_meta 818 feat/pr-wrong-local-branch false
+printf 'checkoutWrongBranch=true\n' >>"$CWT_GH_PRS/818"
+launch_reset
+check_fails 'pr refuses when gh checks the right commit out under the wrong local branch' cwt pr 818
+check 'wrong-local-branch checkout leaves no worktree behind' \
+  test ! -e "$MANAGED/feat-pr-wrong-local-branch"
+check_equals 'wrong-local-branch checkout never launches codex' '' "$(launched pwd)"
+check_equals 'wrong-local-branch checkout writes no PR URL marker' '' \
+  "$(pr_marker feat/pr-wrong-local-branch worktree-pr-url)"
+
+pr_meta 819 feat/pr-reuse-partial-marker false
+cwt pr 819 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset-all branch.feat/pr-reuse-partial-marker.worktree-pr-head
+launch_reset
+check_fails 'pr refuses a reused worktree with only half its identity markers' cwt pr 819
+check_equals 'partial-marker refusal never launches codex' '' "$(launched pwd)"
+
+pr_meta 820 feat/pr-reuse-malformed-marker false
+cwt pr 820 >/dev/null 2>&1
+git -C "$PRIMARY" config branch.feat/pr-reuse-malformed-marker.worktree-pr-head not-an-object
+launch_reset
+check_fails 'pr refuses a malformed last-verified head marker' cwt pr 820
+check_equals 'malformed-marker refusal never launches codex' '' "$(launched pwd)"
+
+pr_meta 821 feat/pr-invalid-url false
+sed 's#^url=.*#url=not-a-canonical-pr-url#' "$CWT_GH_PRS/821" >"$CWT_GH_PRS/821.tmp"
+mv "$CWT_GH_PRS/821.tmp" "$CWT_GH_PRS/821"
+launch_reset
+check_fails 'pr refuses malformed canonical URL metadata' cwt pr 821
+check_equals 'malformed URL refusal never launches codex' '' "$(launched pwd)"
+
+# A markerless worktree created by an older cwt can be migrated only from
+# native Git tracking evidence. Fast-forward is safe; a rewrite is not, because
+# there is no recorded last-verified head to distinguish it from local commits.
+pr_meta 809 feat/pr-reuse-legacy-ff false
+cwt pr 809 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset-all branch.feat/pr-reuse-legacy-ff.worktree-pr-url
+git -C "$PRIMARY" config --unset-all branch.feat/pr-reuse-legacy-ff.worktree-pr-head
+force_advance_pr_head feat/pr-reuse-legacy-ff >/dev/null
+legacy_ff_head=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/809")
+launch_reset
+check 'markerless tracked PR worktree may refresh by fast-forward' cwt pr 809
+check_equals 'successful legacy refresh backfills its canonical URL marker' \
+  'https://github.com/owner/project/pull/809' \
+  "$(pr_marker feat/pr-reuse-legacy-ff worktree-pr-url)"
+check_equals 'successful legacy refresh backfills its verified head marker' \
+  "$legacy_ff_head" "$(pr_marker feat/pr-reuse-legacy-ff worktree-pr-head)"
+
+pr_meta 810 feat/pr-reuse-legacy-rewrite false
+cwt pr 810 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset-all branch.feat/pr-reuse-legacy-rewrite.worktree-pr-url
+git -C "$PRIMARY" config --unset-all branch.feat/pr-reuse-legacy-rewrite.worktree-pr-head
+legacy_rewrite_before=$(git -C "$MANAGED/feat-pr-reuse-legacy-rewrite" rev-parse HEAD)
+rewrite_pr_head feat/pr-reuse-legacy-rewrite >/dev/null
+launch_reset
+check_fails 'markerless tracked PR worktree refuses a rewritten head' cwt pr 810
+check_equals 'legacy rewrite refusal preserves the branch head' "$legacy_rewrite_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-legacy-rewrite" rev-parse HEAD)"
+check_equals 'legacy rewrite refusal does not invent a head marker' '' \
+  "$(pr_marker feat/pr-reuse-legacy-rewrite worktree-pr-head)"
+
+# Exact ignored objects and both parent/child tree-shape conflicts must be
+# refused before reset --hard. Each assertion protects content that Git itself
+# would otherwise delete while making room for the target tree.
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+printf 'keep exact ignored file\n' >"$PRIMARY/.env"
+pr_meta 811 feat/pr-reuse-collision-exact false
+cwt pr 811 >/dev/null 2>&1
+rm -f "$PRIMARY/.worktreeinclude"
+collision_exact_before=$(git -C "$MANAGED/feat-pr-reuse-collision-exact" rev-parse HEAD)
+push_pr_tree_shape 811 feat/pr-reuse-collision-exact exact-file >/dev/null
+launch_reset
+check_fails 'refresh refuses a target object at an exact ignored path' cwt pr 811
+check_equals 'exact ignored-path collision preserves local content' \
+  'keep exact ignored file' "$(cat "$MANAGED/feat-pr-reuse-collision-exact/.env")"
+check_equals 'exact ignored-path collision preserves the branch head' "$collision_exact_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-collision-exact" rev-parse HEAD)"
+check_equals 'exact ignored-path collision preserves the verified head marker' \
+  "$collision_exact_before" \
+  "$(pr_marker feat/pr-reuse-collision-exact worktree-pr-head)"
+check_equals 'exact ignored-path collision never launches codex' '' "$(launched pwd)"
+
+rm -f "$PRIMARY/.env"
+mkdir -p "$PRIMARY/.env"
+printf 'keep ignored descendant\n' >"$PRIMARY/.env/local"
+printf '.env/local\n' >"$PRIMARY/.worktreeinclude"
+pr_meta 812 feat/pr-reuse-collision-ancestor false
+cwt pr 812 >/dev/null 2>&1
+rm -f "$PRIMARY/.worktreeinclude"
+collision_ancestor_before=$(git -C "$MANAGED/feat-pr-reuse-collision-ancestor" rev-parse HEAD)
+push_pr_tree_shape 812 feat/pr-reuse-collision-ancestor file-ancestor >/dev/null
+launch_reset
+check_fails 'refresh refuses a target file replacing an ignored directory' cwt pr 812
+check_equals 'file-ancestor collision preserves ignored descendant content' \
+  'keep ignored descendant' "$(cat "$MANAGED/feat-pr-reuse-collision-ancestor/.env/local")"
+check_equals 'file-ancestor collision preserves the branch head' "$collision_ancestor_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-collision-ancestor" rev-parse HEAD)"
+check_equals 'file-ancestor collision preserves the verified head marker' \
+  "$collision_ancestor_before" \
+  "$(pr_marker feat/pr-reuse-collision-ancestor worktree-pr-head)"
+check_equals 'file-ancestor collision never launches codex' '' "$(launched pwd)"
+
+rm -rf "$PRIMARY/.env"
+mkdir -p "$PRIMARY/.env"
+printf 'keep under target symlink\n' >"$PRIMARY/.env/local"
+printf '.env/local\n' >"$PRIMARY/.worktreeinclude"
+pr_meta 823 feat/pr-reuse-collision-symlink false
+cwt pr 823 >/dev/null 2>&1
+rm -f "$PRIMARY/.worktreeinclude"
+collision_symlink_before=$(git -C "$MANAGED/feat-pr-reuse-collision-symlink" rev-parse HEAD)
+push_pr_tree_shape 823 feat/pr-reuse-collision-symlink symlink-ancestor >/dev/null
+launch_reset
+check_fails 'refresh refuses a target symlink replacing an ignored directory' cwt pr 823
+check_equals 'symlink-ancestor collision preserves ignored descendant content' \
+  'keep under target symlink' "$(cat "$MANAGED/feat-pr-reuse-collision-symlink/.env/local")"
+check_equals 'symlink-ancestor collision preserves the branch head' "$collision_symlink_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-collision-symlink" rev-parse HEAD)"
+check_equals 'symlink-ancestor collision preserves the verified head marker' \
+  "$collision_symlink_before" \
+  "$(pr_marker feat/pr-reuse-collision-symlink worktree-pr-head)"
+check_equals 'symlink-ancestor collision never launches codex' '' "$(launched pwd)"
+
+rm -rf "$PRIMARY/.env"
+printf 'keep ignored blocking file\n' >"$PRIMARY/.env"
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+pr_meta 813 feat/pr-reuse-collision-directory false
+cwt pr 813 >/dev/null 2>&1
+rm -f "$PRIMARY/.worktreeinclude"
+collision_directory_before=$(git -C "$MANAGED/feat-pr-reuse-collision-directory" rev-parse HEAD)
+push_pr_tree_shape 813 feat/pr-reuse-collision-directory directory >/dev/null
+launch_reset
+check_fails 'refresh refuses an ignored file blocking a target directory' cwt pr 813
+check_equals 'directory collision preserves the ignored blocking file' \
+  'keep ignored blocking file' "$(cat "$MANAGED/feat-pr-reuse-collision-directory/.env")"
+check_equals 'directory collision preserves the branch head' "$collision_directory_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-collision-directory" rev-parse HEAD)"
+check_equals 'directory collision preserves the verified head marker' \
+  "$collision_directory_before" \
+  "$(pr_marker feat/pr-reuse-collision-directory worktree-pr-head)"
+check_equals 'directory collision never launches codex' '' "$(launched pwd)"
+rm -f "$PRIMARY/.env"
+
+# PR reuse applies the same ownership boundary as ordinary branch reuse.
+pr_meta 814 feat/pr-reuse-primary false
+primary_pr_oid=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/814")
+git -C "$PRIMARY" fetch -q origin "$primary_pr_oid"
+git -C "$PRIMARY" checkout -q -b feat/pr-reuse-primary "$primary_pr_oid"
+launch_reset
+check_fails 'pr refuses reuse from the primary checkout' cwt pr 814
+check_equals 'primary-checkout refusal never launches codex' '' "$(launched pwd)"
+git -C "$PRIMARY" checkout -q main
+
+pr_meta 815 feat/pr-reuse-unmanaged false
+unmanaged_pr_oid=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/815")
+git -C "$PRIMARY" fetch -q origin "$unmanaged_pr_oid"
+git -C "$PRIMARY" branch feat/pr-reuse-unmanaged "$unmanaged_pr_oid" >/dev/null
+git -C "$PRIMARY" worktree add -q "$TMP/unmanaged-pr-reuse" feat/pr-reuse-unmanaged
+launch_reset
+check_fails 'pr refuses reuse from an unmanaged worktree' cwt pr 815
+check_equals 'unmanaged-worktree refusal never launches codex' '' "$(launched pwd)"
+
+# A failed or inconsistent disposable checkout must neither move the real branch
+# nor leave a registered scratch worktree behind.
+pr_meta 816 feat/pr-reuse-fetch-failure false
+cwt pr 816 >/dev/null 2>&1
+fetch_failure_before=$(git -C "$MANAGED/feat-pr-reuse-fetch-failure" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-fetch-failure >/dev/null
+printf 'checkoutFails=true\n' >>"$CWT_GH_PRS/816"
+launch_reset
+check_fails 'reused PR refuses when the disposable fetch fails' cwt pr 816
+check_equals 'failed disposable fetch preserves the real branch head' "$fetch_failure_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-fetch-failure" rev-parse HEAD)"
+
+pr_meta 817 feat/pr-reuse-fetch-mismatch false
+cwt pr 817 >/dev/null 2>&1
+fetch_mismatch_before=$(git -C "$MANAGED/feat-pr-reuse-fetch-mismatch" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-fetch-mismatch >/dev/null
+printf 'checkoutOidMismatch=true\n' >>"$CWT_GH_PRS/817"
+launch_reset
+check_fails 'reused PR refuses when fetched HEAD differs from metadata' cwt pr 817
+check_equals 'mismatched disposable fetch preserves the real branch head' "$fetch_mismatch_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-fetch-mismatch" rev-parse HEAD)"
+
+pr_meta 822 feat/pr-reuse-tree-inspection-failure false
+cwt pr 822 >/dev/null 2>&1
+tree_inspection_before=$(git -C "$MANAGED/feat-pr-reuse-tree-inspection-failure" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-tree-inspection-failure >/dev/null
+make_failing_git 'ls-tree'
+launch_reset
+check_fails 'reused PR fails closed when the target tree cannot be inspected' \
+  cwt_with_failing_git pr 822
+check_equals 'target-tree inspection failure preserves the real branch head' \
+  "$tree_inspection_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-tree-inspection-failure" rev-parse HEAD)"
+check_equals 'target-tree inspection failure never launches codex' '' "$(launched pwd)"
+rm -f "$FAILGIT/git"
+
+if git -C "$PRIMARY" worktree list --porcelain | grep -q 'cwt-pr-fetch'; then
+  not_ok 'temporary PR fetch worktrees are cleaned up'
+else
+  ok 'temporary PR fetch worktrees are cleaned up'
+fi
+
+section 'clwt and cwt PR marker interoperability'
+
+# Break native tracking after the first launcher writes its markers. The second
+# launcher can then reuse this worktree only through the shared, tool-neutral
+# branch config contract; a legacy-tracking fallback cannot make the test pass.
+pr_meta 824 feat/cwt-markers-for-clwt false
+cwt pr 824 >/dev/null 2>&1
+check_equals 'cwt writes the canonical marker that clwt will consume' \
+  'https://github.com/owner/project/pull/824' \
+  "$(pr_marker feat/cwt-markers-for-clwt worktree-pr-url)"
+git -C "$PRIMARY" config branch.feat/cwt-markers-for-clwt.remote invalid-marker-proof
+force_advance_pr_head feat/cwt-markers-for-clwt >/dev/null
+interop_clwt_head=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/824")
+launch_reset
+check 'clwt accepts cwt markers and refreshes the reused PR worktree' clwt_real pr 824
+check_equals 'clwt launches after consuming cwt markers' 'claude' "$(launched harness)"
+check_equals 'clwt lands exactly on the current PR head from cwt markers' \
+  "$interop_clwt_head" "$(git -C "$MANAGED/feat-cwt-markers-for-clwt" rev-parse HEAD)"
+
+pr_meta 825 feat/clwt-markers-for-cwt false
+clwt_real pr 825 >/dev/null 2>&1
+check_equals 'clwt writes the canonical marker that cwt will consume' \
+  'https://github.com/owner/project/pull/825' \
+  "$(pr_marker feat/clwt-markers-for-cwt worktree-pr-url)"
+git -C "$PRIMARY" config branch.feat/clwt-markers-for-cwt.remote invalid-marker-proof
+force_advance_pr_head feat/clwt-markers-for-cwt >/dev/null
+interop_cwt_head=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/825")
+launch_reset
+check 'cwt accepts clwt markers and refreshes the reused PR worktree' cwt pr 825
+check_equals 'cwt launches after consuming clwt markers' 'codex' "$(launched harness)"
+check_equals 'cwt lands exactly on the current PR head from clwt markers' \
+  "$interop_cwt_head" "$(git -C "$MANAGED/feat-clwt-markers-for-cwt" rev-parse HEAD)"
 
 section 'pr auto-force safety probe'
 
@@ -1760,21 +2215,23 @@ case_out=$(cwt pr 717 2>&1)
 check_contains 'pr auto-resets when the head repository differs only by case' \
   'resetting feat/pr-auto-case' "$case_out"
 
-# Ahead: gh's plain ff-only checkout is a no-op success on its own — the
-# point is proving the fresh-worktree path ran (not reuse_or_refuse) and the
-# tip never moved, pinning AC 9's accepted pass-through.
+# Ahead: gh's plain ff-only checkout is a no-op success on its own, but that
+# would launch a commit that is not the PR head. cwt must detect the mismatch,
+# preserve the leftover branch, and abandon the temporary real worktree.
 pr_meta 709 feat/pr-auto-ahead false
 seed_leftover_branch feat/pr-auto-ahead ahead
 ahead_before_709=$(git -C "$PRIMARY" rev-parse feat/pr-auto-ahead)
 launch_reset
 ahead_out=$(cwt pr 709 2>&1)
 ahead_rc=$?
-check_equals 'pr passes through a leftover branch ahead of the pull request head' \
-  '0' "$ahead_rc"
-check_equals 'the ahead branch tip is unchanged by the pass-through path' \
+check_equals 'pr refuses a leftover branch ahead of the pull request head' \
+  '2' "$ahead_rc"
+check_equals 'the refused ahead branch tip is unchanged' \
   "$ahead_before_709" "$(git -C "$PRIMARY" rev-parse feat/pr-auto-ahead)"
-check_not_contains 'the ahead pass-through takes the fresh-worktree path, not reuse_or_refuse' \
-  'reusing existing worktree' "$ahead_out"
+check 'the refused ahead checkout leaves no managed worktree behind' \
+  test ! -e "$MANAGED/feat-pr-auto-ahead"
+check_contains 'the ahead refusal explains that the checked-out head changed' \
+  'changed while it was being checked out' "$ahead_out"
 
 # Cross-repository, checkout fails outright (the fork's real head is gone):
 # branch_existed must still have been captured before the $cross gate, or the
@@ -2307,6 +2764,14 @@ check 'the Codex README documents native --yolo' grep -qF -- '--yolo' "$CODEX_RE
 check 'the Codex README says --yolo bypasses approvals and sandboxing' \
   grep -qiE 'approvals?.*sandbox|sandbox.*approvals?' "$CODEX_README"
 check 'the Codex README documents the pr --force flag' grep -qF -- '--force' "$CODEX_README"
+check 'the Codex README documents verified refresh of reused PR worktrees' \
+  grep -qF 'last head that `cwt` verified' "$CODEX_README"
+check 'the Codex README says --force cannot bypass PR reuse checks' \
+  grep -qF '`--force` does not bypass these reuse checks' "$CODEX_README"
+check 'the Codex README documents ignored local-file preservation' \
+  grep -qF 'files such as `.env` are preserved' "$CODEX_README"
+check 'the Codex README documents markerless legacy rewrite refusal' \
+  grep -qF 'older markerless PR worktree' "$CODEX_README"
 check 'the Codex README documents worktreeinclude' grep -qF '.worktreeinclude' "$CODEX_README"
 check 'the Codex README documents the beads exclusion' grep -qF '.beads/' "$CODEX_README"
 check 'the Codex README documents how to run the cwt suite' grep -qF 'cwt-test.sh' "$CODEX_README"

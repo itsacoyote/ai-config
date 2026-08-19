@@ -101,6 +101,17 @@ that session. Arguments after `--` pass through to Codex unchanged. On `cwt pr`,
 allows `gh pr checkout` to reset a leftover local branch; without it, automatic reset is
 allowed only when the branch is proven to contain no local-only commits.
 
+When that PR branch already has a managed worktree, `cwt pr` refreshes it only after
+verifying the canonical PR URL, the exact GitHub head commit, a clean working tree, and the
+last head that `cwt` verified. Safe fast-forwards happen normally; rewritten history resets
+only from that recorded head. `--force` does not bypass these reuse checks. Ignored local
+files such as `.env` are preserved, and the refresh is refused if the new PR tree would
+overwrite one. These tool-neutral markers are shared with `clwt`, so either launcher can
+safely resume a PR worktree created by the other.
+An older markerless PR worktree can migrate only when its native Git tracking matches the PR
+and the update is a fast-forward; rewritten history is refused because no last-verified head
+exists yet.
+
 ### Untracked files and beads
 
 New worktrees copy ignored or untracked files matched by the primary checkout's

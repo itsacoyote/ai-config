@@ -65,6 +65,14 @@ branch is left untouched, and a failed checkout points at `clwt pr <n> --force` 
 explicitly. Recommend that exact command when a developer hits the refusal; see `clwt help`
 for the full wording.
 
+An already-open PR worktree is stricter. `clwt pr <n>` verifies its canonical PR URL, exact
+GitHub head commit, clean working tree, and last verified head before refreshing it. It
+fast-forwards when possible and resets rewritten history only when the current commit still
+equals that last verified head. `--force` never bypasses these reuse checks. Ignored local
+files such as `.env` survive; if the new PR tree would replace one, `clwt` refuses the refresh.
+For an older markerless PR worktree, verified native Git tracking permits only a fast-forward;
+rewritten history is refused because there is no last-verified head to trust yet.
+
 Tab completion autoloads in bash but not in zsh. If a zsh developer reports that `clwt <Tab>`
 does nothing, the fix is two lines in their `~/.zshrc` (see the README) — `~/.zshrc` is
 theirs to edit, so hand them the snippet rather than editing it.
@@ -75,9 +83,10 @@ theirs to edit, so hand them the snippet rather than editing it.
   worktree = one feature; don't recycle.
 - **Returning to existing work** → `clwt branch <branch>`, or `clwt open <branch>` if the
   worktree already exists.
-- **Branch already checked out somewhere** → `clwt` handles it: it reuses a managed worktree,
-  and refuses with a distinct message when the branch is in the primary checkout (use
-  `clwt root`) or in an unmanaged worktree.
+- **Branch already checked out somewhere** → `clwt` reuses an ordinary managed branch
+  worktree. For a PR it first performs the verified refresh above. It refuses with a distinct
+  message when the branch is in the primary checkout (use `clwt root`) or an unmanaged
+  worktree.
 - **Branch merged** → `clwt remove <branch>`, or `clwt prune` to sweep everything merged at once.
 
 ## The issue tracker stays central
