@@ -23,7 +23,15 @@ warn() { printf '%s: warning: %s\n' "$PROGRAM" "$*" >&2; }
 # copy_worktree_includes can bail mid-loop; this is how its scratch file gets
 # cleaned up regardless of which exit path is taken.
 CWT_LIST_FILE=''
-trap 'rm -f "${CWT_LIST_FILE:-}"' EXIT
+CWT_PR_FETCH_WORKTREE=''
+cleanup_on_exit() {
+  rm -f "${CWT_LIST_FILE:-}"
+  if [[ -n ${CWT_PR_FETCH_WORKTREE:-} ]]; then
+    git worktree remove --force "$CWT_PR_FETCH_WORKTREE" >/dev/null 2>&1 || true
+    rmdir "$CWT_PR_FETCH_WORKTREE" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_on_exit EXIT
 
 usage() {
   cat <<'EOF'
@@ -58,8 +66,9 @@ Managed worktrees live in:
 bypasses approvals and sandboxing for that session.
 
 `--force` on `cwt pr` passes --force to `gh pr checkout`, resetting a leftover
-local branch to the pull request head; it is a no-op when the branch is
-already checked out in a managed worktree — that worktree is reused instead.
+local branch to the pull request head. An existing managed PR worktree is
+refreshed only after cwt verifies its PR identity and its clean local state;
+`--force` does not bypass those reuse guards.
 Without the flag, `cwt pr` resets a leftover branch on its own only when the
 branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
@@ -508,13 +517,11 @@ copy_worktree_includes() {
   note "copied $copied file(s) matching .worktreeinclude"
 }
 
-# Git allows a branch in exactly one worktree, so "it is already checked out" has
-# three quite different meanings and three different right answers. Git's own
-# message names none of them usefully, which leaves you hunting for where the
-# branch actually is.
-reuse_or_refuse() {
-  local branch=$1 existing=$2 force=${3:-0}
-
+# Applies the location guards shared by generic reuse and pull-request refresh.
+# It deliberately does not launch or mutate anything: callers still have work
+# to do after the target has been proven to be one cwt owns.
+require_reusable_worktree() {
+  local branch=$1 existing=$2
   if [[ $existing == "$primary" ]]; then
     die "$branch is checked out in the primary checkout ($primary); use 'cwt root' to work there"
   fi
@@ -525,6 +532,16 @@ reuse_or_refuse() {
   esac
 
   require_managed_worktree "$existing"
+}
+
+# Git allows a branch in exactly one worktree, so "it is already checked out" has
+# three quite different meanings and three different right answers. Git's own
+# message names none of them usefully, which leaves you hunting for where the
+# branch actually is.
+reuse_or_refuse() {
+  local branch=$1 existing=$2 force=${3:-0}
+
+  require_reusable_worktree "$branch" "$existing"
   # --force resets a branch cwt is about to check out fresh; once it is already
   # sitting in a managed worktree there is nothing to reset, so say so rather
   # than silently swallowing the flag.
@@ -560,11 +577,11 @@ reuse_or_refuse() {
 # status check runs, and a `die` there would only exit the subshell while the
 # parent carried on deleting. That was a real bug here, not a hypothetical.
 worktree_is_dirty() {
-  local out rc
-  out=$(cd "$1" && git status --porcelain --untracked-files=all)
+  local path=$1 action=${2:-remove} out rc
+  out=$(cd "$path" && git status --porcelain --untracked-files=all)
   rc=$?
   ((rc == 0)) ||
-    die "cannot determine whether $1 is clean (git exited $rc); refusing to remove"
+    die "cannot determine whether $path is clean (git exited $rc); refusing to $action"
   [[ -n $out ]]
 }
 
@@ -574,6 +591,231 @@ worktree_ignored_files() {
   rc=$?
   ((rc == 0)) || return 1
   printf '%s' "$out"
+}
+
+valid_head_oid() {
+  local oid=$1
+  case $oid in
+    '' | *[!0-9A-Fa-f]*) return 1 ;;
+  esac
+  [[ ${#oid} == 40 || ${#oid} == 64 ]]
+}
+
+remote_matches_identity() {
+  local remote=$1 wanted_owner=$2 wanted_repo=$3 url rest found_owner found_repo
+  if ! url=$(git remote get-url "$remote" 2>/dev/null); then
+    url=$remote
+  fi
+  url=${url%.git}
+  url=${url%/}
+  found_repo=${url##*/}
+  rest=${url%/*}
+  found_owner=${rest##*/}
+  found_owner=${found_owner##*:}
+  valid_identity_part "$found_owner" || return 1
+  valid_identity_part "$found_repo" || return 1
+  [[ $(printf '%s' "$found_owner" | tr '[:upper:]' '[:lower:]') == "$wanted_owner" ]] &&
+    [[ $(printf '%s' "$found_repo" | tr '[:upper:]' '[:lower:]') == "$wanted_repo" ]]
+}
+
+pr_url_identity() {
+  local url=$1 number=$2 base rest
+  case $url in
+    */pull/"$number") ;;
+    *) return 1 ;;
+  esac
+  base=${url%/pull/$number}
+  PR_BASE_REPO=${base##*/}
+  rest=${base%/*}
+  PR_BASE_OWNER=${rest##*/}
+  valid_identity_part "$PR_BASE_OWNER" || return 1
+  valid_identity_part "$PR_BASE_REPO" || return 1
+  PR_BASE_OWNER=$(printf '%s' "$PR_BASE_OWNER" | tr '[:upper:]' '[:lower:]')
+  PR_BASE_REPO=$(printf '%s' "$PR_BASE_REPO" | tr '[:upper:]' '[:lower:]')
+}
+
+branch_tracks_pr_head() {
+  local branch=$1 number=$2 pr_url=$3 head_ref=$4 head_owner=$5 head_repo=$6
+  local remote merge
+  remote=$(git config --get "branch.$branch.remote" 2>/dev/null) || return 1
+  merge=$(git config --get "branch.$branch.merge" 2>/dev/null) || return 1
+  if [[ $merge == "refs/heads/$head_ref" ]]; then
+    remote_matches_identity "$remote" "$head_owner" "$head_repo"
+    return
+  fi
+  if [[ $merge == "refs/pull/$number/head" ]]; then
+    pr_url_identity "$pr_url" "$number" || return 1
+    remote_matches_identity "$remote" "$PR_BASE_OWNER" "$PR_BASE_REPO"
+    return
+  fi
+  return 1
+}
+
+record_pr_markers() {
+  local branch=$1 pr_url=$2 head_oid=$3 old_url old_head
+  old_url=$(git config --get "branch.$branch.worktree-pr-url" 2>/dev/null) || old_url=''
+  old_head=$(git config --get "branch.$branch.worktree-pr-head" 2>/dev/null) || old_head=''
+  git config "branch.$branch.worktree-pr-url" "$pr_url" || return 1
+  if ! git config "branch.$branch.worktree-pr-head" "$head_oid"; then
+    git config --unset-all "branch.$branch.worktree-pr-url" >/dev/null 2>&1 || true
+    if [[ -n $old_url ]]; then
+      git config "branch.$branch.worktree-pr-url" "$old_url" >/dev/null 2>&1 || true
+    fi
+    if [[ -n $old_head ]]; then
+      git config "branch.$branch.worktree-pr-head" "$old_head" >/dev/null 2>&1 || true
+    else
+      git config --unset-all "branch.$branch.worktree-pr-head" >/dev/null 2>&1 || true
+    fi
+    return 1
+  fi
+}
+
+cleanup_pr_fetch_worktree() {
+  local path=${CWT_PR_FETCH_WORKTREE:-}
+  [[ -n $path ]] || return 0
+  if registered_at "$path"; then
+    git worktree remove --force "$path" || return 1
+  else
+    rmdir "$path" 2>/dev/null || true
+  fi
+  CWT_PR_FETCH_WORKTREE=''
+}
+
+# Fetches the PR through gh without touching the reusable worktree. A detached
+# disposable worktree lets gh resolve same-repo, fork, and authenticated remote
+# details while leaving the real branch and its ignored local files untouched.
+fetch_pr_head() {
+  local number=$1 expected_oid=$2 path actual
+  path=$(mktemp -d "$managed_root/.cwt-pr-fetch.XXXXXX") || return 1
+  CWT_PR_FETCH_WORKTREE=$path
+  if ! git worktree add --detach --quiet "$path" HEAD; then
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || true
+    return 1
+  fi
+  if ! (cd "$path" && gh pr checkout "$number" --detach); then
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || true
+    return 1
+  fi
+  actual=$(git -C "$path" rev-parse HEAD 2>/dev/null) || {
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || true
+    return 1
+  }
+  cleanup_pr_fetch_worktree || return 1
+  [[ $actual == "$expected_oid" ]] || return 2
+}
+
+# Refuses every tree-shape collision that reset --hard could delete: an exact
+# target object at an ignored path, or a target blob/symlink at one of its
+# ancestors. Target trees at ancestors are safe and are walked through.
+pr_ignored_paths_are_safe() {
+  local target=$1 head_oid=$2 ignored_file tree_file path entry
+  local target_path metadata rest object_type
+  PR_COLLISION_PATH=''
+  ignored_file=$(mktemp "${TMPDIR:-/tmp}/cwt-ignored.XXXXXX") || return 2
+  tree_file=$(mktemp "${TMPDIR:-/tmp}/cwt-target-tree.XXXXXX") || {
+    rm -f "$ignored_file"
+    return 2
+  }
+  if ! (cd "$target" && git ls-files -z --others --ignored --exclude-standard) >"$ignored_file"; then
+    rm -f "$ignored_file" "$tree_file"
+    return 2
+  fi
+  if ! git -C "$target" ls-tree -r -t -z "$head_oid" >"$tree_file"; then
+    rm -f "$ignored_file" "$tree_file"
+    return 2
+  fi
+  while IFS= read -r -d '' path; do
+    while IFS= read -r -d '' entry; do
+      case $entry in
+        *$'\t'*) ;;
+        *)
+          rm -f "$ignored_file" "$tree_file"
+          return 2
+          ;;
+      esac
+      target_path=${entry#*$'\t'}
+      metadata=${entry%%$'\t'*}
+      rest=${metadata#* }
+      object_type=${rest%% *}
+      if [[ $target_path == "$path" ]] ||
+        [[ $path == "$target_path"/* && $object_type != tree ]]; then
+        PR_COLLISION_PATH=$target_path
+        rm -f "$ignored_file" "$tree_file"
+        return 1
+      fi
+    done <"$tree_file"
+  done <"$ignored_file"
+  rm -f "$ignored_file" "$tree_file"
+  return 0
+}
+
+reuse_pr_or_refuse() {
+  local branch=$1 existing=$2 number=$3 pr_url=$4 head_oid=$5
+  local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9
+  local marker_url marker_head legacy=0 current collision_rc final
+
+  require_reusable_worktree "$branch" "$existing"
+
+  marker_url=$(git config --get "branch.$branch.worktree-pr-url" 2>/dev/null) || marker_url=''
+  marker_head=$(git config --get "branch.$branch.worktree-pr-head" 2>/dev/null) || marker_head=''
+  if [[ -n $marker_url || -n $marker_head ]]; then
+    [[ -n $marker_url && -n $marker_head ]] ||
+      die "cannot verify the pull request identity for reused worktree: $existing"
+    [[ $marker_url == "$pr_url" ]] ||
+      die "$branch is already a worktree for a different pull request: $marker_url"
+    valid_head_oid "$marker_head" ||
+      die "cannot verify the previous pull request head for reused worktree: $existing"
+  else
+    branch_tracks_pr_head "$branch" "$number" "$pr_url" "$head_ref" "$head_owner" "$head_repo" ||
+      die "cannot verify that reused worktree belongs to pull request #$number: $existing"
+    legacy=1
+  fi
+
+  if worktree_is_dirty "$existing" refresh; then
+    die "worktree has uncommitted or untracked work, refusing to refresh: $existing"
+  fi
+
+  local fetch_rc=0
+  fetch_pr_head "$number" "$head_oid" || fetch_rc=$?
+  case $fetch_rc in
+    0) ;;
+    2) die "pull request #$number changed while its head was being fetched; run cwt pr $number again" ;;
+    *) die "gh could not fetch pull request #$number for safe reuse" ;;
+  esac
+
+  pr_ignored_paths_are_safe "$existing" "$head_oid" || collision_rc=$?
+  case ${collision_rc:-0} in
+    0) ;;
+    1) die "ignored local path would be overwritten by pull request #$number, refusing to refresh: $PR_COLLISION_PATH" ;;
+    *) die "cannot inspect ignored local paths in $existing; refusing to refresh" ;;
+  esac
+
+  current=$(git -C "$existing" rev-parse HEAD 2>/dev/null) ||
+    die "cannot resolve the current head in reused worktree: $existing"
+  if [[ $current == "$head_oid" ]]; then
+    :
+  elif git -C "$existing" merge-base --is-ancestor "$current" "$head_oid"; then
+    (cd "$existing" && git merge --ff-only "$head_oid") ||
+      die "could not fast-forward reused worktree to pull request #$number"
+  elif ((legacy == 0)) && [[ $current == "$marker_head" ]]; then
+    (cd "$existing" && git reset --hard "$head_oid") ||
+      die "could not refresh rewritten pull request #$number"
+  else
+    die "reused worktree has local or unverifiable commits, refusing to refresh: $existing"
+  fi
+
+  final=$(git -C "$existing" rev-parse HEAD 2>/dev/null) ||
+    die "cannot verify refreshed pull request #$number"
+  [[ $final == "$head_oid" ]] ||
+    die "refreshed worktree does not match pull request #$number; refusing to launch"
+  record_pr_markers "$branch" "$pr_url" "$head_oid" ||
+    die "could not record the verified identity for pull request #$number"
+
+  note "reusing existing worktree for $branch at pull request #$number head"
+  if [[ $cross == true ]]; then
+    warn "pull request #$number comes from a fork — this is code you did not write, and opening it here runs it on your machine"
+  fi
+  launch "$existing"
 }
 
 # Removing the directory you are standing in leaves the shell in a path that no
@@ -751,15 +993,11 @@ cmd_prune() {
   done
 }
 
-# The ordering here is forced, not stylistic. `gh pr checkout` operates on the
-# *current* working tree, so the worktree must exist before it runs — but the
-# directory name derives from the pull request's head ref, which is not known
-# until the PR is queried. The auto-force safety probe (branch_contained_in_origin)
-# has to read refs/remotes/origin/<head_ref> before that checkout runs too: `gh
-# pr checkout`'s own fetch moves that ref, and a probe run afterward would be
-# deciding from evidence gh itself just destroyed. So: query, derive, probe,
-# create (detached), check out inside it, copy, warn, launch — read ref,
-# decide, invoke gh exactly once; never try-then-retry.
+# Query canonical PR identity before doing anything. A fresh checkout then
+# verifies both the local branch name and exact head object before it records
+# reusable markers. Existing PR worktrees take a separate path: fetch detached
+# into a disposable worktree, prove the real worktree is clean and belongs to
+# this PR, then fast-forward or reset from its last verified head.
 cmd_pr() {
   # `--force` is pr-only — parse_launch_args must not learn it, or
   # branch/new/open/root silently start accepting it too. Stripped here, before
@@ -796,7 +1034,8 @@ cmd_pr() {
   fi
   ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'pr requires exactly one pull request number'
 
-  local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross head_owner head_repo name target
+  local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross head_owner head_repo
+  local pr_url head_oid name target
   case $number in
     '' | *[!0-9]*) die "pull request must be a number: $number" ;;
   esac
@@ -804,8 +1043,8 @@ cmd_pr() {
   require_gh pr
 
   meta=$(gh pr view "$number" \
-    --json headRefName,isCrossRepository,headRepositoryOwner,headRepository \
-    --jq '.headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name' 2>/dev/null) ||
+    --json headRefName,isCrossRepository,headRepositoryOwner,headRepository,url,headRefOid \
+    --jq '.headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name, .url, .headRefOid' 2>/dev/null) ||
     die "cannot resolve pull request #$number"
   head_ref=$(printf '%s\n' "$meta" | sed -n 1p)
   cross=$(printf '%s\n' "$meta" | sed -n 2p)
@@ -815,6 +1054,8 @@ cmd_pr() {
   # `ItsACoyote/…`, and the plain path gives no hint why.
   head_owner=$(printf '%s\n' "$meta" | sed -n 3p | tr '[:upper:]' '[:lower:]')
   head_repo=$(printf '%s\n' "$meta" | sed -n 4p | tr '[:upper:]' '[:lower:]')
+  pr_url=$(printf '%s\n' "$meta" | sed -n 5p)
+  head_oid=$(printf '%s\n' "$meta" | sed -n 6p)
   [[ -n $head_ref ]] || die "pull request #$number has no head branch"
   # head_ref is fork-controlled input, unvalidated before this point — reject a
   # malicious ref name before it reaches branch_worktree or any other git command.
@@ -824,10 +1065,15 @@ cmd_pr() {
   # values that decision can trust.
   [[ $cross == true || $cross == false ]] ||
     die "cannot determine whether pull request #$number comes from a fork"
+  pr_url_identity "$pr_url" "$number" ||
+    die "pull request #$number returned an invalid canonical URL"
+  valid_head_oid "$head_oid" ||
+    die "pull request #$number returned an invalid head object ID"
 
   local existing
   if existing=$(branch_worktree "$head_ref"); then
-    reuse_or_refuse "$head_ref" "$existing" "$force"
+    reuse_pr_or_refuse "$head_ref" "$existing" "$number" "$pr_url" "$head_oid" \
+      "$head_ref" "$head_owner" "$head_repo" "$cross"
   fi
 
   # Captured UNCONDITIONALLY, outside the $cross gate below: only the
@@ -907,9 +1153,32 @@ cmd_pr() {
     die "gh could not check out pull request #$number$hint"
   fi
 
+  local checked_out_branch checked_out_head
+  checked_out_branch=$(git -C "$target" symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+    abandon_worktree "$target"
+    die "gh did not check pull request #$number out on its head branch"
+  }
+  if [[ $checked_out_branch != "$head_ref" ]]; then
+    abandon_worktree "$target"
+    die "gh checked pull request #$number out as $checked_out_branch instead of $head_ref"
+  fi
+  checked_out_head=$(git -C "$target" rev-parse HEAD 2>/dev/null) || {
+    abandon_worktree "$target"
+    die "cannot verify the checked-out head for pull request #$number"
+  }
+  if [[ $checked_out_head != "$head_oid" ]]; then
+    abandon_worktree "$target"
+    die "pull request #$number changed while it was being checked out; run cwt pr $number again"
+  fi
+
   copy_worktree_includes "$target" || {
     abandon_worktree "$target"
     die "could not prepare the worktree for pull request #$number"
+  }
+
+  record_pr_markers "$head_ref" "$pr_url" "$head_oid" || {
+    abandon_worktree "$target"
+    die "could not record the verified identity for pull request #$number"
   }
 
   if [[ $cross == true ]]; then
