@@ -428,6 +428,53 @@ push_pr_tree_shape() {
   printf '%s\n' "$oid"
 }
 
+# push_pr_wide_tree <number> <branch> — adds enough tracked target entries to
+# expose an ignored-path scan that rereads the complete target tree for every
+# ignored file. The files are unrelated to the ignored fixture below: a safe
+# refresh must reach the launcher without work proportional to their product.
+push_pr_wide_tree() {
+  local number=$1 branch=$2 clone oid i=0
+  clone="$TMP/wide-tree-$number"
+  git clone -q "$REMOTE" "$clone" >/dev/null 2>&1 || return 1
+  git -C "$clone" fetch -q origin "refs/heads/$branch" || return 1
+  git -C "$clone" checkout -q --detach FETCH_HEAD || return 1
+  mkdir -p "$clone/tracked-perf"
+  while [ "$i" -lt 250 ]; do
+    printf 'tracked by pull request\n' >"$clone/tracked-perf/file-$i"
+    i=$((i + 1))
+  done
+  git -C "$clone" add tracked-perf || return 1
+  git -C "$clone" -c commit.gpgsign=false commit -qm "add wide tree for $branch" || return 1
+  oid=$(git -C "$clone" rev-parse HEAD) || return 1
+  git -C "$clone" push -q -f origin "$oid:refs/heads/$branch" || return 1
+  sync_pr_metadata_oid "$branch" "$oid" || return 1
+  printf '%s\n' "$oid"
+}
+
+# The old nested Bash scan needs far longer than this for the fixture below;
+# the Git-batched implementation completes comfortably inside it. Keep the
+# watchdog outside the command process so timing out the regression cannot
+# terminate the test runner itself on macOS.
+within_scan_budget() {
+  local directory=$1 command_pid watchdog_pid rc
+  shift
+  (
+    cd "$directory" || exit 1
+    exec "$@"
+  ) &
+  command_pid=$!
+  (
+    sleep 5
+    kill -TERM "$command_pid" >/dev/null 2>&1 || true
+  ) &
+  watchdog_pid=$!
+  wait "$command_pid"
+  rc=$?
+  kill "$watchdog_pid" >/dev/null 2>&1 || true
+  wait "$watchdog_pid" >/dev/null 2>&1 || true
+  return "$rc"
+}
+
 # new_commit_on <parent-sha> <label> — a new LOCAL commit in $PRIMARY on top of
 # <parent-sha>, same tree, unique message. Built with plumbing so it never
 # touches any checkout; a branch pointed at it stays held nowhere until
@@ -1923,6 +1970,28 @@ check_equals 'directory collision preserves the verified head marker' \
   "$(pr_marker feat/pr-reuse-collision-directory worktree-pr-head)"
 check_equals 'directory collision never launches claude' '' "$(launched pwd)"
 rm -f "$PRIMARY/.env"
+
+# Regression: a real frontend monorepo exposed 32,537 ignored paths. The old
+# implementation reread every target-tree entry for every ignored path and kept
+# clwt CPU-bound for minutes before launch. This smaller fixture still crosses
+# the hard time budget with that nested loop, while remaining quick to construct.
+pr_meta 826 feat/pr-reuse-many-ignored false
+clwt pr 826 >/dev/null 2>&1
+exclude_file="$PRIMARY/.git/info/exclude"
+printf '.clwt-perf/\n' >>"$exclude_file"
+mkdir -p "$MANAGED/feat-pr-reuse-many-ignored/.clwt-perf"
+perf_i=0
+while [ "$perf_i" -lt 8000 ]; do
+  printf 'ignored local content\n' \
+    >"$MANAGED/feat-pr-reuse-many-ignored/.clwt-perf/file-$perf_i"
+  perf_i=$((perf_i + 1))
+done
+push_pr_wide_tree 826 feat/pr-reuse-many-ignored >/dev/null
+launch_reset
+check 'reused PR launch stays within its time budget with thousands of ignored files' \
+  within_scan_budget "$PRIMARY" "$CLWT" pr 826
+check_equals 'large ignored-file refresh still launches claude' \
+  "$MANAGED/feat-pr-reuse-many-ignored" "$(launched pwd)"
 
 # PR reuse applies the same ownership boundary as ordinary branch reuse.
 pr_meta 814 feat/pr-reuse-primary false
