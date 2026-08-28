@@ -156,6 +156,9 @@ resolve_primary() {
 require_repo() {
   resolve_primary
 
+  primary_common=$(git_common_dir "$primary") ||
+    die 'cannot resolve the primary git common directory'
+
   local remote_url
   remote_url=$(git -C "$primary" remote get-url origin 2>/dev/null) ||
     die 'repository has no origin remote'
@@ -233,10 +236,297 @@ launch() {
 
 # ------------------------------------------------------------------- commands
 
+validate_branch() {
+  git -C "$primary" check-ref-format --branch "$1" >/dev/null 2>&1 ||
+    die "invalid branch name: $1"
+}
+
+# Prints the path of the worktree holding a local branch, if any. Porcelain
+# output keeps paths and branch names unambiguous without depending on columns.
+branch_worktree() {
+  local wanted=$1 line path='' records
+  records=$(git -C "$primary" worktree list --porcelain) || return 2
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        ;;
+      "branch refs/heads/$wanted")
+        printf '%s\n' "$path"
+        return 0
+        ;;
+    esac
+  done <<< "$records"
+  return 1
+}
+
+# A registered path is not automatically pwt-owned. Refuse symlinks and require
+# the physical directory to remain below the physical shared managed root.
+require_managed_worktree() {
+  local branch=$1 path=$2 physical common actual_branch
+  [[ ! -L $path ]] || die "managed worktree path must not be a symlink: $path"
+  physical=$(cd -P "$path" 2>/dev/null && pwd -P) ||
+    die "cannot resolve worktree directory: $path"
+  case $physical in
+    "$managed_root"/*) ;;
+    *) die "worktree is not under the managed root, so pwt does not manage it: $path" ;;
+  esac
+
+  common=$(git_common_dir "$physical") ||
+    die "registered worktree path is not a git worktree: $path"
+  [[ $common == "$primary_common" ]] ||
+    die "registered worktree belongs to a different repository: $path"
+  actual_branch=$(git -C "$physical" symbolic-ref --quiet --short HEAD 2>/dev/null) ||
+    die "registered worktree is not on the expected branch: $branch"
+  [[ $actual_branch == "$branch" ]] ||
+    die "registered worktree is on $actual_branch, not the expected branch: $branch"
+}
+
+require_reusable_worktree() {
+  local branch=$1 existing=$2
+  if [[ $existing == "$primary" ]]; then
+    die "$branch is checked out in the primary checkout ($primary); use 'pwt root' to work there"
+  fi
+
+  case $existing in
+    "$managed_root"/*) ;;
+    *) die "$branch is checked out at $existing, which pwt does not manage" ;;
+  esac
+  require_managed_worktree "$branch" "$existing"
+}
+
+reuse_or_refuse() {
+  local branch=$1 existing=$2
+  require_reusable_worktree "$branch" "$existing"
+  note "reusing existing worktree for $branch"
+  launch "$existing"
+}
+
+# Query the remote rather than cached origin/HEAD, which can remain stale after
+# a repository changes its default branch.
+default_remote_branch() {
+  local ref
+  if ! ref=$(git -C "$primary" ls-remote --symref origin HEAD 2>/dev/null |
+    sed -n 's|^ref: refs/heads/\([^[:space:]]*\).*|\1|p' | head -1); then
+    die 'cannot determine the current origin default branch'
+  fi
+  [[ -n $ref ]] || die 'cannot determine the current origin default branch'
+  printf '%s\n' "$ref"
+}
+
+local_branch_exists() {
+  local branch=$1 status
+  if git -C "$primary" show-ref --verify --quiet "refs/heads/$branch"; then
+    return 0
+  else
+    status=$?
+  fi
+  ((status == 1)) && return 1
+  return 2
+}
+
+worktree_name_for_branch() {
+  printf '%s\n' "${1//\//-}"
+}
+
+# check-ref-format protects Git's ref namespace; this second allowlist protects
+# the filesystem path segment derived from that ref.
+validate_worktree_name() {
+  case $1 in
+    '' | . | .. | *..* | */* | *[!A-Za-z0-9._-]*)
+      die "branch name does not produce a safe directory name: $1"
+      ;;
+  esac
+}
+
+registered_at() {
+  local wanted=$1 line records
+  records=$(git -C "$primary" worktree list --porcelain) || return 2
+  while IFS= read -r line; do
+    if [[ $line == "worktree $wanted" ]]; then
+      return 0
+    fi
+  done <<< "$records"
+  return 1
+}
+
+ensure_available_path() {
+  local path=$1 status
+  [[ ! -L $path ]] || die "target path must not be a symlink: $path"
+  if registered_at "$path"; then
+    die "target path is already registered for another branch: $path"
+  else
+    status=$?
+  fi
+  ((status == 1)) || die 'cannot list repository worktrees'
+  [[ ! -e $path ]] ||
+    die "target path exists but is not a registered worktree: $path"
+}
+
+worktree_path_is_managed() {
+  local path=$1 physical
+  [[ ! -L $path ]] || return 1
+  physical=$(cd -P "$path" 2>/dev/null && pwd -P) || return 1
+  case $physical in
+    "$managed_root"/*) return 0 ;;
+  esac
+  return 1
+}
+
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
   launch "$primary"
+}
+
+cmd_new() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'new requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} existing base name target status
+  validate_branch "$branch"
+  [[ $branch == */* ]] ||
+    die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
+
+  if existing=$(branch_worktree "$branch"); then
+    reuse_or_refuse "$branch" "$existing"
+  else
+    status=$?
+    ((status == 1)) || die 'cannot list repository worktrees'
+  fi
+  if local_branch_exists "$branch"; then
+    die "local branch already exists but is not checked out: $branch (use 'pwt branch $branch')"
+  else
+    status=$?
+    ((status == 1)) || die "cannot inspect local branch: $branch"
+  fi
+
+  name=$(worktree_name_for_branch "$branch")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+
+  base=$(default_remote_branch)
+  note "fetching origin/$base"
+  git -C "$primary" fetch --quiet origin \
+    "refs/heads/$base:refs/remotes/origin/$base" ||
+    die "could not fetch origin/$base"
+
+  mkdir -p "$managed_root"
+  # Fetch is an external command and can run hooks. Re-check immediately before
+  # Git writes so a substituted path is refused instead of followed.
+  ensure_available_path "$target"
+  git -C "$primary" worktree add -b "$branch" "$target" "origin/$base"
+  require_managed_worktree "$branch" "$target"
+  launch "$target"
+}
+
+cmd_branch() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'branch requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} existing name target status
+  validate_branch "$branch"
+
+  if existing=$(branch_worktree "$branch"); then
+    reuse_or_refuse "$branch" "$existing"
+  else
+    status=$?
+    ((status == 1)) || die 'cannot list repository worktrees'
+  fi
+
+  name=$(worktree_name_for_branch "$branch")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+  mkdir -p "$managed_root"
+
+  if local_branch_exists "$branch"; then
+    ensure_available_path "$target"
+    git -C "$primary" worktree add "$target" "$branch"
+  else
+    status=$?
+    ((status == 1)) || die "cannot inspect local branch: $branch"
+    note "fetching origin/$branch"
+    git -C "$primary" fetch --quiet origin \
+      "refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null ||
+      die "no such branch locally or on origin: $branch"
+    # Fetch is an external command and can run hooks. Re-check immediately before
+    # Git writes so a substituted path is refused instead of followed.
+    ensure_available_path "$target"
+    git -C "$primary" worktree add -b "$branch" "$target" "origin/$branch"
+  fi
+
+  require_managed_worktree "$branch" "$target"
+  launch "$target"
+}
+
+cmd_open() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'open requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} target status
+  validate_branch "$branch"
+  if target=$(branch_worktree "$branch"); then
+    :
+  else
+    status=$?
+    ((status == 1)) && die "no worktree checked out for branch: $branch"
+    die 'cannot list repository worktrees'
+  fi
+  require_managed_worktree "$branch" "$target"
+  launch "$target"
+}
+
+cmd_list() {
+  [[ $# -eq 0 ]] || die 'list takes no arguments'
+
+  local line path='' branch='' width=0 records
+  local -a listed_branches=() listed_paths=() listed_marks=()
+
+  records=$(git -C "$primary" worktree list --porcelain) ||
+    die 'cannot list repository worktrees'
+  records+=$'\n'
+
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        branch='(detached)'
+        ;;
+      'branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        ;;
+      '')
+        if [[ -n $path && $path != "$primary" ]]; then
+          listed_branches+=("$branch")
+          listed_paths+=("$path")
+          if worktree_path_is_managed "$path"; then
+            listed_marks+=('')
+          else
+            listed_marks+=('(unmanaged)')
+          fi
+          if ((${#branch} > width)); then width=${#branch}; fi
+        fi
+        path=''
+        ;;
+    esac
+  done <<< "$records"
+
+  if ((${#listed_branches[@]} == 0)); then
+    printf 'No managed worktrees for %s/%s.\n' "$owner" "$repo"
+    return 0
+  fi
+
+  local i
+  for i in "${!listed_branches[@]}"; do
+    if [[ -n ${listed_marks[i]} ]]; then
+      printf '%-*s  %s  %s\n' "$width" "${listed_branches[i]}" \
+        "${listed_paths[i]}" "${listed_marks[i]}"
+    else
+      printf '%-*s  %s\n' "$width" "${listed_branches[i]}" "${listed_paths[i]}"
+    fi
+  done
 }
 
 # Undocumented diagnostic seam for the self-contained suite.
@@ -262,7 +552,12 @@ main() {
       require_repo
       cmd_root "$@"
       ;;
-    list | new | branch | open | pr | remove | prune | install)
+    list | open | new | branch)
+      shift || true
+      require_repo
+      "cmd_$command" "$@"
+      ;;
+    pr | remove | prune | install)
       die "$command is not implemented yet"
       ;;
     *)
