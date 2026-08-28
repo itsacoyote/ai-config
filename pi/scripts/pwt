@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# pwt — manage this repository's git worktrees and launch Pi inside them.
+#
+# Pi inherits its process working directory. Every launching subcommand therefore
+# enters the selected physical worktree before exec'ing the Pi executable that was
+# resolved on PATH before the directory change.
+
+set -euo pipefail
+
+PROGRAM=${0##*/}
+
+die() {
+  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  exit 2
+}
+
+note() { printf '%s: %s\n' "$PROGRAM" "$*"; }
+
+usage() {
+  cat <<'EOF'
+Usage:
+  pwt [list]                       list this repository's managed worktrees
+  pwt new <branch> [-- <args>]     branch from the origin default, then launch
+  pwt branch <branch> [-- <args>]  check out an existing branch, then launch
+  pwt open <branch> [-- <args>]    launch in an existing managed worktree
+  pwt pr <n> [--force] [-- <args>]  check out a pull request, then launch read-only
+  pwt root [-- <args>]             launch in the primary checkout
+  pwt remove <branch> [--delete-branch]
+  pwt prune [--yes]                sweep worktrees whose branch has merged
+  pwt install                      symlink pwt onto your PATH
+  pwt help
+
+Commands:
+  new       Create an explicitly named branch from the origin default and launch.
+  branch    Check out or reuse an existing local/remote branch and launch.
+  open      Launch in an existing managed worktree by branch name.
+  pr        Check a pull request out and launch with Pi's read-only restrictions.
+  root      Launch in the primary (non-worktree) checkout.
+  list      List this repository's managed worktrees.
+  remove    Remove a clean managed worktree; keep its branch by default.
+  prune     Remove managed worktrees whose branch has an already-merged PR.
+  install   Symlink this script to ~/.local/bin/pwt.
+  help      Show this usage.
+
+Managed worktrees live in:
+  ~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/
+
+Arguments after `--` are passed through to `pi` unchanged.
+EOF
+}
+
+# --------------------------------------------------------------- foundations
+
+# Physically resolves a path that need not exist yet: walk up to the deepest
+# existing ancestor, resolve that, then append the missing tail.
+resolve_path() {
+  local path=$1 tail='' base
+  while [[ ! -d $path && $path == */* ]]; do
+    tail="${path##*/}${tail:+/$tail}"
+    path=${path%/*}
+    [[ -n $path ]] || path=/
+  done
+  base=$(cd -P "$path" 2>/dev/null && pwd -P) || return 1
+  [[ $base != / ]] || base=''
+  if [[ -n $tail ]]; then
+    printf '%s/%s\n' "$base" "$tail"
+  else
+    printf '%s\n' "${base:-/}"
+  fi
+}
+
+parse_remote_identity() {
+  local url=$1 rest
+  url=${url%.git}
+  url=${url%/}
+
+  repo=${url##*/}
+  rest=${url%/*}
+  owner=${rest##*/}
+  owner=${owner##*:}
+
+  # Do not echo the remote URL here: HTTPS remotes can contain credentials.
+  valid_identity_part "$owner" || die 'cannot derive owner from origin remote'
+  valid_identity_part "$repo" || die 'cannot derive repository from origin remote'
+}
+
+valid_identity_part() {
+  case $1 in
+    '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# Prints the physical common Git directory for a worktree.
+git_common_dir() {
+  local directory=$1 common
+  common=$(git -C "$directory" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+    return 1
+  (cd -P "$common" 2>/dev/null && pwd -P)
+}
+
+# Validates PWT_REPO_ROOT at the process boundary. When pwt is already inside a
+# repository, an override must name that same repository; this catches a stale
+# inherited value after a user changes into another checkout. Outside Git, a
+# valid override intentionally supplies the repository discovery root.
+resolve_primary() {
+  local configured=${PWT_REPO_ROOT:-}
+  local current_common='' configured_physical configured_top configured_common
+  local configured_primary
+
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    current_common=$(git_common_dir .) || die 'cannot resolve the current git common directory'
+  fi
+
+  if [[ -z $configured ]]; then
+    [[ -n $current_common ]] || die 'run pwt from inside a git repository'
+    primary=$(cd -P "$current_common/.." 2>/dev/null && pwd -P) ||
+      die "cannot resolve the primary checkout from: $current_common"
+    return 0
+  fi
+
+  case $configured in
+    /*) ;;
+    *) die 'PWT_REPO_ROOT must be an absolute path' ;;
+  esac
+  [[ -d $configured ]] || die 'PWT_REPO_ROOT must name an existing directory'
+
+  configured_physical=$(cd -P "$configured" 2>/dev/null && pwd -P) ||
+    die 'cannot resolve the PWT_REPO_ROOT directory'
+  git -C "$configured_physical" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+    die 'PWT_REPO_ROOT must name a git repository'
+
+  configured_top=$(git -C "$configured_physical" rev-parse --show-toplevel 2>/dev/null) ||
+    die 'cannot resolve the PWT_REPO_ROOT checkout'
+  configured_top=$(cd -P "$configured_top" 2>/dev/null && pwd -P) ||
+    die 'cannot physically resolve the PWT_REPO_ROOT checkout'
+  [[ $configured_physical == "$configured_top" ]] ||
+    die 'PWT_REPO_ROOT must name the repository checkout root'
+
+  configured_common=$(git_common_dir "$configured_physical") ||
+    die 'cannot resolve the PWT_REPO_ROOT git common directory'
+  configured_primary=$(cd -P "$configured_common/.." 2>/dev/null && pwd -P) ||
+    die "cannot resolve the primary checkout from: $configured_common"
+  [[ $configured_physical == "$configured_primary" ]] ||
+    die 'PWT_REPO_ROOT must name the primary checkout, not a linked worktree'
+
+  if [[ -n $current_common && $configured_common != "$current_common" ]]; then
+    die 'PWT_REPO_ROOT must name the current repository'
+  fi
+
+  primary=$configured_physical
+}
+
+# Resolves the values every lifecycle command builds on. The primary checkout is
+# physical and never the linked worktree returned by --show-toplevel.
+require_repo() {
+  resolve_primary
+
+  local remote_url
+  remote_url=$(git -C "$primary" remote get-url origin 2>/dev/null) ||
+    die 'repository has no origin remote'
+  parse_remote_identity "$remote_url"
+
+  managed_root=$(resolve_path "$HOME/github/.worktrees/$owner/$repo") ||
+    die "cannot resolve the managed worktree root under: $HOME"
+}
+
+# --------------------------------------------------------------- launching
+
+# Everything before `--` belongs to pwt. Unknown pwt-side flags fail loudly;
+# everything after it is retained as an indexed array and handed to Pi exactly.
+parse_launch_args() {
+  LAUNCH_ARGS=()
+  LAUNCH_POSITIONAL=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --)
+        shift
+        LAUNCH_ARGS=("$@")
+        return 0
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      -*)
+        die "unknown option: $1 (run 'pwt help')"
+        ;;
+      *)
+        LAUNCH_POSITIONAL+=("$1")
+        ;;
+    esac
+    shift
+  done
+}
+
+# Resolves the selected executable to an absolute path before launch changes cwd.
+# Relative PATH entries are valid shell behavior, so resolve the containing
+# directory physically while it still has the caller's intended meaning.
+resolve_pi() {
+  local candidate directory basename
+  candidate=$(command -v pi 2>/dev/null) || die 'pi not found on PATH'
+
+  case $candidate in
+    */*) ;;
+    *)
+      candidate=$(type -P pi 2>/dev/null) || die 'pi on PATH is not an executable file'
+      ;;
+  esac
+
+  directory=${candidate%/*}
+  basename=${candidate##*/}
+  [[ $directory != "$candidate" ]] || directory=.
+  directory=$(cd -P "$directory" 2>/dev/null && pwd -P) ||
+    die 'cannot resolve the pi executable directory'
+  pi_command="$directory/$basename"
+  [[ -f $pi_command && -x $pi_command ]] || die 'pi on PATH is not an executable file'
+}
+
+launch() {
+  local target=$1
+  resolve_pi
+
+  cd -P "$target" || die "cannot enter directory: $target"
+  export PWT_REPO_ROOT="$primary"
+
+  note "launching pi in $target"
+  if ((${#LAUNCH_ARGS[@]})); then
+    exec "$pi_command" "${LAUNCH_ARGS[@]}"
+  fi
+  exec "$pi_command"
+}
+
+# ------------------------------------------------------------------- commands
+
+cmd_root() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
+  launch "$primary"
+}
+
+# Undocumented diagnostic seam for the self-contained suite.
+cmd_debug_roots() {
+  printf 'owner=%s\n' "$owner"
+  printf 'repo=%s\n' "$repo"
+  printf 'primary=%s\n' "$primary"
+  printf 'managed_root=%s\n' "$managed_root"
+}
+
+main() {
+  local command=${1:-list}
+  case $command in
+    -h | --help | help)
+      usage
+      ;;
+    debug-roots)
+      require_repo
+      cmd_debug_roots
+      ;;
+    root)
+      shift || true
+      require_repo
+      cmd_root "$@"
+      ;;
+    list | new | branch | open | pr | remove | prune | install)
+      die "$command is not implemented yet"
+      ;;
+    *)
+      die "unknown command: $command (run 'pwt help')"
+      ;;
+  esac
+}
+
+main "$@"
