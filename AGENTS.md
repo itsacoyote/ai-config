@@ -31,6 +31,8 @@ For the catalog of skills/agents and the feature workflow they implement, see
   directory.
 - `codex/scripts/<name>` — Codex-specific executable tooling. `cwt` is a developer-facing
   CLI with its completion beside it and tests under `codex/scripts/tests/`.
+- `codex/rules/ai-config.rules` — Codex command approval rules; install with the human-run
+  `codex/install.sh`, which writes only its dedicated file under `~/.codex/rules/`.
 - `agents/skills/<name>/SKILL.md` — portable Open Agent Skills shared by Codex and Pi.
   New cross-harness skills belong here; harness-specific behavior stays in its own tree.
 - `codex/`, `pi/` — harness-specific configuration and guidance. See `codex/README.md`
@@ -81,6 +83,7 @@ There is no CI, no package manager, and no test runner here. A script under
 ```bash
 bash claude/scripts/tests/clwt-test.sh        # exits non-zero on any failure
 bash codex/scripts/tests/cwt-test.sh
+bash codex/scripts/tests/install-test.sh
 bash claude/scripts/tests/beads-gate-test.sh
 bash claude/scripts/tests/install-test.sh
 bash agents/scripts/tests/install-test.sh

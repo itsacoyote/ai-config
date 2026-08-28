@@ -1,0 +1,23 @@
+# Commands approved by the ai-config Codex workflow.
+# Installed separately as ~/.codex/rules/ai-config.rules.
+
+prefix_rule(pattern=["git", "add"], decision="allow", justification="Stage changes")
+prefix_rule(pattern=["git", "commit"], decision="allow", justification="Commit changes")
+prefix_rule(pattern=["git", "switch"], decision="allow", justification="Manage branches")
+prefix_rule(pattern=["git", "pull"], decision="allow", justification="Update local refs")
+prefix_rule(pattern=["git", "push"], decision="allow", justification="Push approved changes")
+prefix_rule(pattern=["git", "merge"], decision="allow", justification="Merge approved branches")
+prefix_rule(pattern=["gh", "pr"], decision="allow", justification="Manage pull requests")
+prefix_rule(pattern=["bd", "--version"], decision="allow", justification="Inspect beads version")
+prefix_rule(pattern=["bd", "version"], decision="allow", justification="Inspect beads version")
+prefix_rule(pattern=["bd", "init"], decision="allow", justification="Initialize beads")
+prefix_rule(pattern=["bd", "doctor"], decision="allow", justification="Check beads health")
+prefix_rule(pattern=["bd", "config"], decision="allow", justification="Configure beads")
+prefix_rule(pattern=["bd", "create"], decision="allow", justification="Create beads work items")
+prefix_rule(pattern=["bd", "list"], decision="allow", justification="List beads work items")
+prefix_rule(pattern=["bd", "ready"], decision="allow", justification="List ready beads work")
+prefix_rule(pattern=["bd", "show"], decision="allow", justification="Inspect beads work items")
+prefix_rule(pattern=["bd", "blocked"], decision="allow", justification="Inspect blocked beads work")
+prefix_rule(pattern=["bd", "update"], decision="allow", justification="Update beads work items")
+prefix_rule(pattern=["bd", "close"], decision="allow", justification="Close beads work items")
+prefix_rule(pattern=["apply_patch"], decision="allow", justification="Apply reviewed patches")
