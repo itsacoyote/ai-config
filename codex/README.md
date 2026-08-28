@@ -9,6 +9,7 @@ Portable Open Agent Skills shared with Pi live separately under [`../agents/skil
 |---|---|
 | `AGENTS.md` | Always-on engineering conventions, loaded from a project's root |
 | `../agents/skills/` | Portable skills for commits, branches, PRs, and skill authoring |
+| rules/ai-config.rules | Codex command approval rules managed by this repository |
 
 The skills use Codex's native Agent Skills layout — Codex invokes them implicitly when the
 task matches a skill's description, or explicitly via `$git-commit`, `$branch-names`,
@@ -43,8 +44,32 @@ agents/install.sh --dry-run
 Run the installer yourself from the repository checkout. It additively creates or updates
 the shared skill files and reports personal paths it leaves untouched.
 
-The installer never handles `AGENTS.md`, `~/.codex`, or Pi configuration. Project and
-personal instructions remain manually managed.
+The shared-skills installer never handles `AGENTS.md`, `~/.codex`, or Pi configuration.
+Project and personal instructions remain manually managed; `codex/install.sh` is the
+separate human-run installer for the command rules documented below.
+
+## Command approval rules
+
+Codex uses .rules files for command-specific approval decisions. This repository carries
+an additive rules file containing the approved workflow commands translated from the Claude
+allowlist:
+
+~~~bash
+codex/install.sh
+codex/install.sh --dry-run
+~~~
+
+The installer writes only ~/.codex/rules/ai-config.rules. It does not overwrite
+~/.codex/config.toml, ~/.codex/AGENTS.md, or ~/.codex/rules/default.rules, and it
+refuses symlinked destinations. Restart Codex after installing rules. The rules feature is
+experimental in Codex; inspect a rule with:
+
+~~~bash
+codex execpolicy check --pretty \
+  --rules ~/.codex/rules/ai-config.rules -- git add path/to/file
+~~~
+
+These rules allow commands without prompting; they do not disable Codex's sandbox.
 
 ## `cwt` — worktree CLI
 

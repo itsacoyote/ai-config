@@ -307,6 +307,19 @@ test command are documented in the [Codex cwt guide](codex/README.md#cwt--worktr
 The independent-port rationale is recorded in
 [ADR 0011](docs/decisions/0011-cwt-worktree-cli.md).
 
+## Codex command approval rules
+
+The Codex-specific command allowlist lives in codex/rules/ai-config.rules using Codex's
+experimental prefix_rule format. Install it personally with:
+
+~~~bash
+codex/install.sh
+codex/install.sh --dry-run
+~~~
+
+The installer writes only ~/.codex/rules/ai-config.rules; it never touches AGENTS.md,
+config.toml, or the user's other rules. See the Codex guide in codex/README.md.
+
 ---
 
 ## Installing the library
