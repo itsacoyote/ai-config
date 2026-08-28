@@ -1,8 +1,12 @@
-## Description
+## Summary
 
-- What was added/modified
-- Why the change was necessary
-- Any technical details worth noting
+<!-- In one or two short paragraphs, explain what changes, why it matters, and the
+outcome for users or the team. Write for a product manager; keep jargon out. -->
+
+## Technical highlights
+
+<!-- Add 3–6 concise bullets covering reviewer-relevant implementation choices,
+safeguards, migrations, or validation. Do not list every changed file. -->
 
 ## Impact
 
@@ -18,7 +22,8 @@ or context that reviewers should know. -->
 
 ## Issues
 
-<!-- Document any known issues, limitations, or pending concerns. -->
+<!-- Link externally visible issues or note meaningful limitations. Omit internal
+task tracking and workflow status. -->
 
 ## Demo
 
