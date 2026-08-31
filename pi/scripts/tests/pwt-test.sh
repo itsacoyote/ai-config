@@ -67,6 +67,11 @@ check_ref_absent() {
   fi
 }
 
+worktree_registered_at() {
+  git -C "$PRIMARY" worktree list --porcelain |
+    grep -qF "worktree $1"
+}
+
 current_section=''
 section() {
   if [ -n "${PWT_TEST_STOP_AFTER:-}" ] && [ "$current_section" = "$PWT_TEST_STOP_AFTER" ]; then
@@ -104,8 +109,10 @@ BIN="$HOME/bin"
 mkdir -p "$REMOTE" "$BIN"
 MANAGED=$(cd "$MANAGED" && pwd -P)
 
-export PWT_TEST_REAL_GIT
+export PWT_TEST_REAL_GIT PWT_TEST_REAL_MKDIR PWT_TEST_REAL_CP
 PWT_TEST_REAL_GIT=$(command -v git)
+PWT_TEST_REAL_MKDIR=$(command -v mkdir)
+PWT_TEST_REAL_CP=$(command -v cp)
 
 # Git boundary stub: normal calls delegate unchanged. A named failure mode lets
 # the suite prove pwt distinguishes Git errors from ordinary missing records.
@@ -135,6 +142,43 @@ case ${PWT_TEST_GIT_FAIL:-} in
   ls-remote)
     case $args in *' ls-remote --symref origin HEAD '*) exit 70 ;; esac
     ;;
+  include-ls-files)
+    case $args in
+      *' ls-files --others --ignored --exclude-from='*) exit 70 ;;
+    esac
+    ;;
+  include-escaping-path)
+    case $args in
+      *' ls-files --others --ignored --exclude-from='*)
+        printf '../outside\0'
+        exit 0
+        ;;
+    esac
+    ;;
+  worktree-remove)
+    case $args in *' worktree remove --force '*) exit 70 ;; esac
+    ;;
+  worktree-add-after-create)
+    case $args in
+      *' worktree add '*)
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        exit 70
+        ;;
+    esac
+    ;;
+  hold-worktree-add)
+    case $args in
+      *' worktree add '*)
+        : >"$PWT_TEST_ADD_READY"
+        attempts=0
+        while [ ! -e "$PWT_TEST_ADD_RELEASE" ]; do
+          attempts=$((attempts + 1))
+          [ "$attempts" -lt 200 ] || exit 75
+          sleep 0.05
+        done
+        ;;
+    esac
+    ;;
   inject-target-symlink)
     case $args in
       *' fetch --quiet origin '*)
@@ -147,6 +191,32 @@ esac
 exec "$PWT_TEST_REAL_GIT" "$@"
 STUB
 chmod +x "$BIN/git"
+
+# Filesystem boundary stubs delegate by default. Focused modes let the suite
+# deterministically exercise a post-mkdir substitution race and a copy error.
+cat >"$BIN/mkdir" <<'STUB'
+#!/usr/bin/env bash
+if [ -n "${PWT_TEST_MKDIR_FAIL:-}" ] &&
+  [ "$#" -eq 1 ] && [ "$1" = "$PWT_TEST_MKDIR_FAIL" ]; then
+  exit 73
+fi
+if [ -n "${PWT_TEST_MKDIR_SWAP:-}" ] &&
+  [ "$#" -eq 2 ] && [ "$1" = -p ] && [ "$2" = "$PWT_TEST_MKDIR_SWAP" ]; then
+  "$PWT_TEST_REAL_MKDIR" "$@" || exit
+  rm -rf "$PWT_TEST_MKDIR_SWAP"
+  ln -s "$PWT_TEST_MKDIR_OUTSIDE" "$PWT_TEST_MKDIR_SWAP"
+  exit
+fi
+exec "$PWT_TEST_REAL_MKDIR" "$@"
+STUB
+chmod +x "$BIN/mkdir"
+
+cat >"$BIN/cp" <<'STUB'
+#!/usr/bin/env bash
+[ "${PWT_TEST_CP_FAIL:-}" != 1 ] || exit 74
+exec "$PWT_TEST_REAL_CP" "$@"
+STUB
+chmod +x "$BIN/cp"
 
 export PWT_TEST_LOG="$TMP/launch.log"
 export PWT_TEST_ARGS_DIR="$TMP/launch-args"
@@ -253,6 +323,23 @@ pwt_inject_target_symlink() {
     export PWT_TEST_INJECT_OUTSIDE="$outside"
     pwt "$@"
   )
+}
+pwt_swap_after_mkdir() {
+  local destination=$1 outside=$2
+  shift 2
+  (
+    export PWT_TEST_MKDIR_SWAP="$destination"
+    export PWT_TEST_MKDIR_OUTSIDE="$outside"
+    pwt "$@"
+  )
+}
+pwt_cp_fail() {
+  (export PWT_TEST_CP_FAIL=1; pwt "$@")
+}
+pwt_mkdir_fail() {
+  local path=$1
+  shift
+  (export PWT_TEST_MKDIR_FAIL="$path"; pwt "$@")
 }
 
 printf 'pwt test suite\n'
@@ -858,6 +945,426 @@ check 'a failed fetch leaves no target worktree behind' \
   test ! -e "$MANAGED/feat-git-failure"
 check_equals 'a failed fetch never launches Pi' '' "$(launched pwd)"
 git -C "$PRIMARY" remote set-url origin "$REMOTE"
+
+# ---------------------------------------------------------- worktree includes
+
+section 'worktreeinclude'
+
+# Nothing configured yet: creation must remain a no-op.
+launch_reset
+pwt new feat/no-include >/dev/null 2>&1
+check 'creation succeeds when worktreeinclude is absent' \
+  test -d "$MANAGED/feat-no-include"
+
+printf '# nothing matches this\nnever-matches-anything\n' \
+  >"$PRIMARY/.worktreeinclude"
+launch_reset
+pwt new feat/empty-include >/dev/null 2>&1
+check 'creation succeeds when worktreeinclude matches nothing' \
+  test -d "$MANAGED/feat-empty-include"
+
+# Real patterns cover nested paths, spaces, and a literal newline. The wildcard
+# is independent of the unusual filename, so the assertion can disagree with a
+# newline-flattening implementation rather than recreating its parsing logic.
+newline_name=$'line\nbreak.local'
+mkdir -p "$PRIMARY/config"
+printf 'SECRET=1\n' >"$PRIMARY/.env"
+printf '{"local":true}\n' >"$PRIMARY/config/local.json"
+printf 'spaced\n' >"$PRIMARY/with space.txt"
+printf 'newline\n' >"$PRIMARY/$newline_name"
+printf 'adjacent dots\n' >"$PRIMARY/valid..local"
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+.env
+config/local.json
+with space.txt
+*.local
+PATTERNS
+
+launch_reset
+copy_out=$(pwt new feat/copied 2>&1)
+check 'a worktreeinclude match is copied into the new worktree' \
+  test -f "$MANAGED/feat-copied/.env"
+check 'a nested worktreeinclude match keeps its relative path' \
+  test -f "$MANAGED/feat-copied/config/local.json"
+check 'a worktreeinclude match containing a space is copied' \
+  test -f "$MANAGED/feat-copied/with space.txt"
+check 'NUL-safe listing preserves a newline in a matched filename' \
+  test -f "$MANAGED/feat-copied/$newline_name"
+check 'adjacent dots in a filename do not read as path traversal' \
+  test -f "$MANAGED/feat-copied/valid..local"
+check_contains 'copying reports the number of files copied' \
+  'copied 5 file(s)' "$copy_out"
+check_equals 'the copied file has the same contents as the original' \
+  'SECRET=1' "$(sed -n '1p' "$MANAGED/feat-copied/.env" 2>/dev/null)"
+
+# Worktrees must share the primary checkout's single beads database. Even an
+# explicit include pattern cannot create a private, divergent copy.
+mkdir -p "$PRIMARY/.beads/backup"
+printf '{"id":"x"}\n' >"$PRIMARY/.beads/issues.jsonl"
+printf 'blob\n' >"$PRIMARY/.beads/backup/snap.darc"
+cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
+.env
+.beads/
+PATTERNS
+
+launch_reset
+beads_out=$(pwt new feat/beads-guard 2>&1)
+check 'the beads directory is never copied when a pattern matches it' \
+  test ! -e "$MANAGED/feat-beads-guard/.beads"
+check 'no file below the beads directory is copied' \
+  test ! -e "$MANAGED/feat-beads-guard/.beads/issues.jsonl"
+check 'a non-beads match is still copied alongside the refusal' \
+  test -f "$MANAGED/feat-beads-guard/.env"
+check_contains 'skipping the beads directory prints a clear warning' \
+  'refusing to copy .beads/' "$beads_out"
+
+# Both the pattern file and sources come from the physical primary checkout,
+# even when pwt itself is invoked from a linked worktree.
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+launch_reset
+pwt_in "$MANAGED/feat-alpha" new feat/from-inside >/dev/null 2>&1
+check 'worktreeinclude uses the primary checkout from inside a worktree' \
+  test -f "$MANAGED/feat-from-inside/.env"
+
+git -C "$PRIMARY" branch feat/copy-on-branch >/dev/null 2>&1
+launch_reset
+pwt branch feat/copy-on-branch >/dev/null 2>&1
+check 'branch also copies worktreeinclude matches' \
+  test -f "$MANAGED/feat-copy-on-branch/.env"
+
+# Git can report failure after creating and registering a worktree (for example,
+# when a checkout hook fails). The retained registration must be abandoned
+# before preparation state is cleared.
+launch_reset
+late_add_status=0
+late_add_out=$(pwt_git_fail worktree-add-after-create \
+  new feat/late-add-failure 2>&1) || late_add_status=$?
+if [ "$late_add_status" -ne 0 ]; then
+  ok 'a late worktree-add error exits non-zero'
+else
+  not_ok 'a late worktree-add error exits non-zero'
+fi
+check_contains 'a late worktree-add error reports creation failure' \
+  'could not create the worktree' "$late_add_out"
+check 'a late worktree-add error removes the created directory' \
+  test ! -e "$MANAGED/feat-late-add-failure"
+check_fails 'a late worktree-add error unregisters the created worktree' \
+  worktree_registered_at "$MANAGED/feat-late-add-failure"
+check_equals 'a late worktree-add error never launches Pi' '' "$(launched pwd)"
+launch_reset
+pwt branch feat/late-add-failure >/dev/null 2>&1
+check 'a cleaned late worktree-add failure can be retried safely' \
+  test -f "$MANAGED/feat-late-add-failure/.env"
+check_equals 'the late-add retry launches from the prepared worktree' \
+  "$MANAGED/feat-late-add-failure" "$(launched pwd)"
+
+# An include entry names a repository path, but the source itself can still be
+# an untracked symlink. Do not dereference it and import outside data.
+printf 'OUTSIDE SOURCE\n' >"$TMP/outside-source"
+ln -s "$TMP/outside-source" "$PRIMARY/external-source"
+printf 'external-source\n' >"$PRIMARY/.worktreeinclude"
+launch_reset
+source_link_status=0
+source_link_out=$(pwt new feat/source-link 2>&1) || source_link_status=$?
+if [ "$source_link_status" -ne 0 ]; then
+  ok 'a symlink source aborts worktree preparation'
+else
+  not_ok 'a symlink source aborts worktree preparation'
+fi
+check_contains 'the source refusal names the symlink' \
+  'symlink from the primary checkout' "$source_link_out"
+check 'a symlink source causes complete worktree abandonment' \
+  test ! -e "$MANAGED/feat-source-link"
+check_equals 'a symlink source never launches Pi' '' "$(launched pwd)"
+
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+
+# A Git error must not be interpreted as an empty include set. The worktree is
+# abandoned and Pi never starts, while the newly created branch remains for an
+# explicit retry through `pwt branch`.
+launch_reset
+include_list_status=0
+include_list_out=$(pwt_git_fail include-ls-files \
+  new feat/include-list-failure 2>&1) || include_list_status=$?
+if [ "$include_list_status" -ne 0 ]; then
+  ok 'Git listing failure aborts worktree preparation'
+else
+  not_ok 'Git listing failure aborts worktree preparation'
+fi
+check_contains 'Git listing failure is reported instead of reading as empty' \
+  'cannot list .worktreeinclude matches' "$include_list_out"
+check 'Git listing failure removes the new worktree directory' \
+  test ! -e "$MANAGED/feat-include-list-failure"
+check_fails 'Git listing failure unregisters the new worktree' \
+  worktree_registered_at "$MANAGED/feat-include-list-failure"
+check_equals 'Git listing failure never launches Pi' '' "$(launched pwd)"
+launch_reset
+pwt branch feat/include-list-failure >/dev/null 2>&1
+check 'successful abandonment leaves the branch ready for explicit retry' \
+  test -f "$MANAGED/feat-include-list-failure/.env"
+check_equals 'the explicit retry launches from its fully prepared worktree' \
+  "$MANAGED/feat-include-list-failure" "$(launched pwd)"
+
+# A fabricated Git result reaches the traversal assertion directly. This keeps
+# the guard behavioral even though honest `git ls-files` normalizes its output.
+launch_reset
+escape_status=0
+escape_out=$(pwt_git_fail include-escaping-path \
+  new feat/escaping-source-path 2>&1) || escape_status=$?
+if [ "$escape_status" -ne 0 ]; then
+  ok 'an escaping listed path aborts worktree preparation'
+else
+  not_ok 'an escaping listed path aborts worktree preparation'
+fi
+check_contains 'the escaping listed path is reported' \
+  'path that escapes the worktree' "$escape_out"
+check 'an escaping listed path causes complete worktree abandonment' \
+  test ! -e "$MANAGED/feat-escaping-source-path"
+check_equals 'an escaping listed path never launches Pi' '' "$(launched pwd)"
+
+# A copy error is a preparation error, not permission to launch a partially
+# populated worktree.
+launch_reset
+copy_failure_status=0
+copy_failure_out=$(pwt_cp_fail new feat/copy-failure 2>&1) || copy_failure_status=$?
+if [ "$copy_failure_status" -ne 0 ]; then
+  ok 'a copy error aborts worktree preparation'
+else
+  not_ok 'a copy error aborts worktree preparation'
+fi
+check_contains 'a copy error names the file it could not copy' \
+  'cannot copy .env into the worktree' "$copy_failure_out"
+check_not_contains 'a copy error does not report preparation success' \
+  'copied 1 file(s)' "$copy_failure_out"
+check 'a copy error removes the new worktree directory' \
+  test ! -e "$MANAGED/feat-copy-failure"
+check_fails 'a copy error unregisters the new worktree' \
+  worktree_registered_at "$MANAGED/feat-copy-failure"
+check_equals 'a copy error never launches Pi' '' "$(launched pwd)"
+
+# If Git itself cannot remove a failed worktree, its private preparation marker
+# must block every later launch until the retained tree is removed explicitly.
+launch_reset
+cleanup_failure_status=0
+cleanup_failure_out=$(
+  PWT_TEST_CP_FAIL=1 PWT_TEST_GIT_FAIL=worktree-remove \
+    pwt new feat/cleanup-failure 2>&1
+) || cleanup_failure_status=$?
+if [ "$cleanup_failure_status" -ne 0 ]; then
+  ok 'a cleanup error still exits non-zero'
+else
+  not_ok 'a cleanup error still exits non-zero'
+fi
+check_contains 'a cleanup error reports the retained blocked worktree' \
+  'cleanup failed and the worktree remains blocked' "$cleanup_failure_out"
+check 'a cleanup error leaves its worktree registered for explicit recovery' \
+  worktree_registered_at "$MANAGED/feat-cleanup-failure"
+launch_reset
+retry_status=0
+retry_out=$(pwt branch feat/cleanup-failure 2>&1) || retry_status=$?
+if [ "$retry_status" -ne 0 ]; then
+  ok 'an incomplete retained worktree cannot be reused'
+else
+  not_ok 'an incomplete retained worktree cannot be reused'
+fi
+check_contains 'retry explains that retained preparation is incomplete' \
+  'worktree preparation is incomplete' "$retry_out"
+check_equals 'retrying an incomplete retained worktree never launches Pi' \
+  '' "$(launched pwd)"
+git -C "$PRIMARY" worktree remove --force \
+  "$MANAGED/feat-cleanup-failure" >/dev/null 2>&1
+
+# Preparation state is recorded before Git creates anything. A state-write
+# failure therefore leaves no worktree that would need fallible cleanup.
+launch_reset
+marker_failure_status=0
+marker_failure_out=$(pwt_mkdir_fail \
+  "$PRIMARY/.git/pwt/preparing-feat-marker-failure" \
+  new feat/marker-failure 2>&1) || marker_failure_status=$?
+if [ "$marker_failure_status" -ne 0 ]; then
+  ok 'a preparation-marker error still exits non-zero'
+else
+  not_ok 'a preparation-marker error still exits non-zero'
+fi
+check_contains 'a preparation-marker error reports the state-write failure' \
+  'cannot record worktree preparation state' "$marker_failure_out"
+check 'a preparation-marker error leaves no worktree directory' \
+  test ! -e "$MANAGED/feat-marker-failure"
+check_fails 'a preparation-marker error leaves no worktree registration' \
+  worktree_registered_at "$MANAGED/feat-marker-failure"
+check_ref_absent 'a preparation-marker error leaves no branch' \
+  refs/heads/feat/marker-failure
+check_equals 'a preparation-marker error never launches Pi' '' "$(launched pwd)"
+
+# Marker acquisition must be atomic. Hold the first invocation after it acquires
+# state but before Git creates the worktree, then race a second invocation for
+# the same target.
+add_ready="$TMP/concurrent-add-ready"
+add_release="$TMP/concurrent-add-release"
+first_add_out="$TMP/concurrent-first.out"
+launch_reset
+(
+  export PWT_TEST_GIT_FAIL=hold-worktree-add
+  export PWT_TEST_ADD_READY="$add_ready"
+  export PWT_TEST_ADD_RELEASE="$add_release"
+  pwt new feat/concurrent-preparation >"$first_add_out" 2>&1
+) &
+first_add_pid=$!
+barrier_attempts=0
+while [ ! -e "$add_ready" ] && [ "$barrier_attempts" -lt 200 ]; do
+  barrier_attempts=$((barrier_attempts + 1))
+  sleep 0.05
+done
+check 'the first concurrent invocation acquires preparation state' \
+  test -e "$add_ready"
+second_add_status=0
+second_add_out=$(pwt new feat/concurrent-preparation 2>&1) || second_add_status=$?
+if [ "$second_add_status" -ne 0 ]; then
+  ok 'a concurrent invocation cannot acquire the same preparation state'
+else
+  not_ok 'a concurrent invocation cannot acquire the same preparation state'
+fi
+check_contains 'the concurrent refusal names existing preparation state' \
+  'stale worktree preparation state' "$second_add_out"
+check_equals 'the refused concurrent invocation never launches Pi' '' "$(launched pwd)"
+: >"$add_release"
+first_add_status=0
+wait "$first_add_pid" || first_add_status=$?
+if [ "$first_add_status" -eq 0 ]; then
+  ok 'the preparation-state owner completes after the race'
+else
+  not_ok 'the preparation-state owner completes after the race'
+fi
+check 'the preparation-state owner copies its include' \
+  test -f "$MANAGED/feat-concurrent-preparation/.env"
+check_equals 'the preparation-state owner launches from its completed worktree' \
+  "$MANAGED/feat-concurrent-preparation" "$(launched pwd)"
+check 'completed concurrent preparation clears its marker directory' \
+  test ! -e "$PRIMARY/.git/pwt/preparing-feat-concurrent-preparation"
+
+# A hostile branch can commit each unsafe destination shape. The copy source in
+# the trusted primary checkout is regular; only the fresh target is hostile.
+(
+  cd "$TMP/seed" || exit 1
+  git checkout -q stable
+  ln -s "$TMP/victim-file" evil-link
+  ln -s "$TMP/victim-dir" nested-link
+  mkdir -p dir-dst
+  ln -s "$TMP/victim-dir/dir-dst" dir-dst/dir-dst
+  printf 'tracked placeholder\n' >.env
+  git add .env evil-link nested-link dir-dst
+  git commit -qm 'add hostile include destinations'
+  git push -q origin stable
+)
+printf 'ORIGINAL\n' >"$TMP/victim-file"
+mkdir -p "$TMP/victim-dir"
+printf 'SECRET=1\n' >"$PRIMARY/evil-link"
+mkdir -p "$PRIMARY/nested-link/sub"
+printf 'SECRET=1\n' >"$PRIMARY/nested-link/sub/config"
+printf 'SECRET=1\n' >"$PRIMARY/dir-dst"
+
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+launch_reset
+tracked_status=0
+tracked_out=$(pwt new feat/tracked-destination 2>&1) || tracked_status=$?
+if [ "$tracked_status" -ne 0 ]; then
+  ok 'a tracked destination aborts worktree preparation'
+else
+  not_ok 'a tracked destination aborts worktree preparation'
+fi
+check_contains 'the tracked destination refusal names the existing file' \
+  'overwrite an existing file' "$tracked_out"
+check 'a tracked destination causes complete worktree abandonment' \
+  test ! -e "$MANAGED/feat-tracked-destination"
+check_equals 'a tracked destination never launches Pi' '' "$(launched pwd)"
+
+printf 'evil-link\n' >"$PRIMARY/.worktreeinclude"
+launch_reset
+symlink_status=0
+symlink_out=$(pwt new feat/symlink-escape 2>&1) || symlink_status=$?
+if [ "$symlink_status" -ne 0 ]; then
+  ok 'a symlinked destination exits non-zero'
+else
+  not_ok 'a symlinked destination exits non-zero'
+fi
+check_equals 'a symlinked copy destination never launches Pi' '' "$(launched pwd)"
+check_equals 'a file outside the worktree remains untouched' \
+  'ORIGINAL' "$(sed -n '1p' "$TMP/victim-file" 2>/dev/null)"
+check 'a symlinked destination causes complete worktree abandonment' \
+  test ! -e "$MANAGED/feat-symlink-escape"
+check_fails 'the symlinked destination is unregistered after abandonment' \
+  worktree_registered_at "$MANAGED/feat-symlink-escape"
+check_contains 'the refusal names the symlinked destination' \
+  'symlink inside the worktree' "$symlink_out"
+
+printf 'nested-link/sub/config\n' >"$PRIMARY/.worktreeinclude"
+launch_reset
+nested_status=0
+nested_out=$(pwt new feat/nested-escape 2>&1) || nested_status=$?
+if [ "$nested_status" -ne 0 ]; then
+  ok 'an escaping intermediate directory exits non-zero'
+else
+  not_ok 'an escaping intermediate directory exits non-zero'
+fi
+check_equals 'an escaping intermediate directory never launches Pi' '' "$(launched pwd)"
+check 'nothing is copied through an escaping intermediate directory' \
+  test ! -e "$TMP/victim-dir/sub/config"
+# This assertion isolates the PRE-mkdir guard. A post-mkdir refusal alone is too
+# late: it would leave this attacker-chosen directory behind outside the target.
+check 'the pre-mkdir guard prevents creating a directory outside the worktree' \
+  test ! -e "$TMP/victim-dir/sub"
+check 'an escaping parent causes complete worktree abandonment' \
+  test ! -e "$MANAGED/feat-nested-escape"
+check_contains 'the escaping-parent refusal names physical containment' \
+  'resolves outside the worktree' "$nested_out"
+
+# Replace the just-created destination directory with an outside symlink in the
+# mkdir boundary stub. Only the post-mkdir containment check can catch this.
+mkdir -p "$PRIMARY/post-mkdir/sub" "$TMP/post-mkdir-outside"
+printf 'SECRET=1\n' >"$PRIMARY/post-mkdir/sub/config"
+printf 'post-mkdir/sub/config\n' >"$PRIMARY/.worktreeinclude"
+launch_reset
+post_mkdir_status=0
+post_mkdir_out=$(pwt_swap_after_mkdir \
+  "$MANAGED/feat-post-mkdir-race/post-mkdir/sub" \
+  "$TMP/post-mkdir-outside" \
+  new feat/post-mkdir-race 2>&1) || post_mkdir_status=$?
+if [ "$post_mkdir_status" -ne 0 ]; then
+  ok 'a post-mkdir destination substitution exits non-zero'
+else
+  not_ok 'a post-mkdir destination substitution exits non-zero'
+fi
+check_contains 'the post-mkdir substitution is refused by containment' \
+  'resolves outside the worktree' "$post_mkdir_out"
+check 'the post-mkdir substitution writes nothing outside the worktree' \
+  test ! -e "$TMP/post-mkdir-outside/config"
+check 'the post-mkdir substitution abandons the worktree' \
+  test ! -e "$MANAGED/feat-post-mkdir-race"
+check_equals 'a post-mkdir substitution never launches Pi' '' "$(launched pwd)"
+
+printf 'dir-dst\n' >"$PRIMARY/.worktreeinclude"
+launch_reset
+directory_status=0
+directory_out=$(pwt new feat/directory-escape 2>&1) || directory_status=$?
+if [ "$directory_status" -ne 0 ]; then
+  ok 'a directory at the copy destination exits non-zero'
+else
+  not_ok 'a directory at the copy destination exits non-zero'
+fi
+check_equals 'a directory at the copy destination never launches Pi' '' "$(launched pwd)"
+check 'nothing is copied through the directory-at-destination shape' \
+  test ! -e "$TMP/victim-dir/dir-dst"
+check 'a non-regular destination causes complete worktree abandonment' \
+  test ! -e "$MANAGED/feat-directory-escape"
+check_contains 'the directory refusal names the invalid destination shape' \
+  'non-regular destination' "$directory_out"
+
+rm -rf "$PRIMARY/evil-link" "$PRIMARY/nested-link" "$PRIMARY/dir-dst" \
+  "$PRIMARY/post-mkdir"
+rm -f "$PRIMARY/external-source"
+rm -f "$PRIMARY/.worktreeinclude" "$PRIMARY/.env" \
+  "$PRIMARY/config/local.json" "$PRIMARY/with space.txt" \
+  "$PRIMARY/$newline_name" "$PRIMARY/valid..local"
 
 # -------------------------------------------------------------------- summary
 
