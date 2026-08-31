@@ -94,7 +94,23 @@ resolve_path() {
 }
 
 parse_remote_identity() {
-  local url=$1 rest
+  local url=$1 rest authority
+  origin_host=''
+  case $url in
+    *://*)
+      authority=${url#*://}
+      authority=${authority%%/*}
+      authority=${authority##*@}
+      origin_host=${authority%%:*}
+      ;;
+    *@*:*/*)
+      authority=${url%%:*}
+      origin_host=${authority##*@}
+      ;;
+    *:*/*)
+      origin_host=${url%%:*}
+      ;;
+  esac
   url=${url%.git}
   url=${url%/}
 
@@ -106,6 +122,14 @@ parse_remote_identity() {
   # Do not echo the remote URL here: HTTPS remotes can contain credentials.
   valid_identity_part "$owner" || die 'cannot derive owner from origin remote'
   valid_identity_part "$repo" || die 'cannot derive repository from origin remote'
+  # Local-path remotes are useful in tests and still represent github.com when
+  # pwt reaches the GitHub-only gh interface.
+  origin_host=${origin_host:-github.com}
+  case $origin_host in
+    '' | .* | *[!A-Za-z0-9.-]*) die 'cannot derive host from origin remote' ;;
+  esac
+  origin_host=$(printf '%s' "$origin_host" | tr '[:upper:]' '[:lower:]')
+  origin_gh_repo="$origin_host/$owner/$repo"
 }
 
 valid_identity_part() {
@@ -667,17 +691,23 @@ remote_matches_identity() {
 }
 
 pr_url_identity() {
-  local url=$1 number=$2 base rest
+  local url=$1 number=$2 base rest authority
   case $url in
-    */pull/"$number") ;;
+    https://*/pull/"$number") ;;
     *) return 1 ;;
   esac
   base=${url%/pull/$number}
+  authority=${base#https://}
+  PR_BASE_HOST=${authority%%/*}
   PR_BASE_REPO=${base##*/}
   rest=${base%/*}
   PR_BASE_OWNER=${rest##*/}
+  case $PR_BASE_HOST in
+    '' | .* | *[!A-Za-z0-9.-]*) return 1 ;;
+  esac
   valid_identity_part "$PR_BASE_OWNER" || return 1
   valid_identity_part "$PR_BASE_REPO" || return 1
+  PR_BASE_HOST=$(printf '%s' "$PR_BASE_HOST" | tr '[:upper:]' '[:lower:]')
   PR_BASE_OWNER=$(printf '%s' "$PR_BASE_OWNER" | tr '[:upper:]' '[:lower:]')
   PR_BASE_REPO=$(printf '%s' "$PR_BASE_REPO" | tr '[:upper:]' '[:lower:]')
 }
@@ -752,7 +782,7 @@ fetch_pr_head() {
     return 1
   fi
   if ! (cd "$path" && gh pr checkout "$number" \
-    --repo "$owner/$repo" --detach); then
+    --repo "$origin_gh_repo" --detach); then
     cleanup_pr_fetch_worktree >/dev/null 2>&1 || return 3
     return 1
   fi
@@ -1094,7 +1124,7 @@ cmd_pr() {
   esac
 
   require_gh pr
-  meta=$(gh pr view "$number" --repo "$owner/$repo" \
+  meta=$(gh pr view "$number" --repo "$origin_gh_repo" \
     --json headRefName,isCrossRepository,headRepositoryOwner,headRepository,url,headRefOid \
     --jq '.headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name, .url, .headRefOid' \
     2>/dev/null) || die "cannot resolve pull request #$number"
@@ -1113,7 +1143,8 @@ cmd_pr() {
     die "pull request #$number returned an invalid head repository identity"
   pr_url_identity "$pr_url" "$number" ||
     die "pull request #$number returned an invalid canonical URL"
-  [[ $PR_BASE_OWNER == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" &&
+  [[ $PR_BASE_HOST == "$origin_host" &&
+    $PR_BASE_OWNER == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" &&
     $PR_BASE_REPO == "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]] ||
     die "pull request #$number belongs to a different repository than origin"
   valid_head_oid "$head_oid" ||
@@ -1154,10 +1185,10 @@ cmd_pr() {
       note "resetting $head_ref — it has no local-only commits"
     fi
     (cd "$target" && gh pr checkout "$number" \
-      --repo "$owner/$repo" --force) || checkout_ok=0
+      --repo "$origin_gh_repo" --force) || checkout_ok=0
   else
     (cd "$target" && gh pr checkout "$number" \
-      --repo "$owner/$repo") || checkout_ok=0
+      --repo "$origin_gh_repo") || checkout_ok=0
   fi
   if ((! checkout_ok)); then
     if ((branch_existed && ! force && ! auto_force)); then

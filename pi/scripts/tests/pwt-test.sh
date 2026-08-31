@@ -293,8 +293,17 @@ for argument in "$@"; do
   esac
 done
 case $repo_selector in
+  */*/*) ;;
+  *)
+    if [ -n "${GH_HOST:-}" ]; then
+      repo_selector="$GH_HOST/$repo_selector"
+    fi
+    ;;
+esac
+case $repo_selector in
   owner/project | github.com/owner/project) meta_root=$PWT_GH_PRS ;;
-  other/wrong | github.com/other/wrong) meta_root=$PWT_GH_OTHER_PRS ;;
+  other/wrong | github.com/other/wrong | enterprise.example/owner/project) \
+    meta_root=$PWT_GH_OTHER_PRS ;;
   *)
     printf 'unknown repository: %s\n' "$repo_selector" >&2
     exit 1
@@ -660,6 +669,14 @@ pwt_with_ambient_repo() {
   shift 3
   (
     export GH_REPO="$ambient_repo"
+    pwt_with_root "$dir" "$root" "$@"
+  )
+}
+pwt_with_ambient_host() {
+  local dir=$1 root=$2 ambient_host=$3
+  shift 3
+  (
+    export GH_HOST="$ambient_host"
     pwt_with_root "$dir" "$root" "$@"
   )
 }
@@ -1463,6 +1480,38 @@ check_equals 'ambient GH_REPO cannot redirect the launched PR worktree' \
 check 'ambient GH_REPO leaves the other repository branch absent' \
   test ! -e "$MANAGED/feat-pr-ambient-wrong"
 
+# A host-qualified selector must win over gh's ambient enterprise-host override.
+# Removing the origin host from --repo makes both lookup and checkout select the
+# wrong fixture consistently, which exact-OID validation alone cannot detect.
+pr_meta 118 feat/pr-ambient-host-wrong false
+mv "$PWT_GH_PRS/118" "$PWT_GH_OTHER_PRS/118"
+pr_meta 118 feat/pr-ambient-host-right false
+launch_reset
+check 'pr works outside Git with an ambient GH_HOST override' \
+  pwt_with_ambient_host "$TMP" "$PRIMARY" enterprise.example pr 118
+check_equals 'ambient GH_HOST cannot redirect the launched PR worktree' \
+  "$MANAGED/feat-pr-ambient-host-right" "$(launched pwd)"
+check 'ambient GH_HOST leaves the other-host branch absent' \
+  test ! -e "$MANAGED/feat-pr-ambient-host-wrong"
+
+# Git permits userless SCP-style enterprise remotes. The fake enterprise URL
+# cannot fetch this local fixture, but gh must still reach checkout with the
+# enterprise selector rather than silently falling back to github.com.
+pr_meta 120 feat/pr-userless-enterprise false
+sed 's#^url=https://github.com/#url=https://enterprise.example/#' \
+  "$PWT_GH_PRS/120" >"$PWT_GH_OTHER_PRS/120"
+rm -f "$PWT_GH_PRS/120"
+git -C "$PRIMARY" remote set-url origin \
+  'enterprise.example:owner/project.git'
+launch_reset
+: >"$PWT_GH_LOG"
+check_fails 'userless enterprise fixture fails only at its unavailable transport' \
+  pwt pr 120
+check_output 'pr derives an enterprise host from a userless SCP origin' \
+  '--repo enterprise.example/owner/project' cat "$PWT_GH_LOG"
+check_equals 'unavailable enterprise transport never launches Pi' '' "$(launched pwd)"
+git -C "$PRIMARY" remote set-url origin "$REMOTE"
+
 pr_meta 117 feat/pr-wrong-base-repo false
 sed 's#^url=https://github.com/owner/project/#url=https://github.com/other/wrong/#' \
   "$PWT_GH_PRS/117" >"$PWT_GH_PRS/117.tmp"
@@ -1471,6 +1520,15 @@ launch_reset
 check_fails 'pr rejects a canonical-looking URL for a different repository' \
   pwt pr 117
 check_equals 'wrong base-repository metadata never launches Pi' '' "$(launched pwd)"
+
+pr_meta 119 feat/pr-wrong-base-host false
+sed 's#^url=https://github.com/#url=https://enterprise.example/#' \
+  "$PWT_GH_PRS/119" >"$PWT_GH_PRS/119.tmp"
+mv "$PWT_GH_PRS/119.tmp" "$PWT_GH_PRS/119"
+launch_reset
+check_fails 'pr rejects a canonical-looking URL for a different host' \
+  pwt pr 119
+check_equals 'wrong base-host metadata never launches Pi' '' "$(launched pwd)"
 
 rm -f "$PRIMARY/.worktreeinclude" "$PRIMARY/.env"
 
