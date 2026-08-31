@@ -492,6 +492,113 @@ fetch_stale_tracking_ref() {
     "refs/heads/$branch:refs/remotes/origin/$branch"
 }
 
+assert_pr_oid_matches_remote() {
+  local number=$1 branch expected actual
+  branch=$(sed -n 's/^headRefName=//p' "$PWT_GH_PRS/$number")
+  expected=$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/$number")
+  actual=$(git -C "$PRIMARY" ls-remote origin "refs/heads/$branch" | cut -f1)
+  check_equals "fixture PR #$number metadata OID matches its remote head" \
+    "$actual" "$expected"
+}
+
+# Replace a PR head with a tracked .env shape that collides with an ignored
+# local path. A throwaway clone keeps the fixture out of the primary checkout.
+push_pr_tree_shape() {
+  local number=$1 branch=$2 shape=$3 clone oid
+  clone="$TMP/tree-shape-$number"
+  git clone -q "$REMOTE" "$clone" >/dev/null 2>&1 || return 1
+  git -C "$clone" fetch -q origin "refs/heads/$branch" || return 1
+  git -C "$clone" checkout -q --detach FETCH_HEAD || return 1
+  case $shape in
+    exact-file | file-ancestor)
+      printf 'tracked by pull request\n' >"$clone/.env"
+      git -C "$clone" add -f .env || return 1
+      ;;
+    symlink-ancestor)
+      ln -s tracked-target "$clone/.env"
+      git -C "$clone" add -f .env || return 1
+      ;;
+    directory)
+      mkdir -p "$clone/.env"
+      printf 'tracked by pull request\n' >"$clone/.env/child"
+      git -C "$clone" add -f .env/child || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  git -C "$clone" -c commit.gpgsign=false commit -qm \
+    "change .env tree shape for $branch" || return 1
+  oid=$(git -C "$clone" rev-parse HEAD) || return 1
+  git -C "$clone" push -q -f origin \
+    "$oid:refs/heads/$branch" || return 1
+  sync_pr_metadata_oid "$branch" "$oid" || return 1
+  printf '%s\n' "$oid"
+}
+
+# A moderately wide target tree makes the old ignored-path x tree-entry nested
+# scan miss the five-second budget while the batched implementation stays fast.
+push_pr_wide_tree() {
+  local number=$1 branch=$2 clone oid i=0
+  clone="$TMP/wide-tree-$number"
+  git clone -q "$REMOTE" "$clone" >/dev/null 2>&1 || return 1
+  git -C "$clone" fetch -q origin "refs/heads/$branch" || return 1
+  git -C "$clone" checkout -q --detach FETCH_HEAD || return 1
+  mkdir -p "$clone/tracked-perf"
+  while [ "$i" -lt 250 ]; do
+    printf 'tracked by pull request\n' >"$clone/tracked-perf/file-$i"
+    i=$((i + 1))
+  done
+  git -C "$clone" add tracked-perf || return 1
+  git -C "$clone" -c commit.gpgsign=false commit -qm \
+    "add wide tree for $branch" || return 1
+  oid=$(git -C "$clone" rev-parse HEAD) || return 1
+  git -C "$clone" push -q -f origin \
+    "$oid:refs/heads/$branch" || return 1
+  sync_pr_metadata_oid "$branch" "$oid" || return 1
+  printf '%s\n' "$oid"
+}
+
+within_scan_budget() {
+  local directory=$1 command_pid watchdog_pid rc
+  shift
+  (
+    cd "$directory" || exit 1
+    exec "$@"
+  ) &
+  command_pid=$!
+  (
+    sleep 5
+    kill -TERM "$command_pid" >/dev/null 2>&1 || true
+  ) &
+  watchdog_pid=$!
+  wait "$command_pid"
+  rc=$?
+  kill "$watchdog_pid" >/dev/null 2>&1 || true
+  wait "$watchdog_pid" >/dev/null 2>&1 || true
+  return "$rc"
+}
+
+FAILGIT="$TMP/failgit"
+mkdir -p "$FAILGIT"
+make_failing_git() {
+  local failed_command=$1 real_git
+  real_git=$(command -v git)
+  cat >"$FAILGIT/git" <<STUB
+#!/usr/bin/env bash
+for argument in "\$@"; do
+  if [ "\$argument" = "$failed_command" ]; then
+    echo "fatal: simulated git failure" >&2
+    exit 128
+  fi
+done
+exec "$real_git" "\$@"
+STUB
+  chmod +x "$FAILGIT/git"
+}
+
+pwt_with_failing_git() {
+  PATH="$FAILGIT:$PATH" pwt "$@"
+}
+
 pwt_in() {
   local dir=$1
   shift
@@ -558,6 +665,12 @@ if grep -q 'python' "$PWT" 2>/dev/null; then
   not_ok 'the pwt script has no python dependency'
 else
   ok 'the pwt script has no python dependency'
+fi
+if grep -Eq '(^|[[:space:]])(mapfile|readarray|declare[[:space:]]+-A)([[:space:]]|$)' \
+  "$PWT" 2>/dev/null; then
+  not_ok 'the pwt script avoids Bash 4-only array features'
+else
+  ok 'the pwt script avoids Bash 4-only array features'
 fi
 check_equals 'the clone origin/HEAD is stale relative to the remote default' \
   'refs/heads/main|stable' \
@@ -1454,6 +1567,323 @@ check_output 'help documents explicit PR force behavior' \
   'resetting a leftover' pwt help
 check_output 'help documents the safe automatic reset' \
   'provably contained' pwt help
+
+# ------------------------------------------------------ reused PR refresh safety
+
+section 'pr-reuse'
+
+pr_marker() {
+  git -C "$PRIMARY" config --get "branch.$1.$2" 2>/dev/null || true
+}
+
+# Reused worktrees may contain intentionally local ignored configuration.
+exclude_file="$PRIMARY/.git/info/exclude"
+printf '.env\n' >>"$exclude_file"
+
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+printf 'REUSE_SECRET=keep-me\n' >"$PRIMARY/.env"
+pr_meta 301 feat/pr-reuse-refresh false
+assert_pr_oid_matches_remote 301
+launch_reset
+check 'initial PR checkout succeeds before reuse refresh tests' pwt pr 301
+check_equals 'initial PR checkout records its canonical URL marker' \
+  'https://github.com/owner/project/pull/301' \
+  "$(pr_marker feat/pr-reuse-refresh worktree-pr-url)"
+check_equals 'initial PR checkout records its exact head marker' \
+  "$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/301")" \
+  "$(pr_marker feat/pr-reuse-refresh worktree-pr-head)"
+check_equals 'initial PR checkout copied the ignored local file' \
+  'REUSE_SECRET=keep-me' "$(cat "$MANAGED/feat-pr-reuse-refresh/.env")"
+rm -f "$PRIMARY/.worktreeinclude"
+
+force_advance_pr_head feat/pr-reuse-refresh >/dev/null
+assert_pr_oid_matches_remote 301
+launch_reset
+check 'pr refreshes a clean reused worktree after a fast-forward' pwt pr 301
+check_equals 'fast-forward reuse launches the exact current PR head' \
+  "$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/301")" \
+  "$(git -C "$MANAGED/feat-pr-reuse-refresh" rev-parse HEAD)"
+check_equals 'fast-forward reuse preserves ignored local content' \
+  'REUSE_SECRET=keep-me' "$(cat "$MANAGED/feat-pr-reuse-refresh/.env")"
+
+rewrite_pr_head feat/pr-reuse-refresh >/dev/null
+assert_pr_oid_matches_remote 301
+launch_reset
+check 'pr refreshes a rewritten head from its last verified commit' pwt pr 301
+check_equals 'rewritten reuse launches the exact current PR head' \
+  "$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/301")" \
+  "$(git -C "$MANAGED/feat-pr-reuse-refresh" rev-parse HEAD)"
+check_equals 'rewritten reuse preserves ignored local content' \
+  'REUSE_SECRET=keep-me' "$(cat "$MANAGED/feat-pr-reuse-refresh/.env")"
+launch_reset
+check 'reused PR launches still accept forwarded Pi arguments' \
+  pwt pr 301 -- --model 'review value'
+check_arg_equals 'reused PR preserves a forwarded Pi argument unchanged' \
+  1 'review value'
+
+pr_meta 302 feat/pr-reuse-dirty false
+pwt pr 302 >/dev/null 2>&1
+dirty_head=$(git -C "$MANAGED/feat-pr-reuse-dirty" rev-parse HEAD)
+dirty_tracking_head=$(git -C "$PRIMARY" rev-parse \
+  refs/remotes/origin/feat/pr-reuse-dirty)
+printf 'dirty\n' >>"$MANAGED/feat-pr-reuse-dirty/README.md"
+force_advance_pr_head feat/pr-reuse-dirty >/dev/null
+launch_reset
+check_fails 'pr refuses a dirty reused worktree before refresh' pwt pr 302
+check_equals 'dirty refusal preserves the worktree head' "$dirty_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-dirty" rev-parse HEAD)"
+check_equals 'dirty refusal preserves the last verified head marker' "$dirty_head" \
+  "$(pr_marker feat/pr-reuse-dirty worktree-pr-head)"
+check_equals 'dirty refusal happens before the disposable PR fetch' "$dirty_tracking_head" \
+  "$(git -C "$PRIMARY" rev-parse refs/remotes/origin/feat/pr-reuse-dirty)"
+check_equals 'dirty refusal never launches Pi' '' "$(launched pwd)"
+
+pr_meta 303 feat/pr-reuse-local-commit false
+pwt pr 303 >/dev/null 2>&1
+printf 'local\n' >"$MANAGED/feat-pr-reuse-local-commit/local.txt"
+git -C "$MANAGED/feat-pr-reuse-local-commit" add local.txt
+git -C "$MANAGED/feat-pr-reuse-local-commit" -c commit.gpgsign=false \
+  commit -qm 'local work'
+local_head=$(git -C "$MANAGED/feat-pr-reuse-local-commit" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-local-commit >/dev/null
+launch_reset
+check_fails 'pr refuses local commits in a reused worktree even with --force' \
+  pwt pr 303 --force
+check_equals 'local-commit refusal preserves the branch head' "$local_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-local-commit" rev-parse HEAD)"
+check 'local-commit refusal preserves the committed file' \
+  test -f "$MANAGED/feat-pr-reuse-local-commit/local.txt"
+check_equals 'local-commit refusal never launches Pi' '' "$(launched pwd)"
+
+pr_meta 304 feat/pr-reuse-fork-name true fork-one project
+pwt pr 304 >/dev/null 2>&1
+pr_meta 305 feat/pr-reuse-fork-name true fork-two project
+fork_head=$(git -C "$MANAGED/feat-pr-reuse-fork-name" rev-parse HEAD)
+launch_reset
+check_fails 'pr refuses a same-named reused branch from a different fork PR' pwt pr 305
+check_equals 'wrong-fork refusal preserves the original branch head' "$fork_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-fork-name" rev-parse HEAD)"
+check_equals 'wrong-fork refusal preserves the original PR URL marker' \
+  'https://github.com/owner/project/pull/304' \
+  "$(pr_marker feat/pr-reuse-fork-name worktree-pr-url)"
+check_equals 'wrong-fork refusal never launches Pi' '' "$(launched pwd)"
+
+pr_meta 306 feat/pr-reuse-unverified false
+unverified_oid=$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/306")
+git -C "$PRIMARY" fetch -q origin "$unverified_oid"
+git -C "$PRIMARY" branch feat/pr-reuse-unverified "$unverified_oid" >/dev/null
+git -C "$PRIMARY" worktree add -q "$MANAGED/feat-pr-reuse-unverified" \
+  feat/pr-reuse-unverified
+launch_reset
+check_fails 'pr refuses a markerless reused worktree with no tracking identity' pwt pr 306
+check_equals 'unverified identity refusal never launches Pi' '' "$(launched pwd)"
+
+pr_meta 307 feat/pr-reuse-partial-marker false
+pwt pr 307 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-partial-marker.worktree-pr-head
+launch_reset
+check_fails 'pr refuses a reused worktree with only half its identity markers' pwt pr 307
+check_equals 'partial-marker refusal never launches Pi' '' "$(launched pwd)"
+
+pr_meta 308 feat/pr-reuse-malformed-marker false
+pwt pr 308 >/dev/null 2>&1
+git -C "$PRIMARY" config \
+  branch.feat/pr-reuse-malformed-marker.worktree-pr-head not-an-object
+launch_reset
+check_fails 'pr refuses a malformed last-verified head marker' pwt pr 308
+check_equals 'malformed-marker refusal never launches Pi' '' "$(launched pwd)"
+
+# Markerless worktrees from older versions can migrate only from native Git
+# tracking evidence. Rewrites require a recorded last-verified head.
+pr_meta 309 feat/pr-reuse-legacy-ff false
+pwt pr 309 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-legacy-ff.worktree-pr-url
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-legacy-ff.worktree-pr-head
+force_advance_pr_head feat/pr-reuse-legacy-ff >/dev/null
+legacy_ff_head=$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/309")
+launch_reset
+check 'markerless tracked PR worktree may refresh by fast-forward' pwt pr 309
+check_equals 'successful legacy refresh backfills its canonical URL marker' \
+  'https://github.com/owner/project/pull/309' \
+  "$(pr_marker feat/pr-reuse-legacy-ff worktree-pr-url)"
+check_equals 'successful legacy refresh backfills its verified head marker' \
+  "$legacy_ff_head" "$(pr_marker feat/pr-reuse-legacy-ff worktree-pr-head)"
+
+pr_meta 310 feat/pr-reuse-legacy-rewrite false
+pwt pr 310 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-legacy-rewrite.worktree-pr-url
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-legacy-rewrite.worktree-pr-head
+legacy_rewrite_before=$(git -C "$MANAGED/feat-pr-reuse-legacy-rewrite" rev-parse HEAD)
+rewrite_pr_head feat/pr-reuse-legacy-rewrite >/dev/null
+launch_reset
+check_fails 'markerless tracked PR worktree refuses a rewritten head' pwt pr 310
+check_equals 'legacy rewrite refusal preserves the branch head' "$legacy_rewrite_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-legacy-rewrite" rev-parse HEAD)"
+check_equals 'legacy rewrite refusal does not invent a head marker' '' \
+  "$(pr_marker feat/pr-reuse-legacy-rewrite worktree-pr-head)"
+
+# Exact objects and both parent/child tree-shape conflicts must be refused
+# before reset --hard can delete ignored local content.
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+printf 'keep exact ignored file\n' >"$PRIMARY/.env"
+pr_meta 311 feat/pr-reuse-collision-exact false
+pwt pr 311 >/dev/null 2>&1
+rm -f "$PRIMARY/.worktreeinclude"
+collision_exact_before=$(git -C "$MANAGED/feat-pr-reuse-collision-exact" rev-parse HEAD)
+push_pr_tree_shape 311 feat/pr-reuse-collision-exact exact-file >/dev/null
+launch_reset
+check_fails 'refresh refuses a target object at an exact ignored path' pwt pr 311
+check_equals 'exact collision preserves local content' 'keep exact ignored file' \
+  "$(cat "$MANAGED/feat-pr-reuse-collision-exact/.env")"
+check_equals 'exact collision preserves the branch head' "$collision_exact_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-collision-exact" rev-parse HEAD)"
+check_equals 'exact collision preserves the verified marker' "$collision_exact_before" \
+  "$(pr_marker feat/pr-reuse-collision-exact worktree-pr-head)"
+
+rm -rf "$PRIMARY/.env"
+mkdir -p "$PRIMARY/.env"
+printf 'keep ignored descendant\n' >"$PRIMARY/.env/local"
+printf '.env/local\n' >"$PRIMARY/.worktreeinclude"
+pr_meta 312 feat/pr-reuse-collision-ancestor false
+pwt pr 312 >/dev/null 2>&1
+rm -f "$PRIMARY/.worktreeinclude"
+collision_ancestor_before=$(git -C "$MANAGED/feat-pr-reuse-collision-ancestor" rev-parse HEAD)
+push_pr_tree_shape 312 feat/pr-reuse-collision-ancestor file-ancestor >/dev/null
+launch_reset
+check_fails 'refresh refuses a target file replacing an ignored directory' pwt pr 312
+check_equals 'file-ancestor collision preserves ignored content' \
+  'keep ignored descendant' \
+  "$(cat "$MANAGED/feat-pr-reuse-collision-ancestor/.env/local")"
+check_equals 'file-ancestor collision preserves the branch head' "$collision_ancestor_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-collision-ancestor" rev-parse HEAD)"
+
+rm -rf "$PRIMARY/.env"
+mkdir -p "$PRIMARY/.env"
+printf 'keep under target symlink\n' >"$PRIMARY/.env/local"
+printf '.env/local\n' >"$PRIMARY/.worktreeinclude"
+pr_meta 313 feat/pr-reuse-collision-symlink false
+pwt pr 313 >/dev/null 2>&1
+rm -f "$PRIMARY/.worktreeinclude"
+collision_symlink_before=$(git -C "$MANAGED/feat-pr-reuse-collision-symlink" rev-parse HEAD)
+push_pr_tree_shape 313 feat/pr-reuse-collision-symlink symlink-ancestor >/dev/null
+launch_reset
+check_fails 'refresh refuses a target symlink replacing an ignored directory' pwt pr 313
+check_equals 'symlink-ancestor collision preserves ignored content' \
+  'keep under target symlink' \
+  "$(cat "$MANAGED/feat-pr-reuse-collision-symlink/.env/local")"
+check_equals 'symlink collision preserves the branch head' "$collision_symlink_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-collision-symlink" rev-parse HEAD)"
+
+rm -rf "$PRIMARY/.env"
+printf 'keep ignored blocking file\n' >"$PRIMARY/.env"
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+pr_meta 314 feat/pr-reuse-collision-directory false
+pwt pr 314 >/dev/null 2>&1
+rm -f "$PRIMARY/.worktreeinclude"
+collision_directory_before=$(git -C "$MANAGED/feat-pr-reuse-collision-directory" rev-parse HEAD)
+push_pr_tree_shape 314 feat/pr-reuse-collision-directory directory >/dev/null
+launch_reset
+check_fails 'refresh refuses an ignored file blocking a target directory' pwt pr 314
+check_equals 'directory collision preserves ignored blocking file' \
+  'keep ignored blocking file' \
+  "$(cat "$MANAGED/feat-pr-reuse-collision-directory/.env")"
+check_equals 'directory collision preserves the branch head' "$collision_directory_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-collision-directory" rev-parse HEAD)"
+rm -f "$PRIMARY/.env"
+
+# Regression: the old nested Bash scan multiplied ignored paths by target-tree
+# entries. This fixture is small enough for the suite but large enough to time
+# that implementation out.
+pr_meta 315 feat/pr-reuse-many-ignored false
+pwt pr 315 >/dev/null 2>&1
+printf '.pwt-perf/\n' >>"$exclude_file"
+mkdir -p "$MANAGED/feat-pr-reuse-many-ignored/.pwt-perf"
+perf_i=0
+while [ "$perf_i" -lt 8000 ]; do
+  printf 'ignored local content\n' \
+    >"$MANAGED/feat-pr-reuse-many-ignored/.pwt-perf/file-$perf_i"
+  perf_i=$((perf_i + 1))
+done
+push_pr_wide_tree 315 feat/pr-reuse-many-ignored >/dev/null
+launch_reset
+check 'reused PR launch stays within budget with thousands of ignored files' \
+  within_scan_budget "$PRIMARY" "$PWT" pr 315
+check_equals 'large ignored-file refresh still launches Pi' \
+  "$MANAGED/feat-pr-reuse-many-ignored" "$(launched pwd)"
+
+pr_meta 316 feat/pr-reuse-primary false
+primary_pr_oid=$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/316")
+git -C "$PRIMARY" fetch -q origin "$primary_pr_oid"
+git -C "$PRIMARY" checkout -q -b feat/pr-reuse-primary "$primary_pr_oid"
+launch_reset
+check_fails 'pr refuses reuse from the primary checkout' pwt pr 316
+check_equals 'primary-checkout refusal never launches Pi' '' "$(launched pwd)"
+git -C "$PRIMARY" checkout -q main
+
+pr_meta 317 feat/pr-reuse-unmanaged false
+unmanaged_pr_oid=$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/317")
+git -C "$PRIMARY" fetch -q origin "$unmanaged_pr_oid"
+git -C "$PRIMARY" branch feat/pr-reuse-unmanaged "$unmanaged_pr_oid" >/dev/null
+git -C "$PRIMARY" worktree add -q "$TMP/unmanaged-pr-reuse" \
+  feat/pr-reuse-unmanaged
+launch_reset
+check_fails 'pr refuses reuse from an unmanaged worktree' pwt pr 317
+check_equals 'unmanaged-worktree refusal never launches Pi' '' "$(launched pwd)"
+
+# Disposable checkout failures must preserve the real worktree and clean up the
+# scratch worktree used to authenticate and fetch through gh.
+pr_meta 318 feat/pr-reuse-fetch-failure false
+pwt pr 318 >/dev/null 2>&1
+fetch_failure_before=$(git -C "$MANAGED/feat-pr-reuse-fetch-failure" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-fetch-failure >/dev/null
+printf 'checkoutFails=true\n' >>"$PWT_GH_PRS/318"
+launch_reset
+check_fails 'reused PR refuses when the disposable fetch fails' pwt pr 318
+check_equals 'failed disposable fetch preserves the real branch head' "$fetch_failure_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-fetch-failure" rev-parse HEAD)"
+
+pr_meta 319 feat/pr-reuse-fetch-mismatch false
+pwt pr 319 >/dev/null 2>&1
+fetch_mismatch_before=$(git -C "$MANAGED/feat-pr-reuse-fetch-mismatch" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-fetch-mismatch >/dev/null
+printf 'checkoutOidMismatch=true\n' >>"$PWT_GH_PRS/319"
+launch_reset
+check_fails 'reused PR refuses when fetched HEAD differs from metadata' pwt pr 319
+check_equals 'mismatched disposable fetch preserves the real branch head' \
+  "$fetch_mismatch_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-fetch-mismatch" rev-parse HEAD)"
+
+pr_meta 320 feat/pr-reuse-tree-inspection-failure false
+pwt pr 320 >/dev/null 2>&1
+tree_inspection_before=$(git -C "$MANAGED/feat-pr-reuse-tree-inspection-failure" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-tree-inspection-failure >/dev/null
+make_failing_git ls-tree
+launch_reset
+check_fails 'reused PR fails closed when the target tree cannot be inspected' \
+  pwt_with_failing_git pr 320
+check_equals 'tree inspection failure preserves the real branch head' \
+  "$tree_inspection_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-tree-inspection-failure" rev-parse HEAD)"
+check_equals 'tree inspection failure never launches Pi' '' "$(launched pwd)"
+rm -f "$FAILGIT/git"
+
+if git -C "$PRIMARY" worktree list --porcelain | grep -q 'pwt-pr-fetch'; then
+  not_ok 'temporary PR fetch worktrees are cleaned up'
+else
+  ok 'temporary PR fetch worktrees are cleaned up'
+fi
+fetch_scratch_left=0
+for candidate in "$MANAGED"/.pwt-pr-fetch.*; do
+  if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+    fetch_scratch_left=1
+  fi
+done
+check_equals 'temporary PR fetch directories are cleaned up' '0' "$fetch_scratch_left"
 
 # ---------------------------------------------------------- worktree includes
 
