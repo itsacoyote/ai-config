@@ -243,6 +243,98 @@ done
 STUB
 chmod +x "$BIN/pi"
 
+# Stub `gh`: PR metadata and checkout behavior come from files the tests own.
+# Checkout uses real Git so branch relationships, fetch side effects, and
+# failures remain observable instead of being mocked inside pwt.
+export PWT_GH_UNAVAILABLE="$TMP/gh-unavailable"
+export PWT_GH_PRS="$TMP/gh-prs"
+export PWT_GH_LOG="$TMP/gh.log"
+mkdir -p "$PWT_GH_PRS"
+: >"$PWT_GH_LOG"
+cat >"$BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+if [ -f "$PWT_GH_UNAVAILABLE" ]; then
+  printf 'gh: could not authenticate\n' >&2
+  exit 1
+fi
+if [ "$1" = auth ] && [ "$2" = status ]; then
+  exit 0
+fi
+if [ "$1" = pr ] && [ "$2" = view ]; then
+  meta="$PWT_GH_PRS/$3"
+  if [ ! -f "$meta" ]; then
+    printf 'could not resolve pull request %s\n' "$3" >&2
+    exit 1
+  fi
+  sed -n 's/^headRefName=//p' "$meta"
+  sed -n 's/^isCrossRepository=//p' "$meta"
+  sed -n 's/^headRepositoryOwner=//p' "$meta"
+  sed -n 's/^headRepository=//p' "$meta"
+  sed -n 's/^url=//p' "$meta"
+  sed -n 's/^headRefOid=//p' "$meta"
+  exit 0
+fi
+if [ "$1" = pr ] && [ "$2" = checkout ]; then
+  printf '%s\n' "$*" >>"$PWT_GH_LOG"
+  number=$3
+  meta="$PWT_GH_PRS/$number"
+  if [ ! -f "$meta" ]; then
+    printf 'could not resolve pull request %s\n' "$number" >&2
+    exit 1
+  fi
+  if grep -q '^checkoutFails=true$' "$meta"; then
+    printf "fatal: couldn't find remote ref\n" >&2
+    exit 1
+  fi
+  head_ref=$(sed -n 's/^headRefName=//p' "$meta")
+  force=0
+  detach=0
+  shift 3
+  for arg in "$@"; do
+    [ "$arg" = --force ] && force=1
+    [ "$arg" = --detach ] && detach=1
+  done
+  if ! git fetch -q origin \
+    "+refs/heads/$head_ref:refs/remotes/origin/$head_ref" 2>/dev/null; then
+    printf "fatal: couldn't find remote ref %s\n" "$head_ref" >&2
+    exit 1
+  fi
+  if [ "$detach" = 1 ]; then
+    if grep -q '^checkoutOidMismatch=true$' "$meta"; then
+      git checkout -q --detach HEAD
+    else
+      git checkout -q --detach "refs/remotes/origin/$head_ref"
+    fi
+    exit $?
+  fi
+  if grep -q '^checkoutOidMismatch=true$' "$meta"; then
+    if git show-ref --verify --quiet "refs/heads/$head_ref"; then
+      git checkout -q "$head_ref"
+    else
+      git checkout -q -b "$head_ref" HEAD
+    fi
+    exit $?
+  fi
+  if grep -q '^checkoutWrongBranch=true$' "$meta"; then
+    git checkout -q -b "wrong-$head_ref" "refs/remotes/origin/$head_ref"
+    exit $?
+  fi
+  if ! git show-ref --verify --quiet "refs/heads/$head_ref"; then
+    git checkout -q -b "$head_ref" "refs/remotes/origin/$head_ref"
+    exit $?
+  fi
+  git checkout -q "$head_ref" || exit 1
+  if [ "$force" = 1 ]; then
+    git reset -q --hard "refs/remotes/origin/$head_ref"
+    exit $?
+  fi
+  git merge --ff-only "refs/remotes/origin/$head_ref" >/dev/null
+  exit $?
+fi
+exit 0
+STUB
+chmod +x "$BIN/gh"
+
 export PATH="$BIN:$PATH"
 
 # Bare remote with one real commit and a primary clone.
@@ -288,6 +380,29 @@ git -C "$WRONG" remote set-url origin "$WRONG_REMOTE"
 WRONG=$(cd "$WRONG" && pwd -P)
 
 unset PWT_REPO_ROOT
+
+# PR metadata always points at a real remote branch. The scratch clone pushes
+# heads without warming the primary checkout's tracking refs.
+SCRATCH_PUSH="$TMP/scratch-push"
+ensure_scratch_push() {
+  [ -d "$SCRATCH_PUSH" ] || git clone -q "$REMOTE" "$SCRATCH_PUSH" >/dev/null 2>&1
+}
+push_pr_head() {
+  local branch=$1 sha
+  ensure_scratch_push
+  sha=$(git -C "$SCRATCH_PUSH" commit-tree \
+    "$(git -C "$SCRATCH_PUSH" rev-parse HEAD^{tree})" \
+    -p HEAD -m "initial head for $branch ($RANDOM$RANDOM)") || return 1
+  git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch" || return 1
+  printf '%s\n' "$sha"
+}
+pr_meta() {
+  local oid
+  oid=$(push_pr_head "$2") || return 1
+  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
+    "$2" "$3" "${4:-owner}" "${5:-project}" \
+    "https://github.com/owner/project/pull/$1" "$oid" >"$PWT_GH_PRS/$1"
+}
 
 pwt_in() {
   local dir=$1
@@ -945,6 +1060,143 @@ check 'a failed fetch leaves no target worktree behind' \
   test ! -e "$MANAGED/feat-git-failure"
 check_equals 'a failed fetch never launches Pi' '' "$(launched pwd)"
 git -C "$PRIMARY" remote set-url origin "$REMOTE"
+
+# ------------------------------------------------------- pull request checkout
+
+section 'pr-checkout'
+
+pr_meta 101 feat/from-pr false
+pr_meta 102 feat/forked true fork-owner project
+printf '.env\n' >"$PRIMARY/.worktreeinclude"
+printf 'PR_SECRET=1\n' >"$PRIMARY/.env"
+
+launch_reset
+pr_out=$(pwt pr 101 2>&1)
+check 'pr checks out the pull request into a managed worktree' \
+  test -d "$MANAGED/feat-from-pr"
+check_equals 'pr names the worktree from the pull request head ref' \
+  "$MANAGED/feat-from-pr" "$(launched pwd)"
+check 'pr launches Pi in the pull request worktree' test -n "$(launched pwd)"
+check 'pr prepares worktreeinclude files before launch' \
+  test -f "$MANAGED/feat-from-pr/.env"
+check_equals 'the PR worktree is on the expected head branch' \
+  'feat/from-pr' \
+  "$(git -C "$MANAGED/feat-from-pr" symbolic-ref --short HEAD 2>/dev/null)"
+check_equals 'the PR worktree matches the advertised head object' \
+  "$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/101")" \
+  "$(git -C "$MANAGED/feat-from-pr" rev-parse HEAD 2>/dev/null)"
+check_not_contains 'a same-repository pull request prints no fork warning' \
+  'comes from a fork' "$pr_out"
+check_equals 'fresh PR checkout invokes gh checkout exactly once' \
+  '1' "$(grep -c '^pr checkout 101' "$PWT_GH_LOG")"
+check_equals 'fresh PR checkout records its canonical URL marker' \
+  'https://github.com/owner/project/pull/101' \
+  "$(git -C "$PRIMARY" config --get branch.feat/from-pr.worktree-pr-url 2>/dev/null)"
+check_equals 'fresh PR checkout records its exact head marker' \
+  "$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/101")" \
+  "$(git -C "$PRIMARY" config --get branch.feat/from-pr.worktree-pr-head 2>/dev/null)"
+check 'fresh PR checkout clears its preparation marker' \
+  test ! -e "$PRIMARY/.git/pwt/preparing-feat-from-pr"
+
+launch_reset
+fork_out=$(pwt pr 102 2>&1)
+check_contains 'pr warns before launching a fork pull request' \
+  'pull request #102 comes from a fork' "$fork_out"
+check_equals 'pr still launches after the fork warning' \
+  "$MANAGED/feat-forked" "$(launched pwd)"
+
+pr_meta 103 feat/pr-passthrough false
+launch_reset
+pwt pr 103 -- --force --model 'space value' '' >/dev/null 2>&1
+check_equals 'arguments after -- are forwarded to Pi unchanged' '4' "$(launched argc)"
+check_arg_equals 'a post-separator --force reaches Pi literally' 0 '--force'
+check_arg_equals 'a forwarded Pi option remains unchanged' 1 '--model'
+check_arg_equals 'a forwarded value preserves spaces' 2 'space value'
+check_arg_equals 'a forwarded empty argument remains present' 3 ''
+
+# gh can fail after the detached worktree already exists. The partial tree and
+# its preparation ownership must both be cleared so an explicit retry is clean.
+pr_meta 104 feat/deleted-pr-head false
+printf 'checkoutFails=true\n' >>"$PWT_GH_PRS/104"
+launch_reset
+check_fails 'pr exits non-zero when gh cannot check the pull request out' pwt pr 104
+check 'failed PR checkout leaves no worktree directory behind' \
+  test ! -e "$MANAGED/feat-deleted-pr-head"
+check_fails 'failed PR checkout unregisters its partial worktree' \
+  worktree_registered_at "$MANAGED/feat-deleted-pr-head"
+check 'failed PR checkout clears its preparation marker after cleanup' \
+  test ! -e "$PRIMARY/.git/pwt/preparing-feat-deleted-pr-head"
+check_equals 'failed PR checkout never launches Pi' '' "$(launched pwd)"
+check_fails 'retry after failed PR checkout fails cleanly again' pwt pr 104
+
+pr_meta 105 feat/pr-copy-failure false
+launch_reset
+check_fails 'include-copy failure aborts PR worktree preparation' \
+  pwt_cp_fail pr 105
+check 'include-copy failure removes the PR worktree directory' \
+  test ! -e "$MANAGED/feat-pr-copy-failure"
+check_fails 'include-copy failure unregisters the PR worktree' \
+  worktree_registered_at "$MANAGED/feat-pr-copy-failure"
+check_equals 'include-copy failure never launches Pi' '' "$(launched pwd)"
+
+check_fails 'pr requires a pull request number' pwt pr
+check_fails 'pr rejects a non-numeric pull request number' pwt pr not-a-number
+check_fails 'pr rejects an unknown option before the separator' pwt pr 101 --wat
+check_fails 'pr exits non-zero when the pull request does not exist' pwt pr 999
+check_output 'pr names the unresolved pull request number' '999' pwt pr 999
+
+touch "$PWT_GH_UNAVAILABLE"
+check_fails 'pr exits non-zero when gh is unavailable' pwt pr 101
+check_output 'pr explains that authenticated gh is required' 'pr needs gh' pwt pr 101
+rm -f "$PWT_GH_UNAVAILABLE"
+
+pr_meta 106 feat/pr-invalid-oid false
+sed 's/^headRefOid=.*/headRefOid=not-an-object/' "$PWT_GH_PRS/106" \
+  >"$PWT_GH_PRS/106.tmp"
+mv "$PWT_GH_PRS/106.tmp" "$PWT_GH_PRS/106"
+launch_reset
+check_fails 'pr rejects malformed head object metadata' pwt pr 106
+check_equals 'malformed head object metadata never launches Pi' '' "$(launched pwd)"
+
+pr_meta 107 feat/pr-invalid-url false
+sed 's#^url=.*#url=not-a-canonical-pr-url#' "$PWT_GH_PRS/107" \
+  >"$PWT_GH_PRS/107.tmp"
+mv "$PWT_GH_PRS/107.tmp" "$PWT_GH_PRS/107"
+launch_reset
+check_fails 'pr rejects malformed canonical URL metadata' pwt pr 107
+check_equals 'malformed canonical URL metadata never launches Pi' '' "$(launched pwd)"
+
+pr_meta 108 feat/pr-cross-empty false
+sed 's/^isCrossRepository=.*/isCrossRepository=/' "$PWT_GH_PRS/108" \
+  >"$PWT_GH_PRS/108.tmp"
+mv "$PWT_GH_PRS/108.tmp" "$PWT_GH_PRS/108"
+launch_reset
+check_fails 'pr rejects missing fork-status metadata' pwt pr 108
+check_equals 'missing fork-status metadata never launches Pi' '' "$(launched pwd)"
+
+printf 'headRefName=-dash\nisCrossRepository=false\n' >"$PWT_GH_PRS/109"
+launch_reset
+check_output 'pr rejects a hostile head ref before Git plumbing' \
+  'invalid branch name: -dash' pwt pr 109
+check_equals 'a hostile head ref never launches Pi' '' "$(launched pwd)"
+
+pr_meta 110 feat/pr-oid-mismatch false
+printf 'checkoutOidMismatch=true\n' >>"$PWT_GH_PRS/110"
+launch_reset
+check_fails 'pr refuses checkout when HEAD differs from metadata' pwt pr 110
+check 'checkout object mismatch leaves no worktree behind' \
+  test ! -e "$MANAGED/feat-pr-oid-mismatch"
+check_equals 'checkout object mismatch never launches Pi' '' "$(launched pwd)"
+
+pr_meta 111 feat/pr-wrong-branch false
+printf 'checkoutWrongBranch=true\n' >>"$PWT_GH_PRS/111"
+launch_reset
+check_fails 'pr refuses checkout under the wrong local branch' pwt pr 111
+check 'wrong-branch checkout leaves no worktree behind' \
+  test ! -e "$MANAGED/feat-pr-wrong-branch"
+check_equals 'wrong-branch checkout never launches Pi' '' "$(launched pwd)"
+
+rm -f "$PRIMARY/.worktreeinclude" "$PRIMARY/.env"
 
 # ---------------------------------------------------------- worktree includes
 
