@@ -404,6 +404,94 @@ pr_meta() {
     "https://github.com/owner/project/pull/$1" "$oid" >"$PWT_GH_PRS/$1"
 }
 
+sync_pr_metadata_oid() {
+  local branch=$1 oid=$2 meta tmp
+  for meta in "$PWT_GH_PRS"/*; do
+    [ -f "$meta" ] || continue
+    [ "$(sed -n 's/^headRefName=//p' "$meta")" = "$branch" ] || continue
+    tmp="$meta.tmp"
+    sed "s/^headRefOid=.*/headRefOid=$oid/" "$meta" >"$tmp" || return 1
+    mv "$tmp" "$meta" || return 1
+  done
+}
+
+cached_object() {
+  local branch=$1
+  git -C "$PRIMARY" fetch -q origin \
+    "refs/heads/$branch:refs/pr-fixture-cache/$branch" 2>/dev/null || return 1
+  git -C "$PRIMARY" rev-parse "refs/pr-fixture-cache/$branch"
+}
+
+force_advance_pr_head() {
+  local branch=$1 old_tip new_sha
+  ensure_scratch_push
+  git -C "$SCRATCH_PUSH" fetch -q origin "refs/heads/$branch" >/dev/null 2>&1
+  old_tip=$(git -C "$SCRATCH_PUSH" ls-remote origin \
+    "refs/heads/$branch" | cut -f1)
+  [ -n "$old_tip" ] || return 1
+  new_sha=$(git -C "$SCRATCH_PUSH" commit-tree \
+    "$(git -C "$SCRATCH_PUSH" rev-parse "$old_tip^{tree}")" \
+    -p "$old_tip" -m "advance $branch ($RANDOM$RANDOM)") || return 1
+  git -C "$SCRATCH_PUSH" push -q -f origin \
+    "$new_sha:refs/heads/$branch" || return 1
+  sync_pr_metadata_oid "$branch" "$new_sha" || return 1
+  printf '%s\n' "$new_sha"
+}
+
+# Creates a sibling of the selected base commit, making the new PR head
+# genuinely non-fast-forwardable from that base.
+rewrite_pr_head() {
+  local branch=$1 base=${2:-} new_sha
+  ensure_scratch_push
+  if [ -z "$base" ]; then
+    git -C "$SCRATCH_PUSH" fetch -q origin \
+      "refs/heads/$branch" >/dev/null 2>&1
+    base=$(git -C "$SCRATCH_PUSH" ls-remote origin \
+      "refs/heads/$branch" | cut -f1)
+  fi
+  [ -n "$base" ] || return 1
+  new_sha=$(git -C "$SCRATCH_PUSH" commit-tree \
+    "$(git -C "$SCRATCH_PUSH" rev-parse "$base^{tree}")" \
+    -p "$base^" -m "rewrite $branch ($RANDOM$RANDOM)") || return 1
+  [ -n "$new_sha" ] || return 1
+  git -C "$SCRATCH_PUSH" push -q -f origin \
+    "$new_sha:refs/heads/$branch" || return 1
+  sync_pr_metadata_oid "$branch" "$new_sha" || return 1
+  printf '%s\n' "$new_sha"
+}
+
+new_commit_on() {
+  git -C "$PRIMARY" commit-tree \
+    "$(git -C "$PRIMARY" rev-parse "$1^{tree}")" \
+    -p "$1" -m "seed: $2 ($RANDOM$RANDOM)"
+}
+
+seed_leftover_branch() {
+  local branch=$1 relation=$2 base local_sha
+  if git -C "$PRIMARY" worktree list --porcelain |
+    grep -qxF "branch refs/heads/$branch"; then
+    return 1
+  fi
+  base=$(cached_object "$branch") || return 1
+  case $relation in
+    ahead)
+      local_sha=$(new_commit_on "$base" "ahead of $branch") || return 1
+      ;;
+    diverged)
+      force_advance_pr_head "$branch" >/dev/null || return 1
+      local_sha=$(new_commit_on "$base" "diverged from $branch") || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null
+}
+
+fetch_stale_tracking_ref() {
+  local branch=$1
+  git -C "$PRIMARY" fetch -q origin \
+    "refs/heads/$branch:refs/remotes/origin/$branch"
+}
+
 pwt_in() {
   local dir=$1
   shift
@@ -1197,6 +1285,175 @@ check 'wrong-branch checkout leaves no worktree behind' \
 check_equals 'wrong-branch checkout never launches Pi' '' "$(launched pwd)"
 
 rm -f "$PRIMARY/.worktreeinclude" "$PRIMARY/.env"
+
+# ---------------------------------------------------------- PR force decisions
+
+section 'pr-force'
+
+pr_meta 201 feat/pr-force-diverged false
+seed_leftover_branch feat/pr-force-diverged diverged
+launch_reset
+check 'pr --force resets a diverged leftover branch to the PR head' \
+  pwt pr 201 --force
+check_equals 'explicit force lands exactly on the advertised PR head' \
+  "$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/201")" \
+  "$(git -C "$PRIMARY" rev-parse feat/pr-force-diverged)"
+
+pr_meta 202 feat/pr-force-fresh false
+launch_reset
+check 'pr --force also works without a leftover local branch' pwt pr 202 --force
+check_equals 'fresh explicit force launches Pi in the PR worktree' \
+  "$MANAGED/feat-pr-force-fresh" "$(launched pwd)"
+
+# Equal to the stale origin tip, followed by a genuine history rewrite. Plain
+# gh checkout cannot fast-forward this fixture; only safe auto-force can pass.
+pr_meta 203 feat/pr-auto-equal false
+old_203=$(cached_object feat/pr-auto-equal)
+fetch_stale_tracking_ref feat/pr-auto-equal
+git -C "$PRIMARY" branch feat/pr-auto-equal "$old_203" >/dev/null
+rewrite_pr_head feat/pr-auto-equal >/dev/null
+new_203=$(git -C "$PRIMARY" ls-remote origin \
+  refs/heads/feat/pr-auto-equal | cut -f1)
+check_fails 'the equal-tip fixture is genuinely non-fast-forwardable' \
+  git -C "$SCRATCH_PUSH" merge-base --is-ancestor "$old_203" "$new_203"
+launch_reset
+equal_status=0
+equal_out=$(pwt pr 203 2>&1) || equal_status=$?
+check_equals 'pr auto-resets a leftover branch equal to pre-fetch origin' \
+  '0' "$equal_status"
+check_equals 'the equal-tip auto-reset lands at the PR head' \
+  "$new_203" "$(git -C "$PRIMARY" rev-parse feat/pr-auto-equal)"
+check_contains 'auto-reset reports the branch it safely resets' \
+  'resetting feat/pr-auto-equal' "$equal_out"
+
+# Strictly behind the stale tracking ref, then rewritten away from both.
+pr_meta 204 feat/pr-auto-behind false
+old_204=$(cached_object feat/pr-auto-behind)
+force_advance_pr_head feat/pr-auto-behind >/dev/null
+fetch_stale_tracking_ref feat/pr-auto-behind
+rewrite_pr_head feat/pr-auto-behind "$old_204" >/dev/null
+git -C "$PRIMARY" branch feat/pr-auto-behind "$old_204" >/dev/null
+new_204=$(git -C "$PRIMARY" ls-remote origin \
+  refs/heads/feat/pr-auto-behind | cut -f1)
+check_fails 'the behind fixture is genuinely non-fast-forwardable' \
+  git -C "$SCRATCH_PUSH" merge-base --is-ancestor "$old_204" "$new_204"
+launch_reset
+check 'pr auto-resets a leftover branch strictly behind origin' pwt pr 204
+check_equals 'the behind auto-reset lands at the PR head' \
+  "$new_204" "$(git -C "$PRIMARY" rev-parse feat/pr-auto-behind)"
+
+pr_meta 205 feat/pr-auto-diverged false
+seed_leftover_branch feat/pr-auto-diverged diverged
+diverged_before=$(git -C "$PRIMARY" rev-parse feat/pr-auto-diverged)
+launch_reset
+diverged_status=0
+diverged_out=$(pwt pr 205 2>&1) || diverged_status=$?
+check 'pr refuses a leftover branch with local-only commits' \
+  test "$diverged_status" -ne 0
+check_contains 'diverged refusal suggests explicit force' \
+  'pwt pr 205 --force' "$diverged_out"
+check_equals 'diverged refusal preserves the local branch tip' \
+  "$diverged_before" "$(git -C "$PRIMARY" rev-parse feat/pr-auto-diverged)"
+check 'diverged refusal leaves no managed worktree behind' \
+  test ! -e "$MANAGED/feat-pr-auto-diverged"
+check_equals 'diverged refusal never launches Pi' '' "$(launched pwd)"
+
+# These branches are contained, so dropping either repository-identity gate
+# would visibly take the auto-reset path.
+pr_meta 206 feat/pr-auto-fork true Owner Project
+old_206=$(cached_object feat/pr-auto-fork)
+fetch_stale_tracking_ref feat/pr-auto-fork
+git -C "$PRIMARY" branch feat/pr-auto-fork "$old_206" >/dev/null
+launch_reset
+fork_force_out=$(pwt pr 206 2>&1)
+check_not_contains 'pr never auto-resets a cross-repository pull request' \
+  'resetting feat/pr-auto-fork' "$fork_force_out"
+
+pr_meta 207 feat/pr-auto-elsewhere false other-owner project
+old_207=$(cached_object feat/pr-auto-elsewhere)
+fetch_stale_tracking_ref feat/pr-auto-elsewhere
+git -C "$PRIMARY" branch feat/pr-auto-elsewhere "$old_207" >/dev/null
+launch_reset
+elsewhere_out=$(pwt pr 207 2>&1)
+check_not_contains 'pr never auto-resets when origin is not the head repository' \
+  'resetting feat/pr-auto-elsewhere' "$elsewhere_out"
+
+pr_meta 208 feat/pr-auto-case false Owner Project
+old_208=$(cached_object feat/pr-auto-case)
+fetch_stale_tracking_ref feat/pr-auto-case
+git -C "$PRIMARY" branch feat/pr-auto-case "$old_208" >/dev/null
+launch_reset
+case_out=$(pwt pr 208 2>&1)
+check_contains 'repository identity comparison is case-insensitive' \
+  'resetting feat/pr-auto-case' "$case_out"
+
+# A local branch ahead of the PR makes gh's ff-only operation a no-op success.
+# Exact-head verification must still refuse launch and preserve the branch.
+pr_meta 209 feat/pr-auto-ahead false
+seed_leftover_branch feat/pr-auto-ahead ahead
+ahead_before=$(git -C "$PRIMARY" rev-parse feat/pr-auto-ahead)
+launch_reset
+ahead_status=0
+ahead_out=$(pwt pr 209 2>&1) || ahead_status=$?
+check 'pr refuses a leftover branch ahead of the PR head' \
+  test "$ahead_status" -ne 0
+check_equals 'ahead refusal preserves the local branch tip' \
+  "$ahead_before" "$(git -C "$PRIMARY" rev-parse feat/pr-auto-ahead)"
+check 'ahead refusal removes the temporary managed worktree' \
+  test ! -e "$MANAGED/feat-pr-auto-ahead"
+check_contains 'ahead refusal reports the exact-head mismatch' \
+  'changed while it was being checked out' "$ahead_out"
+check_equals 'ahead refusal never launches Pi' '' "$(launched pwd)"
+
+# The missing tracking ref is normal for a never-fetched PR branch. The safety
+# probe must skip merge-base cleanly, then let gh fetch and check it out.
+pr_meta 210 feat/pr-auto-missing-ref false
+sha_210=$(git -C "$PRIMARY" ls-remote origin \
+  refs/heads/feat/pr-auto-missing-ref | cut -f1)
+git -C "$PRIMARY" fetch -q origin "$sha_210"
+git -C "$PRIMARY" branch feat/pr-auto-missing-ref "$sha_210" >/dev/null
+check_fails 'the missing-ref fixture has no origin tracking ref' \
+  git -C "$PRIMARY" rev-parse -q --verify \
+    refs/remotes/origin/feat/pr-auto-missing-ref
+launch_reset
+missing_ref_status=0
+missing_ref_out=$(pwt pr 210 2>&1) || missing_ref_status=$?
+check_equals 'a missing origin tracking ref falls through safely' \
+  '0' "$missing_ref_status"
+check_not_contains 'missing tracking refs never reach noisy merge-base input' \
+  'Not a valid object name' "$missing_ref_out"
+
+pr_meta 211 feat/pr-auto-none false
+launch_reset
+check 'pr with no leftover branch remains a plain checkout' pwt pr 211
+check_equals 'plain PR checkout still uses the head-ref worktree name' \
+  "$MANAGED/feat-pr-auto-none" "$(launched pwd)"
+
+pr_meta 212 feat/pr-force-hint-fail false
+printf 'checkoutFails=true\n' >>"$PWT_GH_PRS/212"
+git -C "$PRIMARY" branch feat/pr-force-hint-fail >/dev/null
+launch_reset
+force_failure_status=0
+force_failure_out=$(pwt pr 212 --force 2>&1) || force_failure_status=$?
+check 'failed explicit-force checkout exits non-zero' \
+  test "$force_failure_status" -ne 0
+check_not_contains 'failed explicit force does not suggest force again' \
+  "--force' to reset it" "$force_failure_out"
+
+pr_meta 213 feat/pr-cross-hint true fork-owner project
+printf 'checkoutFails=true\n' >>"$PWT_GH_PRS/213"
+git -C "$PRIMARY" branch feat/pr-cross-hint >/dev/null
+launch_reset
+cross_failure_out=$(pwt pr 213 2>&1 || true)
+check_contains 'failed fork checkout still suggests force for a leftover branch' \
+  'pwt pr 213 --force' "$cross_failure_out"
+
+check_fails 'branch rejects --force as an unknown option' pwt branch --force
+check_fails 'root rejects --force as an unknown option' pwt root --force
+check_output 'help documents explicit PR force behavior' \
+  'resetting a leftover' pwt help
+check_output 'help documents the safe automatic reset' \
+  'provably contained' pwt help
 
 # ---------------------------------------------------------- worktree includes
 

@@ -56,6 +56,15 @@ Commands:
 Managed worktrees live in:
   ~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/
 
+`--force` on `pwt pr` passes --force to `gh pr checkout`, resetting a leftover
+local branch to the pull request head. An existing managed PR worktree is
+refreshed only after pwt verifies its PR identity and its clean local state;
+`--force` does not bypass those reuse guards.
+Without the flag, `pwt pr` resets a leftover branch on its own only when the
+branch is provably contained in `origin/<branch>` (no local-only commits);
+otherwise the checkout runs plain, and if it then fails, the error names this
+flag.
+
 Arguments after `--` are passed through to `pi` unchanged.
 EOF
 }
@@ -268,6 +277,22 @@ branch_worktree() {
         ;;
     esac
   done <<< "$records"
+  return 1
+}
+
+# True only when resetting a local branch cannot discard local-only commits.
+# Fully qualified refs keep the pull-request-controlled branch name from
+# resolving to an unrelated tag or other ref.
+branch_contained_in_origin() {
+  local branch=$1
+  if ! git -C "$primary" show-ref --verify --quiet \
+    "refs/remotes/origin/$branch"; then
+    return 1
+  fi
+  if git -C "$primary" merge-base --is-ancestor \
+    "refs/heads/$branch" "refs/remotes/origin/$branch"; then
+    return 0
+  fi
   return 1
 }
 
@@ -794,6 +819,7 @@ cmd_pr() {
 
   local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross head_owner head_repo
   local pr_url head_oid existing status name target checkout_ok=1
+  local branch_existed=0 auto_force=0 hint=''
   case $number in
     '' | *[!0-9]*) die "pull request must be a number: $number" ;;
   esac
@@ -828,6 +854,19 @@ cmd_pr() {
     ((status == 1)) || die 'cannot list repository worktrees'
   fi
 
+  # Capture this before gh fetches or moves any refs. A fork can reuse the name
+  # of an unrelated base-repository branch, so both repository identity gates
+  # are required before origin containment proves a reset safe.
+  if git -C "$primary" show-ref --verify --quiet "refs/heads/$head_ref"; then
+    branch_existed=1
+  fi
+  if ((! force)) && [[ $cross == false ]] &&
+    [[ $head_owner == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" ]] &&
+    [[ $head_repo == "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]] &&
+    ((branch_existed)) && branch_contained_in_origin "$head_ref"; then
+    auto_force=1
+  fi
+
   name=$(worktree_name_for_branch "$head_ref")
   validate_worktree_name "$name"
   target="$managed_root/$name"
@@ -837,13 +876,19 @@ cmd_pr() {
   git -C "$primary" worktree add --detach --quiet "$target" HEAD ||
     fail_worktree_creation "$head_ref" "$target"
 
-  if ((force)); then
+  if ((force || auto_force)); then
+    if ((auto_force)); then
+      note "resetting $head_ref — it has no local-only commits"
+    fi
     (cd "$target" && gh pr checkout "$number" --force) || checkout_ok=0
   else
     (cd "$target" && gh pr checkout "$number") || checkout_ok=0
   fi
   if ((! checkout_ok)); then
-    fail_pr_worktree "$target" "gh could not check out pull request #$number"
+    if ((branch_existed && ! force && ! auto_force)); then
+      hint=" — $head_ref may have diverged from the pull request; run 'pwt pr $number --force' to reset it"
+    fi
+    fail_pr_worktree "$target" "gh could not check out pull request #$number$hint"
   fi
 
   local checked_out_branch checked_out_head
