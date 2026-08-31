@@ -734,7 +734,9 @@ cleanup_pr_fetch_worktree() {
   else
     status=$?
     ((status == 1)) || return 1
-    rmdir "$path" 2>/dev/null || true
+    if [[ -e $path || -L $path ]]; then
+      rmdir "$path" 2>/dev/null || return 1
+    fi
   fi
   PWT_PR_FETCH_WORKTREE=''
 }
@@ -746,18 +748,19 @@ fetch_pr_head() {
   path=$(mktemp -d "$managed_root/.pwt-pr-fetch.XXXXXX") || return 1
   PWT_PR_FETCH_WORKTREE=$path
   if ! git -C "$primary" worktree add --detach --quiet "$path" HEAD; then
-    cleanup_pr_fetch_worktree >/dev/null 2>&1 || true
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || return 3
     return 1
   fi
-  if ! (cd "$path" && gh pr checkout "$number" --detach); then
-    cleanup_pr_fetch_worktree >/dev/null 2>&1 || true
+  if ! (cd "$path" && gh pr checkout "$number" \
+    --repo "$owner/$repo" --detach); then
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || return 3
     return 1
   fi
-  actual=$(git -C "$path" rev-parse HEAD 2>/dev/null) || {
-    cleanup_pr_fetch_worktree >/dev/null 2>&1 || true
+  if ! actual=$(git -C "$path" rev-parse HEAD 2>/dev/null); then
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || return 3
     return 1
-  }
-  cleanup_pr_fetch_worktree || return 1
+  fi
+  cleanup_pr_fetch_worktree || return 3
   [[ $actual == "$expected_oid" ]] || return 2
 }
 
@@ -887,6 +890,9 @@ reuse_pr_or_refuse() {
     2)
       die "pull request #$number changed while its head was being fetched; run pwt pr $number again"
       ;;
+    3)
+      die "temporary PR fetch worktree remains blocked after cleanup failure: $PWT_PR_FETCH_WORKTREE"
+      ;;
     *) die "gh could not fetch pull request #$number for safe reuse" ;;
   esac
 
@@ -899,6 +905,13 @@ reuse_pr_or_refuse() {
     *) die "cannot inspect ignored local paths in $existing; refusing to refresh" ;;
   esac
 
+  # The authenticated fetch and tree scan are external work. Re-check at the
+  # mutation boundary so an editor or watcher cannot turn the earlier clean
+  # result stale and have a rewrite discard its new work.
+  if worktree_is_dirty "$existing" refresh; then
+    die "worktree changed while pull request #$number was being fetched, refusing to refresh: $existing"
+  fi
+
   current=$(git -C "$existing" rev-parse HEAD 2>/dev/null) ||
     die "cannot resolve the current head in reused worktree: $existing"
   if [[ $current == "$head_oid" ]]; then
@@ -907,7 +920,7 @@ reuse_pr_or_refuse() {
     git -C "$existing" merge --ff-only "$head_oid" ||
       die "could not fast-forward reused worktree to pull request #$number"
   elif ((legacy == 0)) && [[ $current == "$marker_head" ]]; then
-    git -C "$existing" reset --hard "$head_oid" ||
+    git -C "$existing" reset --keep "$head_oid" ||
       die "could not refresh rewritten pull request #$number"
   else
     die "reused worktree has local or unverifiable commits, refusing to refresh: $existing"
@@ -917,6 +930,9 @@ reuse_pr_or_refuse() {
     die "cannot verify refreshed pull request #$number"
   [[ $final == "$head_oid" ]] ||
     die "refreshed worktree does not match pull request #$number; refusing to launch"
+  if worktree_is_dirty "$existing" refresh; then
+    die "worktree changed while pull request #$number was being refreshed, refusing to launch: $existing"
+  fi
   record_pr_markers "$branch" "$pr_url" "$head_oid" ||
     die "could not record the verified identity for pull request #$number"
 
@@ -1078,7 +1094,7 @@ cmd_pr() {
   esac
 
   require_gh pr
-  meta=$(gh pr view "$number" \
+  meta=$(gh pr view "$number" --repo "$owner/$repo" \
     --json headRefName,isCrossRepository,headRepositoryOwner,headRepository,url,headRefOid \
     --jq '.headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name, .url, .headRefOid' \
     2>/dev/null) || die "cannot resolve pull request #$number"
@@ -1097,6 +1113,9 @@ cmd_pr() {
     die "pull request #$number returned an invalid head repository identity"
   pr_url_identity "$pr_url" "$number" ||
     die "pull request #$number returned an invalid canonical URL"
+  [[ $PR_BASE_OWNER == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" &&
+    $PR_BASE_REPO == "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]] ||
+    die "pull request #$number belongs to a different repository than origin"
   valid_head_oid "$head_oid" ||
     die "pull request #$number returned an invalid head object ID"
 
@@ -1134,9 +1153,11 @@ cmd_pr() {
     if ((auto_force)); then
       note "resetting $head_ref — it has no local-only commits"
     fi
-    (cd "$target" && gh pr checkout "$number" --force) || checkout_ok=0
+    (cd "$target" && gh pr checkout "$number" \
+      --repo "$owner/$repo" --force) || checkout_ok=0
   else
-    (cd "$target" && gh pr checkout "$number") || checkout_ok=0
+    (cd "$target" && gh pr checkout "$number" \
+      --repo "$owner/$repo") || checkout_ok=0
   fi
   if ((! checkout_ok)); then
     if ((branch_existed && ! force && ! auto_force)); then

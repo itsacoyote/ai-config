@@ -91,6 +91,7 @@ trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
 export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
 export GIT_CONFIG_NOSYSTEM=1
+unset GH_REPO GH_HOST
 printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' \
   >"$GIT_CONFIG_GLOBAL"
 
@@ -110,6 +111,8 @@ mkdir -p "$REMOTE" "$BIN"
 MANAGED=$(cd "$MANAGED" && pwd -P)
 
 export PWT_TEST_REAL_GIT PWT_TEST_REAL_MKDIR PWT_TEST_REAL_CP
+export PWT_TEST_FETCH_PREFIX="$MANAGED/.pwt-pr-fetch."
+export PWT_TEST_PARTIAL_PATH_FILE="$TMP/partial-pr-fetch-path"
 PWT_TEST_REAL_GIT=$(command -v git)
 PWT_TEST_REAL_MKDIR=$(command -v mkdir)
 PWT_TEST_REAL_CP=$(command -v cp)
@@ -163,6 +166,21 @@ case ${PWT_TEST_GIT_FAIL:-} in
       *' worktree add '*)
         "$PWT_TEST_REAL_GIT" "$@" || exit
         exit 70
+        ;;
+    esac
+    ;;
+  pr-fetch-add-unregistered-partial)
+    case $args in
+      *' worktree add '*)
+        for argument in "$@"; do
+          case $argument in
+            "$PWT_TEST_FETCH_PREFIX"*)
+              printf 'partial worktree data\n' >"$argument/partial"
+              printf '%s\n' "$argument" >"$PWT_TEST_PARTIAL_PATH_FILE"
+              exit 70
+              ;;
+          esac
+        done
         ;;
     esac
     ;;
@@ -248,8 +266,9 @@ chmod +x "$BIN/pi"
 # failures remain observable instead of being mocked inside pwt.
 export PWT_GH_UNAVAILABLE="$TMP/gh-unavailable"
 export PWT_GH_PRS="$TMP/gh-prs"
+export PWT_GH_OTHER_PRS="$TMP/gh-other-prs"
 export PWT_GH_LOG="$TMP/gh.log"
-mkdir -p "$PWT_GH_PRS"
+mkdir -p "$PWT_GH_PRS" "$PWT_GH_OTHER_PRS"
 : >"$PWT_GH_LOG"
 cat >"$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -260,8 +279,29 @@ fi
 if [ "$1" = auth ] && [ "$2" = status ]; then
   exit 0
 fi
+repo_selector=${GH_REPO:-owner/project}
+want_repo=0
+for argument in "$@"; do
+  if [ "$want_repo" = 1 ]; then
+    repo_selector=$argument
+    want_repo=0
+    continue
+  fi
+  case $argument in
+    --repo) want_repo=1 ;;
+    --repo=*) repo_selector=${argument#--repo=} ;;
+  esac
+done
+case $repo_selector in
+  owner/project | github.com/owner/project) meta_root=$PWT_GH_PRS ;;
+  other/wrong | github.com/other/wrong) meta_root=$PWT_GH_OTHER_PRS ;;
+  *)
+    printf 'unknown repository: %s\n' "$repo_selector" >&2
+    exit 1
+    ;;
+esac
 if [ "$1" = pr ] && [ "$2" = view ]; then
-  meta="$PWT_GH_PRS/$3"
+  meta="$meta_root/$3"
   if [ ! -f "$meta" ]; then
     printf 'could not resolve pull request %s\n' "$3" >&2
     exit 1
@@ -277,7 +317,7 @@ fi
 if [ "$1" = pr ] && [ "$2" = checkout ]; then
   printf '%s\n' "$*" >>"$PWT_GH_LOG"
   number=$3
-  meta="$PWT_GH_PRS/$number"
+  meta="$meta_root/$number"
   if [ ! -f "$meta" ]; then
     printf 'could not resolve pull request %s\n' "$number" >&2
     exit 1
@@ -305,7 +345,12 @@ if [ "$1" = pr ] && [ "$2" = checkout ]; then
     else
       git checkout -q --detach "refs/remotes/origin/$head_ref"
     fi
-    exit $?
+    checkout_status=$?
+    dirty_target=$(sed -n 's/^dirtyAfterFetchPath=//p' "$meta")
+    if [ -n "$dirty_target" ]; then
+      printf 'dirty during disposable fetch\n' >>"$dirty_target/README.md"
+    fi
+    exit "$checkout_status"
   fi
   if grep -q '^checkoutOidMismatch=true$' "$meta"; then
     if git show-ref --verify --quiet "refs/heads/$head_ref"; then
@@ -610,6 +655,14 @@ pwt_with_root() {
   shift 2
   (cd "$dir" && PWT_REPO_ROOT="$root" "$PWT" "$@")
 }
+pwt_with_ambient_repo() {
+  local dir=$1 root=$2 ambient_repo=$3
+  shift 3
+  (
+    export GH_REPO="$ambient_repo"
+    pwt_with_root "$dir" "$root" "$@"
+  )
+}
 pwt_git_fail() {
   local failure=$1
   shift
@@ -666,7 +719,7 @@ if grep -q 'python' "$PWT" 2>/dev/null; then
 else
   ok 'the pwt script has no python dependency'
 fi
-if grep -Eq '(^|[[:space:]])(mapfile|readarray|declare[[:space:]]+-A)([[:space:]]|$)' \
+if grep -Eq '(^|[[:space:]])(mapfile|readarray|(declare|local)[[:space:]]+-A)([[:space:]]|$)' \
   "$PWT" 2>/dev/null; then
   not_ok 'the pwt script avoids Bash 4-only array features'
 else
@@ -1397,6 +1450,28 @@ check 'wrong-branch checkout leaves no worktree behind' \
   test ! -e "$MANAGED/feat-pr-wrong-branch"
 check_equals 'wrong-branch checkout never launches Pi' '' "$(launched pwd)"
 
+# Both metadata lookup and checkout must stay pinned to the resolved origin,
+# even outside Git and when gh's ambient repository override points elsewhere.
+pr_meta 116 feat/pr-ambient-wrong false
+mv "$PWT_GH_PRS/116" "$PWT_GH_OTHER_PRS/116"
+pr_meta 116 feat/pr-ambient-right false
+launch_reset
+check 'pr works outside Git with an ambient GH_REPO override' \
+  pwt_with_ambient_repo "$TMP" "$PRIMARY" other/wrong pr 116
+check_equals 'ambient GH_REPO cannot redirect the launched PR worktree' \
+  "$MANAGED/feat-pr-ambient-right" "$(launched pwd)"
+check 'ambient GH_REPO leaves the other repository branch absent' \
+  test ! -e "$MANAGED/feat-pr-ambient-wrong"
+
+pr_meta 117 feat/pr-wrong-base-repo false
+sed 's#^url=https://github.com/owner/project/#url=https://github.com/other/wrong/#' \
+  "$PWT_GH_PRS/117" >"$PWT_GH_PRS/117.tmp"
+mv "$PWT_GH_PRS/117.tmp" "$PWT_GH_PRS/117"
+launch_reset
+check_fails 'pr rejects a canonical-looking URL for a different repository' \
+  pwt pr 117
+check_equals 'wrong base-repository metadata never launches Pi' '' "$(launched pwd)"
+
 rm -f "$PRIMARY/.worktreeinclude" "$PRIMARY/.env"
 
 # ---------------------------------------------------------- PR force decisions
@@ -1871,6 +1946,56 @@ check_equals 'tree inspection failure preserves the real branch head' \
   "$(git -C "$MANAGED/feat-pr-reuse-tree-inspection-failure" rev-parse HEAD)"
 check_equals 'tree inspection failure never launches Pi' '' "$(launched pwd)"
 rm -f "$FAILGIT/git"
+
+pr_meta 321 feat/pr-reuse-dirty-during-fetch false
+pwt pr 321 >/dev/null 2>&1
+dirty_during_head=$(git -C "$MANAGED/feat-pr-reuse-dirty-during-fetch" rev-parse HEAD)
+rewrite_pr_head feat/pr-reuse-dirty-during-fetch >/dev/null
+printf 'dirtyAfterFetchPath=%s\n' \
+  "$MANAGED/feat-pr-reuse-dirty-during-fetch" >>"$PWT_GH_PRS/321"
+launch_reset
+dirty_during_status=0
+dirty_during_out=$(pwt pr 321 2>&1) || dirty_during_status=$?
+check 'pr refuses edits created during the disposable fetch' \
+  test "$dirty_during_status" -ne 0
+check_equals 'mid-fetch edit preserves the reused branch head' "$dirty_during_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-dirty-during-fetch" rev-parse HEAD)"
+check 'mid-fetch tracked edit remains in the worktree' \
+  grep -q '^dirty during disposable fetch$' \
+  "$MANAGED/feat-pr-reuse-dirty-during-fetch/README.md"
+check_equals 'mid-fetch edit preserves the last verified head marker' \
+  "$dirty_during_head" \
+  "$(pr_marker feat/pr-reuse-dirty-during-fetch worktree-pr-head)"
+check_equals 'mid-fetch edit never launches Pi' '' "$(launched pwd)"
+
+pr_meta 322 feat/pr-reuse-partial-fetch-add false
+pwt pr 322 >/dev/null 2>&1
+partial_fetch_head=$(git -C "$MANAGED/feat-pr-reuse-partial-fetch-add" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-partial-fetch-add >/dev/null
+rm -f "$PWT_TEST_PARTIAL_PATH_FILE"
+launch_reset
+partial_fetch_status=0
+partial_fetch_out=$(pwt_git_fail pr-fetch-add-unregistered-partial \
+  pr 322 2>&1) || partial_fetch_status=$?
+partial_fetch_path=''
+if [ -f "$PWT_TEST_PARTIAL_PATH_FILE" ]; then
+  IFS= read -r partial_fetch_path <"$PWT_TEST_PARTIAL_PATH_FILE"
+fi
+check 'late disposable worktree-add failure exits non-zero' \
+  test "$partial_fetch_status" -ne 0
+check 'late disposable worktree-add fixture records its scratch path' \
+  test -n "$partial_fetch_path"
+check 'failed unregistered scratch cleanup preserves the blocked path' \
+  test -f "$partial_fetch_path/partial"
+check_contains 'failed scratch cleanup reports the blocked path' \
+  "$partial_fetch_path" "$partial_fetch_out"
+check_equals 'failed scratch cleanup preserves the real branch head' \
+  "$partial_fetch_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-partial-fetch-add" rev-parse HEAD)"
+check_equals 'failed scratch cleanup never launches Pi' '' "$(launched pwd)"
+if [ -n "$partial_fetch_path" ]; then
+  rm -rf "$partial_fetch_path"
+fi
 
 if git -C "$PRIMARY" worktree list --porcelain | grep -q 'pwt-pr-fetch'; then
   not_ok 'temporary PR fetch worktrees are cleaned up'
