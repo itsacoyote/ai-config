@@ -1,7 +1,7 @@
 ---
 name: qa-review
-description: Independent QA review in an isolated context. Runs the e2e suite when present, audits coverage and test quality against the spec, optionally captures evidence, and returns a verdict. Spawn from the main session (e.g. during Validate).
-model: sonnet
+description: Independent QA review in an isolated context. Verifies a change actually works — traces the real code path and, where feasible, exercises the feature's behavior (drives the app or endpoint, or hands the developer a walkthrough to verify by eye) — and audits test coverage and quality against the spec, returning a verdict with evidence. Spawn from the main session (e.g. during Validate or a PR review).
+model: opus
 skills:
   - qa-review
   - writing-tests
