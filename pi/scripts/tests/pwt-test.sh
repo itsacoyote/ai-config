@@ -122,6 +122,25 @@ PWT_TEST_REAL_CP=$(command -v cp)
 cat >"$BIN/git" <<'STUB'
 #!/usr/bin/env bash
 args=" $* "
+case $args in
+  *' worktree remove '*)
+    case $args in
+      *' --force '*) ;;
+      *)
+        if [ -n "${PWT_TEST_REMOVE_ATTEMPT:-}" ]; then
+          : >"$PWT_TEST_REMOVE_ATTEMPT"
+        fi
+        ;;
+    esac
+    ;;
+esac
+case $args in
+  *' branch '*)
+    if [ -n "${PWT_TEST_BRANCH_LOG:-}" ]; then
+      printf '%s\n' "$*" >>"$PWT_TEST_BRANCH_LOG"
+    fi
+    ;;
+esac
 case ${PWT_TEST_GIT_FAIL:-} in
   worktree-list)
     case $args in *' worktree list --porcelain '*) exit 70 ;; esac
@@ -155,6 +174,129 @@ case ${PWT_TEST_GIT_FAIL:-} in
       *' ls-files --others --ignored --exclude-from='*)
         printf '../outside\0'
         exit 0
+        ;;
+    esac
+    ;;
+  remove-status)
+    case $args in *' status --porcelain --untracked-files=all '*) exit 70 ;; esac
+    ;;
+  remove-index-list)
+    case $args in *' ls-files -v -z '*) exit 70 ;; esac
+    ;;
+  remove-ignored-list)
+    case $args in
+      *' ls-files --others --ignored --exclude-standard '*) exit 70 ;;
+    esac
+    ;;
+  remove-checked)
+    case $args in
+      *' worktree remove '*)
+        case $args in *' --force '*) ;; *) exit 70 ;; esac
+        ;;
+    esac
+    ;;
+  remove-dirty-after-ignored)
+    case $args in
+      *' ls-files --others --ignored --exclude-standard '*)
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        printf 'late edit\n' >"$PWT_TEST_REMOVE_TARGET/late.txt"
+        exit 0
+        ;;
+    esac
+    ;;
+  remove-symlink-after-ignored)
+    case $args in
+      *' ls-files --others --ignored --exclude-standard '*)
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        mv "$PWT_TEST_REMOVE_TARGET" "$PWT_TEST_REMOVE_OUTSIDE"
+        ln -s "$PWT_TEST_REMOVE_OUTSIDE" "$PWT_TEST_REMOVE_TARGET"
+        exit 0
+        ;;
+    esac
+    ;;
+  remove-ignored-after-status)
+    case $args in
+      *' status --porcelain --untracked-files=all '*)
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        printf 'late ignored\n' >"$PWT_TEST_REMOVE_TARGET/.remove-secret"
+        exit 0
+        ;;
+    esac
+    ;;
+  remove-symlink-after-status)
+    case $args in
+      *' status --porcelain --untracked-files=all '*)
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        mv "$PWT_TEST_REMOVE_TARGET" "$PWT_TEST_REMOVE_OUTSIDE"
+        ln -s "$PWT_TEST_REMOVE_OUTSIDE" "$PWT_TEST_REMOVE_TARGET"
+        exit 0
+        ;;
+    esac
+    ;;
+  remove-registration-after-status)
+    case $args in
+      *' status --porcelain --untracked-files=all '*)
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        : >"$PWT_TEST_REMOVE_SWITCHED"
+        exit 0
+        ;;
+      *' worktree list --porcelain '*)
+        if [ -e "$PWT_TEST_REMOVE_SWITCHED" ]; then
+          printf 'worktree %s\nbranch refs/heads/%s\n\n' \
+            "$PWT_TEST_REMOVE_DECOY" "$PWT_TEST_REMOVE_BRANCH"
+          exit 0
+        fi
+        ;;
+      *" -C $PWT_TEST_REMOVE_DECOY symbolic-ref --quiet --short HEAD "*)
+        if [ -e "$PWT_TEST_REMOVE_SWITCHED" ]; then
+          printf '%s\n' "$PWT_TEST_REMOVE_BRANCH"
+          exit 0
+        fi
+        ;;
+    esac
+    ;;
+  remove-success-keeps-path)
+    case $args in
+      *' worktree remove '*)
+        case $args in *' --force '*) ;; *) exit 0 ;; esac
+        ;;
+    esac
+    ;;
+  remove-success-keeps-registration)
+    case $args in
+      *' worktree remove '*)
+        case $args in
+          *' --force '*) ;;
+          *)
+            "$PWT_TEST_REAL_GIT" "$@" || exit
+            : >"$PWT_TEST_REMOVE_DONE"
+            exit 0
+            ;;
+        esac
+        ;;
+      *' worktree list --porcelain '*)
+        if [ -e "$PWT_TEST_REMOVE_DONE" ]; then
+          "$PWT_TEST_REAL_GIT" "$@" || exit
+          printf 'worktree %s\n\n' "$PWT_TEST_REMOVE_TARGET"
+          exit 0
+        fi
+        ;;
+    esac
+    ;;
+  remove-success-list-fails)
+    case $args in
+      *' worktree remove '*)
+        case $args in
+          *' --force '*) ;;
+          *)
+            "$PWT_TEST_REAL_GIT" "$@" || exit
+            : >"$PWT_TEST_REMOVE_DONE"
+            exit 0
+            ;;
+        esac
+        ;;
+      *' worktree list --porcelain '*)
+        [ ! -e "$PWT_TEST_REMOVE_DONE" ] || exit 70
         ;;
     esac
     ;;
@@ -2897,6 +3039,572 @@ rm -f "$PRIMARY/external-source"
 rm -f "$PRIMARY/.worktreeinclude" "$PRIMARY/.env" \
   "$PRIMARY/config/local.json" "$PRIMARY/with space.txt" \
   "$PRIMARY/$newline_name" "$PRIMARY/valid..local"
+
+# --------------------------------------------------------- guarded removal
+
+section 'remove'
+
+# A clean managed worktree is disposable, but its branch is history and remains
+# unless deletion is requested explicitly.
+launch_reset
+pwt new feat/removable >/dev/null 2>&1
+check 'the worktree to remove exists first' test -d "$MANAGED/feat-removable"
+check 'remove deletes a clean managed worktree' pwt remove feat/removable
+check 'the removed worktree directory is gone' test ! -d "$MANAGED/feat-removable"
+check 'remove keeps the branch by default' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/removable
+
+# An interrupted preparation leaves shared Git state that blocks reuse. Explicit
+# removal is the recovery path, so it must clear that state after Git removes
+# the worktree.
+launch_reset
+pwt new feat/marker-recovery >/dev/null 2>&1
+remove_common=$(git -C "$PRIMARY" rev-parse \
+  --path-format=absolute --git-common-dir)
+remove_marker="$remove_common/pwt/preparing-feat-marker-recovery"
+mkdir -p "$remove_marker"
+check 'remove recovers an incompletely prepared worktree' \
+  pwt remove feat/marker-recovery
+check 'remove clears stale preparation state' test ! -e "$remove_marker"
+launch_reset
+check 'a branch is reusable after stale-state removal' \
+  pwt branch feat/marker-recovery
+pwt remove feat/marker-recovery >/dev/null 2>&1
+
+launch_reset
+pwt new feat/disposable >/dev/null 2>&1
+check 'remove --delete-branch succeeds for a merged branch' \
+  pwt remove feat/disposable --delete-branch
+check_fails 'remove --delete-branch deletes the merged branch' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/disposable
+
+# Both tracked edits and untracked files are local work. The wrapper must name
+# that reason itself rather than relying on Git's eventual removal failure.
+launch_reset
+pwt new feat/dirty-tracked >/dev/null 2>&1
+printf 'edited\n' >>"$MANAGED/feat-dirty-tracked/README.md"
+check_fails 'remove refuses a worktree with tracked changes' \
+  pwt remove feat/dirty-tracked
+check_output 'tracked-change refusal identifies local work' \
+  'uncommitted or untracked work' pwt remove feat/dirty-tracked
+check 'the tracked-dirty worktree survives refusal' \
+  test -d "$MANAGED/feat-dirty-tracked"
+
+launch_reset
+pwt new feat/dirty-untracked >/dev/null 2>&1
+printf 'scratch\n' >"$MANAGED/feat-dirty-untracked/notes.md"
+check_fails 'remove refuses a worktree with an untracked file' \
+  pwt remove feat/dirty-untracked
+check_output 'untracked-file refusal identifies local work' \
+  'uncommitted or untracked work' pwt remove feat/dirty-untracked
+check 'the untracked-dirty worktree survives refusal' \
+  test -d "$MANAGED/feat-dirty-untracked"
+
+# Git status deliberately hides assume-unchanged entries. A destructive wrapper
+# must detect that index state itself rather than accepting a false clean result.
+launch_reset
+pwt new feat/assume-unchanged >/dev/null 2>&1
+git -C "$MANAGED/feat-assume-unchanged" update-index \
+  --assume-unchanged README.md
+printf 'hidden local edit\n' >>"$MANAGED/feat-assume-unchanged/README.md"
+assume_status=$(git -C "$MANAGED/feat-assume-unchanged" status \
+  --porcelain --untracked-files=all)
+check_equals 'the assume-unchanged fixture is hidden from status' '' \
+  "$assume_status"
+ASSUME_REMOVE_ATTEMPT="$TMP/assume-remove-attempt"
+assume_remove_status=0
+assume_remove_out=$(
+  PWT_TEST_REMOVE_ATTEMPT="$ASSUME_REMOVE_ATTEMPT" \
+    pwt remove feat/assume-unchanged 2>&1
+) || assume_remove_status=$?
+check 'remove refuses hidden tracked work' test "$assume_remove_status" -ne 0
+check_contains 'hidden-work refusal names assume-unchanged state' \
+  'assume-unchanged' "$assume_remove_out"
+check 'hidden-work refusal never reaches Git removal' \
+  test ! -e "$ASSUME_REMOVE_ATTEMPT"
+check 'hidden-work refusal preserves the local edit' grep -qF \
+  'hidden local edit' "$MANAGED/feat-assume-unchanged/README.md"
+
+# A materialized skip-worktree entry is another way tracked edits can disappear
+# from status. Assert the fixture shape before relying on the pwt refusal.
+launch_reset
+pwt new feat/skip-worktree >/dev/null 2>&1
+git -C "$MANAGED/feat-skip-worktree" update-index --skip-worktree README.md
+printf 'skip-worktree local edit\n' >>"$MANAGED/feat-skip-worktree/README.md"
+skip_status=$(git -C "$MANAGED/feat-skip-worktree" status \
+  --porcelain --untracked-files=all)
+check_equals 'the skip-worktree fixture is hidden from status' '' "$skip_status"
+SKIP_REMOVE_ATTEMPT="$TMP/skip-remove-attempt"
+skip_remove_status=0
+skip_remove_out=$(
+  PWT_TEST_REMOVE_ATTEMPT="$SKIP_REMOVE_ATTEMPT" \
+    pwt remove feat/skip-worktree 2>&1
+) || skip_remove_status=$?
+check 'remove refuses materialized skip-worktree state' \
+  test "$skip_remove_status" -ne 0
+check_contains 'skip-worktree refusal names the hidden index state' \
+  'materialized skip-worktree' "$skip_remove_out"
+check 'skip-worktree refusal never reaches Git removal' \
+  test ! -e "$SKIP_REMOVE_ATTEMPT"
+check 'skip-worktree refusal preserves the local edit' grep -qF \
+  'skip-worktree local edit' "$MANAGED/feat-skip-worktree/README.md"
+
+# A repository can configure status to ignore dirty submodules. pwt overrides
+# that preference at the destructive boundary so nested local work still blocks.
+SUBMODULE_SOURCE="$TMP/remove-submodule-source"
+git init -q "$SUBMODULE_SOURCE"
+printf 'submodule seed\n' >"$SUBMODULE_SOURCE/submodule.txt"
+git -C "$SUBMODULE_SOURCE" add submodule.txt
+git -C "$SUBMODULE_SOURCE" commit -qm 'seed removal submodule'
+launch_reset
+pwt new feat/dirty-submodule >/dev/null 2>&1
+git -C "$MANAGED/feat-dirty-submodule" \
+  -c protocol.file.allow=always submodule add -q \
+  "$SUBMODULE_SOURCE" vendor/removal-submodule
+git -C "$MANAGED/feat-dirty-submodule" commit -qam \
+  'add removal submodule'
+git -C "$MANAGED/feat-dirty-submodule" config \
+  submodule.vendor/removal-submodule.ignore all
+printf 'nested local edit\n' \
+  >>"$MANAGED/feat-dirty-submodule/vendor/removal-submodule/submodule.txt"
+submodule_status=$(git -C "$MANAGED/feat-dirty-submodule" status \
+  --porcelain --untracked-files=all)
+check_equals 'the dirty-submodule fixture is hidden by repository config' '' \
+  "$submodule_status"
+SUBMODULE_REMOVE_ATTEMPT="$TMP/submodule-remove-attempt"
+submodule_remove_status=0
+submodule_remove_out=$(
+  PWT_TEST_REMOVE_ATTEMPT="$SUBMODULE_REMOVE_ATTEMPT" \
+    pwt remove feat/dirty-submodule 2>&1
+) || submodule_remove_status=$?
+check 'remove refuses a dirty submodule hidden by repository config' \
+  test "$submodule_remove_status" -ne 0
+check_contains 'dirty-submodule refusal names local work' \
+  'uncommitted or untracked work' "$submodule_remove_out"
+check 'dirty-submodule refusal never reaches Git removal' \
+  test ! -e "$SUBMODULE_REMOVE_ATTEMPT"
+check 'dirty-submodule refusal preserves the nested local edit' grep -qF \
+  'nested local edit' \
+  "$MANAGED/feat-dirty-submodule/vendor/removal-submodule/submodule.txt"
+
+# Ignored worktreeinclude files are intentionally disposable, but removal must
+# disclose them before Git destroys the directory.
+printf '.remove-secret\n' >>"$exclude_file"
+printf '.remove-secret\n' >"$PRIMARY/.worktreeinclude"
+printf 'SECRET=1\n' >"$PRIMARY/.remove-secret"
+launch_reset
+ignored_create_status=0
+ignored_create_out=$(pwt new feat/has-ignored 2>&1) || ignored_create_status=$?
+if [ "$ignored_create_status" -eq 0 ]; then
+  ok 'the ignored removal fixture is created successfully'
+else
+  not_ok "the ignored removal fixture is created successfully (got: $ignored_create_out)"
+fi
+check 'the ignored removal fixture contains its copied file' \
+  test -f "$MANAGED/feat-has-ignored/.remove-secret"
+ignored_status=$(git -C "$MANAGED/feat-has-ignored" status \
+  --porcelain --untracked-files=all)
+check_equals 'ignored content is not reported as untracked work' '' "$ignored_status"
+remove_out=$(pwt remove feat/has-ignored 2>&1)
+check 'remove accepts a clean worktree containing ignored files' \
+  test ! -d "$MANAGED/feat-has-ignored"
+check_contains 'remove discloses the ignored file it destroys' \
+  '.remove-secret' "$remove_out"
+rm -f "$PRIMARY/.worktreeinclude" "$PRIMARY/.remove-secret"
+
+# A refusal must not announce that ignored content will be destroyed.
+printf 'ignored beside dirty work\n' \
+  >"$MANAGED/feat-dirty-tracked/.remove-secret"
+dirty_ignored_status=0
+dirty_ignored_out=$(pwt remove feat/dirty-tracked 2>&1) || \
+  dirty_ignored_status=$?
+check 'dirty work with ignored content is still refused' \
+  test "$dirty_ignored_status" -ne 0
+check_not_contains 'a refused removal makes no destruction announcement' \
+  'removing will destroy' "$dirty_ignored_out"
+
+# Removing the directory containing the caller would strand its shell in a
+# deleted cwd. The same worktree remains removable from elsewhere.
+launch_reset
+pwt new feat/self-remove >/dev/null 2>&1
+check_fails 'remove refuses the caller-current worktree' \
+  pwt_in "$MANAGED/feat-self-remove" remove feat/self-remove
+check_output 'caller-current refusal explains the standing-directory guard' \
+  'standing in' pwt_in "$MANAGED/feat-self-remove" remove feat/self-remove
+check 'caller-current refusal preserves the worktree' \
+  test -d "$MANAGED/feat-self-remove"
+check 'the same worktree remains removable from elsewhere' \
+  pwt remove feat/self-remove
+
+launch_reset
+pwt new feat/deleted-cwd-remove >/dev/null 2>&1
+DELETED_CWD="$TMP/deleted-remove-cwd"
+mkdir "$DELETED_CWD"
+deleted_cwd_status=0
+deleted_cwd_out=$(
+  cd "$DELETED_CWD" || exit 1
+  rmdir "$DELETED_CWD" || exit 1
+  PWT_REPO_ROOT="$PRIMARY" "$PWT" remove feat/deleted-cwd-remove 2>&1
+) || deleted_cwd_status=$?
+check 'remove fails closed when the caller cwd no longer exists' \
+  test "$deleted_cwd_status" -ne 0
+check_contains 'deleted-cwd refusal uses a pwt diagnostic' \
+  'cannot determine the current directory; refusing to remove' \
+  "$deleted_cwd_out"
+check 'deleted-cwd refusal preserves the worktree' \
+  test -d "$MANAGED/feat-deleted-cwd-remove"
+pwt remove feat/deleted-cwd-remove >/dev/null 2>&1
+
+# Registration alone does not establish pwt ownership.
+check_fails 'remove refuses an unmanaged worktree' pwt remove feat/stray
+check_output 'unmanaged removal refusal names managed-root ownership' \
+  'pwt does not manage it' pwt remove feat/stray
+check 'unmanaged removal refusal preserves the worktree' test -d "$UNMANAGED"
+
+# A path registered by the primary repository can be replaced by a clean checkout
+# from another repository. Physical containment alone must not grant ownership.
+launch_reset
+pwt new feat/remove-wrong-repo >/dev/null 2>&1
+WRONG_REPO_REAL="$TMP/remove-wrong-repo-real"
+mv "$MANAGED/feat-remove-wrong-repo" "$WRONG_REPO_REAL"
+git clone -q "$WRONG" "$MANAGED/feat-remove-wrong-repo"
+git -C "$MANAGED/feat-remove-wrong-repo" checkout -qb \
+  feat/remove-wrong-repo
+WRONG_REPO_ATTEMPT="$TMP/remove-wrong-repo-attempt"
+wrong_repo_status=0
+wrong_repo_out=$(
+  PWT_TEST_REMOVE_ATTEMPT="$WRONG_REPO_ATTEMPT" \
+    pwt remove feat/remove-wrong-repo 2>&1
+) || wrong_repo_status=$?
+check 'remove refuses a same-branch checkout from another repository' \
+  test "$wrong_repo_status" -ne 0
+check_contains 'wrong-repository refusal names repository ownership' \
+  'different repository' "$wrong_repo_out"
+check 'wrong-repository refusal never reaches Git removal' \
+  test ! -e "$WRONG_REPO_ATTEMPT"
+check 'wrong-repository refusal preserves the replacement checkout' \
+  test -d "$MANAGED/feat-remove-wrong-repo/.git"
+rm -rf "$MANAGED/feat-remove-wrong-repo"
+mv "$WRONG_REPO_REAL" "$MANAGED/feat-remove-wrong-repo"
+pwt remove feat/remove-wrong-repo >/dev/null 2>&1
+
+check_fails 'remove refuses the primary checkout' pwt remove "$primary_branch"
+check_output 'primary-checkout refusal reaches its explicit defense-in-depth guard' \
+  'refusing to remove the primary checkout' pwt remove "$primary_branch"
+check 'primary-checkout removal refusal preserves the repository' test -d "$PRIMARY"
+check_fails 'remove fails for a branch with no worktree' \
+  pwt remove feat/never-existed
+check_fails 'remove requires a branch name' pwt remove
+check_fails 'remove rejects an invalid branch name' pwt remove 'bad branch'
+
+# Parser fixtures must be clean so a missing argument guard would delete one.
+launch_reset
+pwt new feat/remove-arg-guard >/dev/null 2>&1
+pwt new feat/remove-other-clean >/dev/null 2>&1
+check_output 'remove takes exactly one branch name' \
+  'remove takes exactly one branch name' \
+  pwt remove feat/remove-arg-guard feat/remove-other-clean
+check_output 'remove rejects an unknown flag' 'unknown option: --nope' \
+  pwt remove feat/remove-arg-guard --nope
+check 'argument refusals preserve the first clean worktree' \
+  test -d "$MANAGED/feat-remove-arg-guard"
+check 'argument refusals preserve the second clean worktree' \
+  test -d "$MANAGED/feat-remove-other-clean"
+pwt remove feat/remove-arg-guard >/dev/null 2>&1
+pwt remove feat/remove-other-clean >/dev/null 2>&1
+
+# A registered target replaced by a symlink must be refused without following
+# it. Restore the fixture afterward so normal checked removal can clean it up.
+launch_reset
+pwt new feat/symlink-remove >/dev/null 2>&1
+SYMLINK_REMOVE_REAL="$TMP/symlink-remove-real"
+mv "$MANAGED/feat-symlink-remove" "$SYMLINK_REMOVE_REAL"
+ln -s "$SYMLINK_REMOVE_REAL" "$MANAGED/feat-symlink-remove"
+check_fails 'remove refuses a symlink substituted for a managed worktree' \
+  pwt remove feat/symlink-remove
+check_output 'symlinked removal refusal names the unsafe path shape' \
+  'must not be a symlink' pwt remove feat/symlink-remove
+check 'symlinked removal refusal preserves the link' \
+  test -L "$MANAGED/feat-symlink-remove"
+check 'symlinked removal refusal preserves the target' \
+  test -d "$SYMLINK_REMOVE_REAL"
+rm -f "$MANAGED/feat-symlink-remove"
+mv "$SYMLINK_REMOVE_REAL" "$MANAGED/feat-symlink-remove"
+pwt remove feat/symlink-remove >/dev/null 2>&1
+
+# A nested lexical path can escape when an intermediate directory is replaced.
+# Physical containment must reject that registered worktree as unmanaged.
+mkdir -p "$MANAGED/remove-intermediate"
+git -C "$PRIMARY" worktree add -q -b feat/remove-escape \
+  "$MANAGED/remove-intermediate/worktree" origin/stable >/dev/null 2>&1
+mv "$MANAGED/remove-intermediate" "$TMP/remove-outside"
+ln -s "$TMP/remove-outside" "$MANAGED/remove-intermediate"
+check_fails 'remove refuses a worktree physically escaped from the managed root' \
+  pwt remove feat/remove-escape
+check_output 'physical-escape refusal names managed-root ownership' \
+  'not under the managed root' pwt remove feat/remove-escape
+check 'physical-escape refusal preserves the outside worktree' \
+  test -d "$TMP/remove-outside/worktree"
+rm -f "$MANAGED/remove-intermediate"
+mv "$TMP/remove-outside" "$MANAGED/remove-intermediate"
+pwt remove feat/remove-escape >/dev/null 2>&1
+rmdir "$MANAGED/remove-intermediate"
+
+# Every Git query that decides whether deletion is safe fails closed and leaves
+# both the registered worktree and its contents untouched.
+launch_reset
+pwt new feat/remove-git-failure >/dev/null 2>&1
+check_fails 'remove exits non-zero when worktree enumeration fails' \
+  pwt_git_fail worktree-list remove feat/remove-git-failure
+check_output 'remove reports failed worktree enumeration' \
+  'cannot list repository worktrees' \
+  pwt_git_fail worktree-list remove feat/remove-git-failure
+check 'enumeration failure preserves the worktree' \
+  test -d "$MANAGED/feat-remove-git-failure"
+
+check_fails 'remove exits non-zero when ignored-file inspection fails' \
+  pwt_git_fail remove-ignored-list remove feat/remove-git-failure
+check_output 'remove explains failed ignored-file inspection' \
+  'refusing to remove without knowing what would be destroyed' \
+  pwt_git_fail remove-ignored-list remove feat/remove-git-failure
+check 'ignored-file inspection failure preserves the worktree' \
+  test -d "$MANAGED/feat-remove-git-failure"
+
+check_fails 'remove exits non-zero when status inspection fails' \
+  pwt_git_fail remove-status remove feat/remove-git-failure
+check_output 'remove explains failed status inspection' \
+  'cannot determine whether' \
+  pwt_git_fail remove-status remove feat/remove-git-failure
+check 'status inspection failure preserves the worktree' \
+  test -d "$MANAGED/feat-remove-git-failure"
+
+check_fails 'remove exits non-zero when checked Git removal fails' \
+  pwt_git_fail remove-checked remove feat/remove-git-failure
+check_output 'remove reports the checked Git removal failure' \
+  'Git could not remove worktree' \
+  pwt_git_fail remove-checked remove feat/remove-git-failure
+check 'checked Git removal failure preserves the worktree' \
+  test -d "$MANAGED/feat-remove-git-failure"
+pwt remove feat/remove-git-failure >/dev/null 2>&1
+
+launch_reset
+pwt new feat/remove-index-failure >/dev/null 2>&1
+check_fails 'remove exits non-zero when index-flag inspection fails' \
+  pwt_git_fail remove-index-list remove feat/remove-index-failure
+check_output 'remove explains failed index-flag inspection' \
+  'cannot inspect tracked-file index flags' \
+  pwt_git_fail remove-index-list remove feat/remove-index-failure
+check 'index-flag inspection failure preserves the worktree' \
+  test -d "$MANAGED/feat-remove-index-failure"
+if [ -d "$MANAGED/feat-remove-index-failure" ]; then
+  pwt remove feat/remove-index-failure >/dev/null 2>&1
+fi
+
+# A successful exit from Git is not sufficient: verify both filesystem and
+# registration state, and fail closed if post-removal enumeration itself fails.
+launch_reset
+pwt new feat/remove-lies-path >/dev/null 2>&1
+check_fails 'remove rejects a success result that leaves the path' \
+  pwt_git_fail remove-success-keeps-path remove feat/remove-lies-path
+check_output 'path-verification failure names the retained path' \
+  'worktree path remains after Git reported removal' \
+  pwt_git_fail remove-success-keeps-path remove feat/remove-lies-path
+check 'path-verification failure preserves the worktree' \
+  test -d "$MANAGED/feat-remove-lies-path"
+pwt remove feat/remove-lies-path >/dev/null 2>&1
+
+launch_reset
+pwt new feat/remove-lies-registration >/dev/null 2>&1
+REGISTRATION_DONE="$TMP/remove-registration-done"
+registration_lie_status=0
+registration_lie_out=$(
+  PWT_TEST_GIT_FAIL=remove-success-keeps-registration \
+    PWT_TEST_REMOVE_DONE="$REGISTRATION_DONE" \
+    PWT_TEST_REMOVE_TARGET="$MANAGED/feat-remove-lies-registration" \
+    pwt remove feat/remove-lies-registration 2>&1
+) || registration_lie_status=$?
+check 'remove rejects a success result that leaves registration' \
+  test "$registration_lie_status" -ne 0
+check_contains 'registration-verification failure names retained state' \
+  'worktree remains registered after Git reported removal' \
+  "$registration_lie_out"
+check 'registration-lie fixture really removes the directory' \
+  test ! -e "$MANAGED/feat-remove-lies-registration"
+
+launch_reset
+pwt new feat/remove-post-list-failure >/dev/null 2>&1
+POST_LIST_DONE="$TMP/remove-post-list-done"
+post_list_status=0
+post_list_out=$(
+  PWT_TEST_GIT_FAIL=remove-success-list-fails \
+    PWT_TEST_REMOVE_DONE="$POST_LIST_DONE" \
+    pwt remove feat/remove-post-list-failure 2>&1
+) || post_list_status=$?
+check 'remove fails closed when post-removal enumeration fails' \
+  test "$post_list_status" -ne 0
+check_contains 'post-removal enumeration failure names verification' \
+  'cannot verify its worktree registration' "$post_list_out"
+check 'post-enumeration fixture really removes the directory' \
+  test ! -e "$MANAGED/feat-remove-post-list-failure"
+
+# External inspection can run filters and hooks. Re-check immediately after the
+# ignored-file query so late edits and target substitution cannot reach delete.
+launch_reset
+pwt new feat/remove-late-dirty >/dev/null 2>&1
+REMOVE_ATTEMPT="$TMP/remove-late-dirty-attempt"
+remove_late_status=0
+remove_late_out=$(
+  PWT_TEST_GIT_FAIL=remove-dirty-after-ignored \
+    PWT_TEST_REMOVE_TARGET="$MANAGED/feat-remove-late-dirty" \
+    PWT_TEST_REMOVE_ATTEMPT="$REMOVE_ATTEMPT" \
+    pwt remove feat/remove-late-dirty 2>&1
+) || remove_late_status=$?
+check 'remove refuses work created during ignored-file inspection' \
+  test "$remove_late_status" -ne 0
+check_contains 'late-work refusal identifies local work' \
+  'uncommitted or untracked work' "$remove_late_out"
+check 'late-work refusal never reaches Git removal' test ! -e "$REMOVE_ATTEMPT"
+check 'late-work refusal preserves the new file' \
+  test -f "$MANAGED/feat-remove-late-dirty/late.txt"
+
+launch_reset
+pwt new feat/remove-late-symlink >/dev/null 2>&1
+REMOVE_SYMLINK_OUTSIDE="$TMP/remove-late-symlink-real"
+REMOVE_SYMLINK_ATTEMPT="$TMP/remove-late-symlink-attempt"
+remove_symlink_status=0
+remove_symlink_out=$(
+  PWT_TEST_GIT_FAIL=remove-symlink-after-ignored \
+    PWT_TEST_REMOVE_TARGET="$MANAGED/feat-remove-late-symlink" \
+    PWT_TEST_REMOVE_OUTSIDE="$REMOVE_SYMLINK_OUTSIDE" \
+    PWT_TEST_REMOVE_ATTEMPT="$REMOVE_SYMLINK_ATTEMPT" \
+    pwt remove feat/remove-late-symlink 2>&1
+) || remove_symlink_status=$?
+check 'remove refuses target substitution after ignored-file inspection' \
+  test "$remove_symlink_status" -ne 0
+check_contains 'late target substitution reaches the symlink ownership guard' \
+  'must not be a symlink' "$remove_symlink_out"
+check 'late target substitution never reaches Git removal' \
+  test ! -e "$REMOVE_SYMLINK_ATTEMPT"
+check 'late target substitution preserves the outside worktree' \
+  test -d "$REMOVE_SYMLINK_OUTSIDE"
+rm -f "$MANAGED/feat-remove-late-symlink"
+mv "$REMOVE_SYMLINK_OUTSIDE" "$MANAGED/feat-remove-late-symlink"
+
+# Status is another external inspection boundary. Re-check ignored content and
+# target ownership after it before allowing Git removal to run.
+launch_reset
+pwt new feat/remove-late-ignored >/dev/null 2>&1
+LATE_IGNORED_ATTEMPT="$TMP/remove-late-ignored-attempt"
+late_ignored_status=0
+late_ignored_out=$(
+  PWT_TEST_GIT_FAIL=remove-ignored-after-status \
+    PWT_TEST_REMOVE_TARGET="$MANAGED/feat-remove-late-ignored" \
+    PWT_TEST_REMOVE_ATTEMPT="$LATE_IGNORED_ATTEMPT" \
+    pwt remove feat/remove-late-ignored 2>&1
+) || late_ignored_status=$?
+check 'remove refuses ignored content created during status inspection' \
+  test "$late_ignored_status" -ne 0
+check_contains 'late ignored refusal names changed disclosure state' \
+  'ignored files changed while preparing removal' "$late_ignored_out"
+check 'late ignored refusal never reaches Git removal' \
+  test ! -e "$LATE_IGNORED_ATTEMPT"
+check 'late ignored refusal preserves the new file' \
+  test -f "$MANAGED/feat-remove-late-ignored/.remove-secret"
+
+launch_reset
+pwt new feat/remove-status-symlink >/dev/null 2>&1
+STATUS_SYMLINK_OUTSIDE="$TMP/remove-status-symlink-real"
+STATUS_SYMLINK_ATTEMPT="$TMP/remove-status-symlink-attempt"
+status_symlink_status=0
+status_symlink_out=$(
+  PWT_TEST_GIT_FAIL=remove-symlink-after-status \
+    PWT_TEST_REMOVE_TARGET="$MANAGED/feat-remove-status-symlink" \
+    PWT_TEST_REMOVE_OUTSIDE="$STATUS_SYMLINK_OUTSIDE" \
+    PWT_TEST_REMOVE_ATTEMPT="$STATUS_SYMLINK_ATTEMPT" \
+    pwt remove feat/remove-status-symlink 2>&1
+) || status_symlink_status=$?
+check 'remove refuses target substitution during status inspection' \
+  test "$status_symlink_status" -ne 0
+check_contains 'post-status substitution reaches the symlink guard' \
+  'must not be a symlink' "$status_symlink_out"
+check 'post-status substitution never reaches Git removal' \
+  test ! -e "$STATUS_SYMLINK_ATTEMPT"
+check 'post-status substitution preserves the outside worktree' \
+  test -d "$STATUS_SYMLINK_OUTSIDE"
+rm -f "$MANAGED/feat-remove-status-symlink"
+mv "$STATUS_SYMLINK_OUTSIDE" "$MANAGED/feat-remove-status-symlink"
+
+# If the named branch moves to another valid managed target during inspection,
+# the saved target must not be removed under its stale identity.
+launch_reset
+pwt new feat/remove-registration-moved >/dev/null 2>&1
+pwt new feat/remove-registration-decoy >/dev/null 2>&1
+REGISTRATION_SWITCHED="$TMP/remove-registration-switched"
+REGISTRATION_MOVE_ATTEMPT="$TMP/remove-registration-move-attempt"
+registration_move_status=0
+registration_move_out=$(
+  PWT_TEST_GIT_FAIL=remove-registration-after-status \
+    PWT_TEST_REMOVE_TARGET="$MANAGED/feat-remove-registration-moved" \
+    PWT_TEST_REMOVE_DECOY="$MANAGED/feat-remove-registration-decoy" \
+    PWT_TEST_REMOVE_BRANCH=feat/remove-registration-moved \
+    PWT_TEST_REMOVE_SWITCHED="$REGISTRATION_SWITCHED" \
+    PWT_TEST_REMOVE_ATTEMPT="$REGISTRATION_MOVE_ATTEMPT" \
+    pwt remove feat/remove-registration-moved 2>&1
+) || registration_move_status=$?
+check 'remove refuses registration movement during inspection' \
+  test "$registration_move_status" -ne 0
+check_contains 'registration movement names the stale target' \
+  'registration changed while preparing removal' "$registration_move_out"
+check 'registration movement never reaches Git removal' \
+  test ! -e "$REGISTRATION_MOVE_ATTEMPT"
+check 'registration movement preserves the original worktree' \
+  test -d "$MANAGED/feat-remove-registration-moved"
+check 'registration movement preserves the decoy worktree' \
+  test -d "$MANAGED/feat-remove-registration-decoy"
+if [ -d "$MANAGED/feat-remove-registration-moved" ]; then
+  pwt remove feat/remove-registration-moved >/dev/null 2>&1
+fi
+pwt remove feat/remove-registration-decoy >/dev/null 2>&1
+
+# Non-forcing branch deletion removes a fully merged branch but preserves a
+# clean branch containing local-only commits after its worktree is removed.
+launch_reset
+pwt new feat/unmerged-delete >/dev/null 2>&1
+printf 'local history\n' >"$MANAGED/feat-unmerged-delete/local.txt"
+git -C "$MANAGED/feat-unmerged-delete" add local.txt
+git -C "$MANAGED/feat-unmerged-delete" commit -qm 'add local-only history'
+unmerged_head=$(git -C "$MANAGED/feat-unmerged-delete" rev-parse HEAD)
+UNMERGED_BRANCH_LOG="$TMP/unmerged-branch-log"
+unmerged_status=0
+unmerged_out=$(
+  PWT_TEST_BRANCH_LOG="$UNMERGED_BRANCH_LOG" \
+    pwt remove feat/unmerged-delete --delete-branch 2>&1
+) || \
+  unmerged_status=$?
+check 'remove reports failure when safe branch deletion rejects local history' \
+  test "$unmerged_status" -ne 0
+check 'safe branch deletion still removes the disposable worktree' \
+  test ! -e "$MANAGED/feat-unmerged-delete"
+check 'safe branch deletion preserves the unmerged local branch' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/unmerged-delete
+check_equals 'safe branch deletion preserves the exact local commit' \
+  "$unmerged_head" "$(git -C "$PRIMARY" rev-parse feat/unmerged-delete)"
+check_contains 'safe branch deletion explains its partial completion' \
+  'could not safely delete branch' "$unmerged_out"
+check_output 'runtime branch deletion uses the non-forcing form' \
+  'branch -d feat/unmerged-delete' cat "$UNMERGED_BRANCH_LOG"
+
+# Source-level pins complement the behavioral unmerged-history assertion. The
+# exact negative spelling does not claim to recognize every possible force form.
+check 'remove uses Git non-forcing branch deletion' \
+  grep -qF 'branch -d "$branch"' "$PWT"
+if grep -qF 'branch -D "$branch"' "$PWT"; then
+  not_ok 'remove source omits the exact branch -D spelling'
+else
+  ok 'remove source omits the exact branch -D spelling'
+fi
+check 'remove status explicitly inspects dirty submodules' \
+  grep -qF -- '--ignore-submodules=none' "$PWT"
 
 # -------------------------------------------------------------------- summary
 

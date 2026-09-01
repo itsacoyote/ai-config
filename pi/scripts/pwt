@@ -781,11 +781,59 @@ valid_head_oid() {
 # status is captured explicitly because errexit is disabled inside $(...).
 worktree_is_dirty() {
   local path=$1 action=${2:-remove} out rc
-  out=$(git -C "$path" status --porcelain --untracked-files=all)
+  out=$(git -C "$path" status --porcelain --untracked-files=all \
+    --ignore-submodules=none)
   rc=$?
   ((rc == 0)) ||
     die "cannot determine whether $path is clean (git exited $rc); refusing to $action"
   [[ -n $out ]]
+}
+
+# Newline-delimited output is safe here: ls-files C-quotes unusual paths, and
+# these names are displayed only rather than turned back into filesystem paths.
+worktree_ignored_files() {
+  local out rc
+  out=$(git -C "$1" ls-files --others --ignored --exclude-standard)
+  rc=$?
+  ((rc == 0)) || return 1
+  printf '%s' "$out"
+}
+
+# Git status intentionally trusts index suppression flags. Inspect them
+# losslessly so assume-unchanged edits and materialized skip-worktree entries
+# cannot make local tracked content look clean before removal.
+refuse_hidden_index_state() {
+  local path=$1 list_file record flag rel problem=''
+  list_file=$(mktemp "${TMPDIR:-/tmp}/pwt.XXXXXX") ||
+    die 'cannot create tracked-file inspection state; refusing to remove'
+  PWT_LIST_FILE=$list_file
+
+  if ! git -C "$path" ls-files -v -z >"$list_file"; then
+    die "cannot inspect tracked-file index flags in $path; refusing to remove"
+  fi
+
+  while IFS= read -r -d '' record; do
+    flag=${record%% *}
+    rel=${record#??}
+    case $flag in
+      [a-z])
+        problem="assume-unchanged tracked file: $rel"
+        break
+        ;;
+      S)
+        if [[ -e "$path/$rel" || -L "$path/$rel" ]]; then
+          problem="materialized skip-worktree tracked file: $rel"
+          break
+        fi
+        ;;
+    esac
+  done <"$list_file"
+
+  rm -f "$list_file" ||
+    die 'cannot clear tracked-file inspection state; refusing to remove'
+  PWT_LIST_FILE=''
+  [[ -z $problem ]] ||
+    die "worktree has hidden local state ($problem), refusing to remove: $path"
 }
 
 remote_matches_identity() {
@@ -1089,6 +1137,104 @@ reuse_pr_or_refuse() {
   launch_pr "$existing"
 }
 
+# Removing the directory containing the caller leaves its shell in a path that
+# no longer exists. Refuse both the worktree root and any directory below it.
+refuse_if_caller_inside() {
+  local target=$1 here
+  here=$(pwd -P 2>/dev/null) ||
+    die 'cannot determine the current directory; refusing to remove'
+  if [[ $here == "$target" || $here == "$target"/* ]]; then
+    die "refusing to remove the worktree you are standing in: $target"
+  fi
+}
+
+# Resolve one branch to a pwt-owned physical worktree. Git enumeration failures
+# are distinct from an ordinary branch with no worktree and must fail closed.
+resolve_removable() {
+  local branch=$1 target status
+  validate_branch "$branch"
+  if target=$(branch_worktree "$branch"); then
+    :
+  else
+    status=$?
+    ((status == 1)) && die "no worktree checked out for branch: $branch"
+    die 'cannot list repository worktrees; refusing to remove'
+  fi
+  [[ $target != "$primary" ]] ||
+    die "refusing to remove the primary checkout: $target"
+  require_managed_worktree "$branch" "$target"
+  target=$(cd -P "$target" 2>/dev/null && pwd -P) ||
+    die "cannot resolve worktree directory: $target"
+  refuse_if_caller_inside "$target"
+  resolved_worktree=$target
+}
+
+# Inspect local content, then repeat ownership at the final mutation boundary
+# before asking Git to remove anything.
+remove_worktree() {
+  local branch=$1 delete_branch=$2 target ignored_before ignored_after
+  local f status marker
+  local -a doomed=()
+
+  resolve_removable "$branch"
+  target=$resolved_worktree
+
+  ignored_before=$(worktree_ignored_files "$target") ||
+    die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
+  refuse_hidden_index_state "$target"
+  if worktree_is_dirty "$target"; then
+    die "worktree has uncommitted or untracked work, refusing to remove: $target"
+  fi
+  ignored_after=$(worktree_ignored_files "$target") ||
+    die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
+  [[ $ignored_after == "$ignored_before" ]] ||
+    die "ignored files changed while preparing removal; refusing to remove: $target"
+
+  # Status and ignored-file inspection are external boundaries. Re-resolve the
+  # named branch after both, then compare it with the exact inspected target.
+  resolve_removable "$branch"
+  [[ $resolved_worktree == "$target" ]] ||
+    die "worktree registration changed while preparing removal: $branch"
+
+  while IFS= read -r f; do
+    [[ -n $f ]] && doomed+=("$f")
+  done <<< "$ignored_after"
+  if ((${#doomed[@]})); then
+    note "removing will destroy ${#doomed[@]} ignored file(s):"
+    printf '  %s\n' "${doomed[@]}"
+  fi
+
+  git -C "$primary" worktree remove "$target" ||
+    die "Git could not remove worktree: $target"
+  [[ ! -e $target && ! -L $target ]] ||
+    die "worktree path remains after Git reported removal: $target"
+  if registered_at "$target"; then
+    die "worktree remains registered after Git reported removal: $target"
+  else
+    status=$?
+  fi
+  ((status == 1)) ||
+    die "removed $target but cannot verify its worktree registration"
+
+  marker=$(worktree_preparation_marker "$target")
+  if [[ -L $marker ]]; then
+    die "removed $target but its preparation state is not a directory: $marker"
+  elif [[ -d $marker ]]; then
+    rmdir "$marker" ||
+      die "removed $target but could not clear its preparation state: $marker"
+  elif [[ -e $marker ]]; then
+    die "removed $target but its preparation state is not a directory: $marker"
+  fi
+  note "removed $target"
+
+  if ((delete_branch)); then
+    # -d, never -D: local commits must survive a requested branch cleanup.
+    git -C "$primary" branch -d "$branch" ||
+      die "removed worktree but could not safely delete branch: $branch"
+    note "deleted branch $branch"
+  fi
+}
+
 fail_pr_worktree() {
   local target=$1 message=$2
   if ! abandon_worktree "$target"; then
@@ -1346,6 +1492,29 @@ cmd_pr() {
   launch_pr "$target"
 }
 
+cmd_remove() {
+  local branch='' delete_branch=0
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --delete-branch) delete_branch=1 ;;
+      -h | --help)
+        usage
+        return 0
+        ;;
+      -*) die "unknown option: $1 (run 'pwt help')" ;;
+      *)
+        [[ -z $branch ]] || die 'remove takes exactly one branch name'
+        branch=$1
+        ;;
+    esac
+    shift
+  done
+  [[ -n $branch ]] || die 'remove requires a branch name'
+
+  remove_worktree "$branch" "$delete_branch"
+}
+
 cmd_open() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'open requires exactly one branch name'
@@ -1446,12 +1615,12 @@ main() {
       require_repo
       cmd_pr "$@"
       ;;
-    list | open | new | branch)
+    list | open | new | branch | remove)
       shift || true
       require_repo
       "cmd_$command" "$@"
       ;;
-    remove | prune | install)
+    prune | install)
       die "$command is not implemented yet"
       ;;
     *)
