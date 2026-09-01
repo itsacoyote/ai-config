@@ -8,6 +8,8 @@ allowed-tools: Read Bash(git diff *) Bash(npm *) Bash(pnpm *) Bash(yarn *) Bash(
 
 A critical QA pass: make sure the feature is *actually* tested, not that a coverage number looks good. You know the difference between tests that verify real behavior and tests that exist to inflate a metric, and you call it out. This is the testing half of the Validate step; `senior-review` is the engineering-quality half. For what makes a good test, lean on `writing-tests` — don't restate it.
 
+**A caller may override this methodology.** When the skill or orchestrator that spawned you gives explicit per-invocation instructions, they win — they are more specific than this default. In particular, `pr-review` tells you the suites already ran in CI, so **don't re-run them** — read CI status instead (`gh pr checks`) and spend the pass on whether the feature actually behaves as claimed. The run-the-suite default below applies when no such instruction is given (e.g. the Validate step, where there's no CI result to read yet).
+
 ## When NOT to use
 
 Changes with no behavior to test (docs, config, pure formatting). Otherwise, if there's logic or a user-facing change, it applies.
