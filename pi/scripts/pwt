@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # pwt — manage this repository's git worktrees and launch Pi inside them.
 #
 # Pi inherits its process working directory. Every launching subcommand therefore
@@ -245,6 +245,71 @@ parse_launch_args() {
   done
 }
 
+# PR sessions keep context-file discovery, but must not let forwarded Pi
+# options replace the tool/trust policy, load executable extensions, or resume
+# a session whose stored cwd escapes the selected worktree. Validate first so
+# a dangling value-taking option cannot consume an enforcement token.
+validate_pr_launch_args() {
+  local index=0 arg next count=${#LAUNCH_ARGS[@]}
+
+  # Pi handles these commands before it creates the restricted agent session.
+  # Some can print credentials, modify package configuration, or self-update.
+  case ${LAUNCH_ARGS[0]-} in
+    auth | install | remove | uninstall | update | list | config)
+      die "pwt pr does not allow Pi command: ${LAUNCH_ARGS[0]}"
+      ;;
+  esac
+
+  while ((index < count)); do
+    arg=${LAUNCH_ARGS[$index]}
+    case $arg in
+      --provider | --model | --api-key | --system-prompt | \
+        --append-system-prompt | --name | \
+        --models | --thinking | --skill | --prompt-template | --theme | -n)
+        index=$((index + 1))
+        ((index < count)) ||
+          die "pwt pr needs a value after Pi option: $arg"
+        ;;
+      --mode)
+        index=$((index + 1))
+        ((index < count)) ||
+          die 'pwt pr needs text or json after Pi option: --mode'
+        case ${LAUNCH_ARGS[$index]} in
+          text | json) ;;
+          *) die 'pwt pr does not allow Pi mode outside the tool boundary' ;;
+        esac
+        ;;
+      --tui-mode)
+        index=$((index + 1))
+        ((index < count)) ||
+          die 'pwt pr needs regular or fullscreen after Pi option: --tui-mode'
+        case ${LAUNCH_ARGS[$index]} in
+          regular | fullscreen) ;;
+          *) die 'pwt pr needs regular or fullscreen after Pi option: --tui-mode' ;;
+        esac
+        ;;
+      --print | -p)
+        if ((index + 1 < count)); then
+          next=${LAUNCH_ARGS[$((index + 1))]}
+          case $next in
+            ---*) index=$((index + 1)) ;;
+          esac
+        fi
+        ;;
+      --help | -h | --version | -v | --no-session | \
+        --no-tools | -nt | --no-builtin-tools | -nbt | \
+        --no-extensions | -ne | --no-skills | -ns | \
+        --no-prompt-templates | -np | --no-themes | --list-models | \
+        --verbose | --no-approve | -na | --offline)
+        ;;
+      -*)
+        die "pwt pr does not allow Pi option: $arg"
+        ;;
+    esac
+    index=$((index + 1))
+  done
+}
+
 # Resolves the selected executable to an absolute path before launch changes cwd.
 # Relative PATH entries are valid shell behavior, so resolve the containing
 # directory physically while it still has the caller's intended meaning.
@@ -280,6 +345,57 @@ launch() {
     exec "$pi_command" "${LAUNCH_ARGS[@]}"
   fi
   exec "$pi_command"
+}
+
+# Pi migrates a project .pi/commands directory before it creates the agent
+# session. Refuse that write, and reject a .pi symlink that could redirect it
+# outside the selected worktree before this check reaches exec.
+validate_pr_startup_paths() {
+  local config="$1/.pi"
+  [[ ! -L $config ]] ||
+    die 'pwt pr does not allow a symlinked .pi directory'
+  [[ ! -e $config/settings.json && ! -L $config/settings.json ]] ||
+    die 'pwt pr does not allow .pi/settings.json before trust enforcement'
+  if [[ -e $config/commands && ! -e $config/prompts ]]; then
+    die 'pwt pr refuses a worktree where Pi would migrate .pi/commands to .pi/prompts before launch'
+  fi
+}
+
+# Pi's interpreter and helper lookups happen after launch enters the PR
+# worktree. A relative PATH entry would then resolve against untrusted content.
+validate_pr_path() {
+  local remaining=${PATH-} entry more
+  while :; do
+    more=0
+    case $remaining in
+      *:*)
+        entry=${remaining%%:*}
+        remaining=${remaining#*:}
+        more=1
+        ;;
+      *) entry=$remaining ;;
+    esac
+
+    case $entry in
+      /*) ;;
+      *) die 'pwt pr requires absolute PATH entries' ;;
+    esac
+    ((more)) || break
+  done
+}
+
+# Keep the enforced suffix adjacent to exec so no later PR preparation can
+# accidentally append an argument after the last-value-wins tool/trust policy.
+launch_pr() {
+  local target=$1
+  validate_pr_startup_paths "$target"
+  # Cwd-sensitive Pi overrides can redirect configuration, migrations, or
+  # session writes through tracked PR paths. Use only trusted locations here.
+  unset PI_CODING_AGENT_DIR PI_PACKAGE_DIR
+  PI_CODING_AGENT_SESSION_DIR="$primary_common/pwt/sessions/${target##*/}"
+  export PI_CODING_AGENT_SESSION_DIR
+  LAUNCH_ARGS+=(--no-extensions --tools read,grep,find,ls --no-approve)
+  launch "$target"
 }
 
 # ------------------------------------------------------------------- commands
@@ -970,7 +1086,7 @@ reuse_pr_or_refuse() {
   if [[ $cross == true ]]; then
     warn "pull request #$number comes from a fork — this is code you did not write, and opening it here runs it on your machine"
   fi
-  launch "$existing"
+  launch_pr "$existing"
 }
 
 fail_pr_worktree() {
@@ -1122,6 +1238,8 @@ cmd_pr() {
   case $number in
     '' | *[!0-9]*) die "pull request must be a number: $number" ;;
   esac
+  validate_pr_launch_args
+  validate_pr_path
 
   require_gh pr
   meta=$(gh pr view "$number" --repo "$origin_gh_repo" \
@@ -1150,6 +1268,10 @@ cmd_pr() {
   valid_head_oid "$head_oid" ||
     die "pull request #$number returned an invalid head object ID"
 
+  name=$(worktree_name_for_branch "$head_ref")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+
   if existing=$(branch_worktree "$head_ref"); then
     reuse_pr_or_refuse "$head_ref" "$existing" "$number" "$pr_url" \
       "$head_oid" "$head_ref" "$head_owner" "$head_repo" "$cross"
@@ -1171,9 +1293,6 @@ cmd_pr() {
     auto_force=1
   fi
 
-  name=$(worktree_name_for_branch "$head_ref")
-  validate_worktree_name "$name"
-  target="$managed_root/$name"
   ensure_available_path "$target"
   mkdir -p "$managed_root"
   begin_worktree_preparation "$target"
@@ -1224,7 +1343,7 @@ cmd_pr() {
   if [[ $cross == true ]]; then
     warn "pull request #$number comes from a fork — this is code you did not write, and opening it here runs it on your machine"
   fi
-  launch "$target"
+  launch_pr "$target"
 }
 
 cmd_open() {
@@ -1319,7 +1438,15 @@ main() {
       require_repo
       cmd_root "$@"
       ;;
-    list | open | new | branch | pr)
+    pr)
+      shift || true
+      # This must precede repository discovery: pwt may be invoked from an
+      # existing PR worktree whose tracked files are reachable through PATH.
+      validate_pr_path
+      require_repo
+      cmd_pr "$@"
+      ;;
+    list | open | new | branch)
       shift || true
       require_repo
       "cmd_$command" "$@"

@@ -251,6 +251,10 @@ cat >"$BIN/pi" <<'STUB'
   printf 'selected=%s\n' "${PWT_PI_SELECTED:-path}"
   printf 'pwd=%s\n' "$PWD"
   printf 'PWT_REPO_ROOT=%s\n' "${PWT_REPO_ROOT-<unset>}"
+  printf 'PI_CODING_AGENT_DIR=%s\n' "${PI_CODING_AGENT_DIR-<unset>}"
+  printf 'PI_CODING_AGENT_SESSION_DIR=%s\n' \
+    "${PI_CODING_AGENT_SESSION_DIR-<unset>}"
+  printf 'PI_PACKAGE_DIR=%s\n' "${PI_PACKAGE_DIR-<unset>}"
   printf 'argc=%s\n' "$#"
 } >>"$PWT_TEST_LOG"
 i=0
@@ -659,6 +663,26 @@ pwt_in() {
   (cd "$dir" && "$PWT" "$@")
 }
 pwt() { pwt_in "$PRIMARY" "$@"; }
+pwt_with_pi_env() {
+  local agent_dir=$1 session_dir=$2 package_dir=$3
+  shift 3
+  (
+    cd "$PRIMARY" || exit 1
+    PI_CODING_AGENT_DIR=$agent_dir \
+      PI_CODING_AGENT_SESSION_DIR=$session_dir \
+      PI_PACKAGE_DIR=$package_dir "$PWT" "$@"
+  )
+}
+pwt_with_path() {
+  local selected_path=$1
+  shift
+  (cd "$PRIMARY" && PATH="$selected_path" "$PWT" "$@")
+}
+pwt_in_with_path() {
+  local dir=$1 selected_path=$2
+  shift 2
+  (cd "$dir" && PATH="$selected_path" "$PWT" "$@")
+}
 pwt_with_root() {
   local dir=$1 root=$2
   shift 2
@@ -876,6 +900,31 @@ check_arg_equals() {
     not_ok "$label"
   fi
 }
+launched_has_arg() {
+  local expected=$1 expected_file="$TMP/expected-arg" count index=0
+  printf '%s' "$expected" >"$expected_file"
+  count=$(launched argc)
+  while [ "$index" -lt "${count:-0}" ]; do
+    if [ -f "$PWT_TEST_ARGS_DIR/$index" ] &&
+      cmp -s "$expected_file" "$PWT_TEST_ARGS_DIR/$index"; then
+      return 0
+    fi
+    index=$((index + 1))
+  done
+  return 1
+}
+check_pr_policy_rejects() {
+  local label=$1
+  shift
+  launch_reset
+  if pwt pr 121 -- "$@" >/dev/null 2>&1; then
+    not_ok "$label"
+  elif [ -n "$(launched pwd)" ]; then
+    not_ok "$label (Pi launched)"
+  else
+    ok "$label"
+  fi
+}
 
 launch_reset
 pwt root >/dev/null 2>&1
@@ -883,6 +932,16 @@ check_equals 'root launches pi from the physical primary checkout' "$PRIMARY" "$
 check_equals 'root exports PWT_REPO_ROOT equal to the physical primary checkout' \
   "$PRIMARY" "$(launched PWT_REPO_ROOT)"
 check_equals 'root passes no arguments to pi by default' '0' "$(launched argc)"
+
+launch_reset
+pwt_with_pi_env relative-agent relative-sessions relative-package \
+  root >/dev/null 2>&1
+check_equals 'normal launch preserves the Pi agent-directory override' \
+  'relative-agent' "$(launched PI_CODING_AGENT_DIR)"
+check_equals 'normal launch preserves the Pi session-directory override' \
+  'relative-sessions' "$(launched PI_CODING_AGENT_SESSION_DIR)"
+check_equals 'normal launch preserves the Pi package-directory override' \
+  'relative-package' "$(launched PI_PACKAGE_DIR)"
 
 # Invoked from a linked worktree, root must still enter the primary checkout.
 launch_reset
@@ -1378,9 +1437,10 @@ check_equals 'pr still launches after the fork warning' \
 
 pr_meta 103 feat/pr-passthrough false
 launch_reset
-pwt pr 103 -- --force --model 'space value' '' >/dev/null 2>&1
-check_equals 'arguments after -- are forwarded to Pi unchanged' '4' "$(launched argc)"
-check_arg_equals 'a post-separator --force reaches Pi literally' 0 '--force'
+pwt pr 103 -- --no-session --model 'space value' '' >/dev/null 2>&1
+check_equals 'permitted PR arguments stay unchanged before policy' \
+  '8' "$(launched argc)"
+check_arg_equals 'a permitted post-separator Pi flag reaches Pi literally' 0 '--no-session'
 check_arg_equals 'a forwarded Pi option remains unchanged' 1 '--model'
 check_arg_equals 'a forwarded value preserves spaces' 2 'space value'
 check_arg_equals 'a forwarded empty argument remains present' 3 ''
@@ -1531,6 +1591,356 @@ check_fails 'pr rejects a canonical-looking URL for a different host' \
 check_equals 'wrong base-host metadata never launches Pi' '' "$(launched pwd)"
 
 rm -f "$PRIMARY/.worktreeinclude" "$PRIMARY/.env"
+
+# ----------------------------------------------------------- PR launch policy
+
+section 'pr-policy'
+
+pr_meta 121 feat/pr-policy false
+launch_reset
+check 'PR launch accepts ordinary model, thinking, and prompt arguments' \
+  pwt pr 121 -- --model 'model value' --thinking high 'prompt value'
+check_equals 'PR launch appends exactly four enforcement tokens' \
+  '9' "$(launched argc)"
+check_arg_equals 'PR launch preserves the model option first' 0 '--model'
+check_arg_equals 'PR launch preserves the model value' 1 'model value'
+check_arg_equals 'PR launch preserves the thinking option' 2 '--thinking'
+check_arg_equals 'PR launch preserves the thinking value' 3 'high'
+check_arg_equals 'PR launch preserves the prompt before policy' 4 'prompt value'
+check_arg_equals 'PR policy disables extension discovery last' 5 '--no-extensions'
+check_arg_equals 'PR policy appends the tool option' 6 '--tools'
+check_arg_equals 'PR policy appends only read-only tools' 7 'read,grep,find,ls'
+check_arg_equals 'PR policy appends the no-approve trust boundary' 8 '--no-approve'
+check_fails 'PR policy keeps AGENTS and CLAUDE context discovery enabled' \
+  launched_has_arg '--no-context-files'
+check_fails 'PR policy does not append the short context-disable alias' \
+  launched_has_arg '-nc'
+
+launch_reset
+check 'reused PR worktrees receive the same launch policy' \
+  pwt pr 121 -- --provider google
+check_equals 'reused PR launch keeps permitted arguments before policy' \
+  '6' "$(launched argc)"
+check_arg_equals 'reused PR launch preserves its provider option' 0 '--provider'
+check_arg_equals 'reused PR launch preserves its provider value' 1 'google'
+check_arg_equals 'reused PR launch disables extension discovery' 2 '--no-extensions'
+check_arg_equals 'reused PR launch appends the tool option' 3 '--tools'
+check_arg_equals 'reused PR launch appends only read-only tools' 4 'read,grep,find,ls'
+check_arg_equals 'reused PR launch appends no-approve last' 5 '--no-approve'
+
+launch_reset
+check 'PR policy preserves dash-leading values using Pi parser semantics' \
+  pwt pr 121 -- --name -review --system-prompt --approve
+check_equals 'dash-leading values remain before the enforced suffix' \
+  '8' "$(launched argc)"
+check_arg_equals 'dash-leading name option remains unchanged' 0 '--name'
+check_arg_equals 'dash-leading name value remains unchanged' 1 '-review'
+check_arg_equals 'system prompt option remains unchanged' 2 '--system-prompt'
+check_arg_equals 'option-looking system prompt remains a value' 3 '--approve'
+check_arg_equals 'dash-leading value launch still disables extensions' \
+  4 '--no-extensions'
+check_arg_equals 'dash-leading value launch still appends tools' 5 '--tools'
+check_arg_equals 'dash-leading value launch still limits tools' \
+  6 'read,grep,find,ls'
+check_arg_equals 'dash-leading value launch still appends no-approve last' \
+  7 '--no-approve'
+
+launch_reset
+check 'PR policy permits audited policy-neutral Pi flags' \
+  pwt pr 121 -- --no-session --offline -p 'review prompt'
+check_equals 'audited flags remain before the policy suffix' \
+  '8' "$(launched argc)"
+check_arg_equals 'audited no-session flag remains unchanged' 0 '--no-session'
+check_arg_equals 'audited offline flag remains unchanged' 1 '--offline'
+check_arg_equals 'audited print flag remains unchanged' 2 '-p'
+check_arg_equals 'audited print prompt remains unchanged' 3 'review prompt'
+check_arg_equals 'audited flag launch still appends policy last' \
+  7 '--no-approve'
+
+launch_reset
+# Pi treats a three-dash token after --print as its prompt, not as an option.
+# This catches a validator that scans the prompt as an unknown flag instead.
+check 'PR policy preserves Pi print prompts beginning with three dashes' \
+  pwt pr 121 -- -p '--- review this change'
+check_equals 'three-dash print prompts remain before the policy suffix' \
+  '6' "$(launched argc)"
+check_arg_equals 'three-dash print option remains unchanged' 0 '-p'
+check_arg_equals 'three-dash print prompt remains unchanged' \
+  1 '--- review this change'
+check_arg_equals 'three-dash print launch still appends policy last' \
+  5 '--no-approve'
+
+launch_reset
+# Pi leaves a dash-leading invalid TUI value for its next parser iteration.
+# This catches a validator that skips a hidden policy override as that value.
+check 'PR policy accepts a valid TUI mode' \
+  pwt pr 121 -- --tui-mode fullscreen
+check_equals 'valid TUI mode remains before the policy suffix' \
+  '6' "$(launched argc)"
+check_arg_equals 'valid TUI mode option remains unchanged' 0 '--tui-mode'
+check_arg_equals 'valid TUI mode value remains unchanged' 1 'fullscreen'
+check_arg_equals 'valid TUI mode launch still appends policy last' \
+  5 '--no-approve'
+
+launch_reset
+check 'PR policy accepts a non-RPC output mode' \
+  pwt pr 121 -- --mode json
+check_equals 'non-RPC output mode remains before the policy suffix' \
+  '6' "$(launched argc)"
+check_arg_equals 'non-RPC mode option remains unchanged' 0 '--mode'
+check_arg_equals 'non-RPC mode value remains unchanged' 1 'json'
+check_arg_equals 'non-RPC mode launch still appends policy last' \
+  5 '--no-approve'
+
+check_pr_policy_rejects 'PR policy rejects --tools overrides' \
+  --tools read,bash
+check_pr_policy_rejects 'PR policy rejects -t overrides' -t read,bash
+check_pr_policy_rejects 'PR policy rejects attached --tools overrides' \
+  --tools=read,bash
+check_pr_policy_rejects 'PR policy rejects attached -t overrides' -tread,bash
+# Pi applies excludeTools after tools, so the final --tools suffix alone cannot
+# prevent a forwarded exclusion from removing an enforced read-only tool.
+check_pr_policy_rejects 'PR policy rejects --exclude-tools overrides' \
+  --exclude-tools read
+check_pr_policy_rejects 'PR policy rejects -xt overrides' -xt read
+check_pr_policy_rejects 'PR policy rejects --approve' --approve
+check_pr_policy_rejects 'PR policy rejects -a' -a
+check_pr_policy_rejects 'PR policy rejects --no-context-files' \
+  --no-context-files
+check_pr_policy_rejects 'PR policy rejects -nc' -nc
+check_pr_policy_rejects 'PR policy rejects --extension paths' \
+  --extension ./review.ts
+check_pr_policy_rejects 'PR policy rejects --extension= paths' \
+  --extension=./review.ts
+check_pr_policy_rejects 'PR policy rejects -e paths' -e ./review.ts
+check_pr_policy_rejects 'PR policy rejects attached -e paths' -e./review.ts
+check_pr_policy_rejects 'PR policy rejects --session selection' \
+  --session saved.jsonl
+check_pr_policy_rejects 'PR policy rejects --session-id selection' \
+  --session-id saved-id
+check_pr_policy_rejects 'PR policy rejects --session-dir overrides' \
+  --session-dir /tmp/poisoned
+check_pr_policy_rejects 'PR policy rejects --resume selection' --resume
+check_pr_policy_rejects 'PR policy rejects -r selection' -r
+check_pr_policy_rejects 'PR policy rejects --continue selection' --continue
+check_pr_policy_rejects 'PR policy rejects -c selection' -c
+check_pr_policy_rejects 'PR policy rejects --fork selection' --fork saved.jsonl
+check_pr_policy_rejects 'PR policy rejects a forwarded option terminator' --
+check_pr_policy_rejects 'PR policy rejects unknown future long options' \
+  --future-value
+check_pr_policy_rejects 'PR policy rejects unknown short options' -z
+check_pr_policy_rejects 'PR policy rejects unsupported model equals form' \
+  --model=gpt-4o
+check_pr_policy_rejects 'PR policy rejects unsupported api-key equals form' \
+  --api-key=not-a-real-key
+check_pr_policy_rejects 'PR policy rejects invalid TUI mode values' \
+  --tui-mode invalid
+check_pr_policy_rejects 'PR policy rejects dangling TUI mode values' \
+  --tui-mode
+check_output 'dangling TUI mode reports the policy diagnostic' \
+  'needs regular or fullscreen after Pi option: --tui-mode' \
+  pwt pr 121 -- --tui-mode
+check_pr_policy_rejects 'PR policy does not let TUI mode hide extensions' \
+  --tui-mode --extension ./review.ts
+check_pr_policy_rejects 'PR policy does not let TUI mode hide context disabling' \
+  --tui-mode --no-context-files
+# Pi does not consume ordinary dash-leading options as --print prompts. These
+# catch a validator that skips every token after --print instead of only ---*.
+check_pr_policy_rejects 'PR policy checks extensions after print mode' \
+  -p --extension ./review.ts
+check_pr_policy_rejects 'PR policy checks trust flags after print mode' \
+  --print --approve
+check_pr_policy_rejects 'PR policy rejects RPC mode outside the tool boundary' \
+  --mode rpc
+check_pr_policy_rejects 'PR policy rejects session export mode' \
+  --export /tmp/private-session.jsonl /tmp/session.html
+# These commands run before Pi creates the restricted agent session. Removing
+# this guard would let the stub launch and make every assertion below fail.
+for reserved_command in auth install remove uninstall update list config; do
+  check_pr_policy_rejects \
+    "PR policy rejects Pi pre-session command $reserved_command" \
+    "$reserved_command"
+done
+check_pr_policy_rejects 'PR policy rejects dangling value-taking options' --model
+for value_option in \
+  --provider --api-key --system-prompt --append-system-prompt \
+  --name -n --models --thinking --skill \
+  --prompt-template --theme; do
+  check_pr_policy_rejects \
+    "PR policy rejects dangling value-taking option $value_option" \
+    "$value_option"
+done
+
+# Pi migrates a project .pi/commands directory before it creates the agent
+# session. PR launch must refuse that write even when the directory is tracked.
+MIGRATION_PUSH="$TMP/pr-migration-push"
+git clone -q "$REMOTE" "$MIGRATION_PUSH"
+git -C "$MIGRATION_PUSH" checkout -q -b feat/pr-migration-dir origin/stable
+mkdir -p "$MIGRATION_PUSH/.pi/commands"
+printf 'legacy prompt\n' >"$MIGRATION_PUSH/.pi/commands/review.md"
+git -C "$MIGRATION_PUSH" add .pi/commands/review.md
+git -C "$MIGRATION_PUSH" commit -qm 'add legacy project command'
+git -C "$MIGRATION_PUSH" push -q origin feat/pr-migration-dir
+migration_dir_oid=$(git -C "$MIGRATION_PUSH" rev-parse HEAD)
+printf 'headRefName=%s\nisCrossRepository=false\nheadRepositoryOwner=owner\nheadRepository=project\nurl=%s\nheadRefOid=%s\n' \
+  'feat/pr-migration-dir' 'https://github.com/owner/project/pull/122' \
+  "$migration_dir_oid" >"$PWT_GH_PRS/122"
+
+launch_reset
+check_fails 'PR policy refuses a tracked startup migration' pwt pr 122
+check_output 'tracked migration refusal explains the pre-session write' \
+  'would migrate .pi/commands to .pi/prompts before launch' pwt pr 122
+check_equals 'tracked migration refusal never launches Pi' \
+  '' "$(launched pwd)"
+check 'tracked migration refusal preserves the commands directory' \
+  test -f "$MANAGED/feat-pr-migration-dir/.pi/commands/review.md"
+check 'tracked migration refusal does not create the prompts directory' \
+  test ! -e "$MANAGED/feat-pr-migration-dir/.pi/prompts"
+check_equals 'tracked migration refusal leaves the PR worktree clean' '' \
+  "$(git -C "$MANAGED/feat-pr-migration-dir" status --porcelain)"
+
+# A committed .pi symlink can redirect that migration outside the worktree.
+# Refuse the symlink itself so later external state cannot open the same path.
+MIGRATION_VICTIM="$TMP/pr-migration-victim"
+mkdir -p "$MIGRATION_VICTIM"
+printf 'outside content\n' >"$MIGRATION_VICTIM/sentinel"
+git -C "$MIGRATION_PUSH" checkout -q -B feat/pr-migration-symlink origin/stable
+ln -s "$MIGRATION_VICTIM" "$MIGRATION_PUSH/.pi"
+git -C "$MIGRATION_PUSH" add .pi
+git -C "$MIGRATION_PUSH" commit -qm 'add escaping pi symlink'
+git -C "$MIGRATION_PUSH" push -q origin feat/pr-migration-symlink
+migration_symlink_oid=$(git -C "$MIGRATION_PUSH" rev-parse HEAD)
+printf 'headRefName=%s\nisCrossRepository=false\nheadRepositoryOwner=owner\nheadRepository=project\nurl=%s\nheadRefOid=%s\n' \
+  'feat/pr-migration-symlink' 'https://github.com/owner/project/pull/123' \
+  "$migration_symlink_oid" >"$PWT_GH_PRS/123"
+
+launch_reset
+check_fails 'PR policy refuses a symlinked project config directory' pwt pr 123
+check_output 'symlinked config refusal names the unsafe path shape' \
+  'does not allow a symlinked .pi directory' pwt pr 123
+check_equals 'symlinked config refusal never launches Pi' \
+  '' "$(launched pwd)"
+check 'symlinked config refusal preserves the outside target' \
+  test -f "$MIGRATION_VICTIM/sentinel"
+check 'symlinked config refusal creates no outside commands directory' \
+  test ! -e "$MIGRATION_VICTIM/commands"
+check 'symlinked config refusal creates no outside prompts directory' \
+  test ! -e "$MIGRATION_VICTIM/prompts"
+
+# Relative Pi directory overrides resolve after pwt enters the PR worktree.
+# Scrubbing them prevents a nested tracked symlink from redirecting migrations.
+AGENT_DIR_VICTIM="$TMP/pr-agent-dir-victim"
+mkdir -p "$AGENT_DIR_VICTIM/commands"
+printf 'outside agent content\n' >"$AGENT_DIR_VICTIM/commands/review.md"
+PACKAGE_DIR_VICTIM="$TMP/pr-package-dir-victim/session-dir"
+git -C "$MIGRATION_PUSH" checkout -q -B feat/pr-agent-dir-env origin/stable
+mkdir -p "$MIGRATION_PUSH/.pi" "$MIGRATION_PUSH/.evil"
+ln -s "$AGENT_DIR_VICTIM" "$MIGRATION_PUSH/.pi/agent"
+printf '{"name":"pi-fixture","piConfig":{"configDir":".evil"}}\n' \
+  >"$MIGRATION_PUSH/package.json"
+printf '{"sessionDir":"%s"}\n' "$PACKAGE_DIR_VICTIM" \
+  >"$MIGRATION_PUSH/.evil/settings.json"
+git -C "$MIGRATION_PUSH" add .pi/agent package.json .evil/settings.json
+git -C "$MIGRATION_PUSH" commit -qm 'add cwd-sensitive Pi overrides'
+git -C "$MIGRATION_PUSH" push -q origin feat/pr-agent-dir-env
+agent_dir_oid=$(git -C "$MIGRATION_PUSH" rev-parse HEAD)
+printf 'headRefName=%s\nisCrossRepository=false\nheadRepositoryOwner=owner\nheadRepository=project\nurl=%s\nheadRefOid=%s\n' \
+  'feat/pr-agent-dir-env' 'https://github.com/owner/project/pull/124' \
+  "$agent_dir_oid" >"$PWT_GH_PRS/124"
+
+mkdir -p "$HOME/.pi/agent"
+printf '{"sessionDir":".pi/agent/sessions"}\n' \
+  >"$HOME/.pi/agent/settings.json"
+launch_reset
+check 'PR policy safely launches with cwd-sensitive Pi inputs hardened' \
+  pwt_with_pi_env .pi/agent '' . pr 124
+check_equals 'Pi agent-directory override is absent from PR launch' \
+  '<unset>' "$(launched PI_CODING_AGENT_DIR)"
+check_equals 'PR launch pins an absolute trusted session directory' \
+  "$PRIMARY/.git/pwt/sessions/feat-pr-agent-dir-env" \
+  "$(launched PI_CODING_AGENT_SESSION_DIR)"
+check_equals 'Pi package-directory override is absent from PR launch' \
+  '<unset>' "$(launched PI_PACKAGE_DIR)"
+check 'scrubbed overrides preserve the outside commands directory' \
+  test -f "$AGENT_DIR_VICTIM/commands/review.md"
+check 'scrubbed overrides create no outside prompts directory' \
+  test ! -e "$AGENT_DIR_VICTIM/prompts"
+check 'package override creates no outside session directory' \
+  test ! -e "$PACKAGE_DIR_VICTIM"
+rm -f "$HOME/.pi/agent/settings.json"
+
+# Pi loads tracked project settings before --no-approve takes effect. Refuse
+# the file so an attacker-controlled sessionDir cannot write outside the PR.
+SETTINGS_VICTIM="$TMP/pr-settings-victim/session-dir"
+git -C "$MIGRATION_PUSH" checkout -q -B feat/pr-project-settings origin/stable
+mkdir -p "$MIGRATION_PUSH/.pi"
+printf '{"sessionDir":"%s"}\n' "$SETTINGS_VICTIM" \
+  >"$MIGRATION_PUSH/.pi/settings.json"
+git -C "$MIGRATION_PUSH" add .pi/settings.json
+git -C "$MIGRATION_PUSH" commit -qm 'add external session directory setting'
+git -C "$MIGRATION_PUSH" push -q origin feat/pr-project-settings
+settings_oid=$(git -C "$MIGRATION_PUSH" rev-parse HEAD)
+printf 'headRefName=%s\nisCrossRepository=false\nheadRepositoryOwner=owner\nheadRepository=project\nurl=%s\nheadRefOid=%s\n' \
+  'feat/pr-project-settings' 'https://github.com/owner/project/pull/125' \
+  "$settings_oid" >"$PWT_GH_PRS/125"
+
+launch_reset
+check_fails 'PR policy refuses tracked project settings on fresh checkout' \
+  pwt pr 125
+check_equals 'fresh project-settings refusal never launches Pi' \
+  '' "$(launched pwd)"
+launch_reset
+check_fails 'PR policy refuses tracked project settings on reuse' pwt pr 125
+check_output 'project-settings refusal explains the pre-session trust gap' \
+  'does not allow .pi/settings.json before trust enforcement' pwt pr 125
+check_equals 'reused project-settings refusal never launches Pi' \
+  '' "$(launched pwd)"
+check 'project-settings refusal creates no outside session directory' \
+  test ! -e "$SETTINGS_VICTIM"
+
+# Pi's env-based interpreter and helper lookup runs after pwt enters the PR.
+# A relative PATH component could therefore execute a tracked PR binary first.
+PATH_ATTACK_BASH_MARKER="$TMP/pr-path-bash-ran"
+PATH_ATTACK_GIT_MARKER="$TMP/pr-path-git-ran"
+export PATH_ATTACK_BASH_MARKER PATH_ATTACK_GIT_MARKER
+git -C "$MIGRATION_PUSH" checkout -q -B feat/pr-relative-path origin/stable
+printf '#!/bin/sh\nprintf executed >"$PATH_ATTACK_BASH_MARKER"\n' \
+  >"$MIGRATION_PUSH/bash"
+printf '#!/bin/sh\nprintf executed >"$PATH_ATTACK_GIT_MARKER"\n' \
+  >"$MIGRATION_PUSH/git"
+chmod +x "$MIGRATION_PUSH/bash" "$MIGRATION_PUSH/git"
+git -C "$MIGRATION_PUSH" add bash git
+git -C "$MIGRATION_PUSH" commit -qm 'add hostile path interpreter'
+git -C "$MIGRATION_PUSH" push -q origin feat/pr-relative-path
+path_oid=$(git -C "$MIGRATION_PUSH" rev-parse HEAD)
+printf 'headRefName=%s\nisCrossRepository=false\nheadRepositoryOwner=owner\nheadRepository=project\nurl=%s\nheadRefOid=%s\n' \
+  'feat/pr-relative-path' 'https://github.com/owner/project/pull/126' \
+  "$path_oid" >"$PWT_GH_PRS/126"
+
+launch_reset
+check_fails 'PR policy rejects relative PATH entries before Pi launch' \
+  pwt_with_path ".:$PATH" pr 126
+check_output 'relative PATH refusal names the absolute-entry requirement' \
+  'pwt pr requires absolute PATH entries' pwt_with_path ".:$PATH" pr 126
+check 'relative PATH refusal never executes the tracked interpreter' \
+  test ! -e "$PATH_ATTACK_BASH_MARKER"
+check_equals 'relative PATH refusal never launches Pi' '' "$(launched pwd)"
+
+# The guard must run before repository discovery when pwt starts inside an
+# existing PR worktree. The fixed shebang protects script startup; the early
+# validation protects the first external `git` lookup.
+pwt pr 126 >/dev/null 2>&1
+launch_reset
+check_fails 'PR policy rejects relative PATH before repository discovery' \
+  pwt_in_with_path "$MANAGED/feat-pr-relative-path" ".:$PATH" pr 126
+check_output 'early relative PATH refusal uses the policy diagnostic' \
+  'pwt pr requires absolute PATH entries' \
+  pwt_in_with_path "$MANAGED/feat-pr-relative-path" ".:$PATH" pr 126
+check 'early PATH refusal never executes the tracked Bash interpreter' \
+  test ! -e "$PATH_ATTACK_BASH_MARKER"
+check 'early PATH refusal never executes tracked Git' \
+  test ! -e "$PATH_ATTACK_GIT_MARKER"
+check_equals 'early PATH refusal never launches Pi' '' "$(launched pwd)"
 
 # ---------------------------------------------------------- PR force decisions
 
