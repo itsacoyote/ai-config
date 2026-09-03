@@ -130,6 +130,9 @@ case $args in
         if [ -n "${PWT_TEST_REMOVE_ATTEMPT:-}" ]; then
           : >"$PWT_TEST_REMOVE_ATTEMPT"
         fi
+        if [ -n "${PWT_TEST_REMOVE_LOG:-}" ]; then
+          printf '%s\n' "$*" >>"$PWT_TEST_REMOVE_LOG"
+        fi
         ;;
     esac
     ;;
@@ -179,6 +182,35 @@ case ${PWT_TEST_GIT_FAIL:-} in
     ;;
   remove-status)
     case $args in *' status --porcelain --untracked-files=all '*) exit 70 ;; esac
+    ;;
+  prune-status)
+    case $args in
+      *" -C $PWT_TEST_PRUNE_TARGET status --porcelain --untracked-files=all "*)
+        exit 70
+        ;;
+    esac
+    ;;
+  prune-head-after-status)
+    case $args in
+      *" -C $PWT_TEST_PRUNE_TARGET status --porcelain --untracked-files=all "*)
+        count=0
+        if [ -f "$PWT_TEST_PRUNE_STATUS_COUNT" ]; then
+          IFS= read -r count <"$PWT_TEST_PRUNE_STATUS_COUNT"
+        fi
+        count=$((count + 1))
+        printf '%s\n' "$count" >"$PWT_TEST_PRUNE_STATUS_COUNT"
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        if [ "$count" -eq 2 ]; then
+          printf 'committed after status\n' \
+            >"$PWT_TEST_PRUNE_TARGET/prune-late-head.txt"
+          "$PWT_TEST_REAL_GIT" -C "$PWT_TEST_PRUNE_TARGET" \
+            add prune-late-head.txt || exit
+          "$PWT_TEST_REAL_GIT" -C "$PWT_TEST_PRUNE_TARGET" \
+            commit -qm 'advance after prune status' || exit
+        fi
+        exit 0
+        ;;
+    esac
     ;;
   remove-index-list)
     case $args in *' ls-files -v -z '*) exit 70 ;; esac
@@ -413,8 +445,11 @@ chmod +x "$BIN/pi"
 export PWT_GH_UNAVAILABLE="$TMP/gh-unavailable"
 export PWT_GH_PRS="$TMP/gh-prs"
 export PWT_GH_OTHER_PRS="$TMP/gh-other-prs"
+export PWT_GH_STATES="$TMP/gh-states"
+export PWT_GH_FAILURES="$TMP/gh-failures"
 export PWT_GH_LOG="$TMP/gh.log"
-mkdir -p "$PWT_GH_PRS" "$PWT_GH_OTHER_PRS"
+mkdir -p "$PWT_GH_PRS" "$PWT_GH_OTHER_PRS" \
+  "$PWT_GH_STATES" "$PWT_GH_FAILURES"
 : >"$PWT_GH_LOG"
 cat >"$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -422,6 +457,7 @@ if [ -f "$PWT_GH_UNAVAILABLE" ]; then
   printf 'gh: could not authenticate\n' >&2
   exit 1
 fi
+printf '%s\n' "$*" >>"$PWT_GH_LOG"
 if [ "$1" = auth ] && [ "$2" = status ]; then
   exit 0
 fi
@@ -456,11 +492,28 @@ case $repo_selector in
     ;;
 esac
 if [ "$1" = pr ] && [ "$2" = view ]; then
-  meta="$meta_root/$3"
+  requested=$3
+  number=${requested##*/}
+  meta="$meta_root/$number"
   if [ ! -f "$meta" ]; then
     printf 'could not resolve pull request %s\n' "$3" >&2
     exit 1
   fi
+  case " $* " in
+    *' --json state,'*)
+      branch=$(sed -n 's/^headRefName=//p' "$meta")
+      state_name=$(printf '%s' "$branch" | tr '/' '-')
+      if [ -f "$PWT_GH_FAILURES/$state_name" ]; then
+        printf 'gh: simulated pull request state failure\n' >&2
+        exit 70
+      fi
+      if [ -f "$PWT_GH_STATES/$state_name" ]; then
+        sed -n 1p "$PWT_GH_STATES/$state_name"
+      else
+        printf 'OPEN\n'
+      fi
+      ;;
+  esac
   sed -n 's/^headRefName=//p' "$meta"
   sed -n 's/^isCrossRepository=//p' "$meta"
   sed -n 's/^headRepositoryOwner=//p' "$meta"
@@ -469,8 +522,63 @@ if [ "$1" = pr ] && [ "$2" = view ]; then
   sed -n 's/^headRefOid=//p' "$meta"
   exit 0
 fi
+if [ "$1" = pr ] && [ "$2" = list ]; then
+  branch=''
+  want_head=0
+  want_state=0
+  state_scope=''
+  for argument in "$@"; do
+    if [ "$want_head" = 1 ]; then
+      branch=$argument
+      want_head=0
+      continue
+    fi
+    if [ "$want_state" = 1 ]; then
+      state_scope=$argument
+      want_state=0
+      continue
+    fi
+    case $argument in
+      --head) want_head=1 ;;
+      --head=*) branch=${argument#--head=} ;;
+      --state) want_state=1 ;;
+      --state=*) state_scope=${argument#--state=} ;;
+    esac
+  done
+  if [ "$state_scope" != all ]; then
+    printf 'gh: prune state lookup must include merged pull requests\n' >&2
+    exit 64
+  fi
+  state_name=$(printf '%s' "$branch" | tr '/' '-')
+  if [ -f "$PWT_GH_FAILURES/$state_name" ]; then
+    printf 'gh: simulated pull request state failure\n' >&2
+    exit 70
+  fi
+  if [ -f "$PWT_GH_STATES/$state_name" ]; then
+    cat "$PWT_GH_STATES/$state_name"
+  fi
+
+  if [ "${PWT_TEST_PRUNE_MUTATION:-}" = dirty-after-state ] &&
+    [ "$branch" = "$PWT_TEST_PRUNE_BRANCH" ]; then
+    printf 'late edit\n' >"$PWT_TEST_PRUNE_TARGET/late.txt"
+  elif [ "${PWT_TEST_PRUNE_MUTATION:-}" = symlink-after-state ] &&
+    [ "$branch" = "$PWT_TEST_PRUNE_BRANCH" ]; then
+    mv "$PWT_TEST_PRUNE_TARGET" "$PWT_TEST_PRUNE_OUTSIDE"
+    ln -s "$PWT_TEST_PRUNE_OUTSIDE" "$PWT_TEST_PRUNE_TARGET"
+  elif [ "${PWT_TEST_PRUNE_MUTATION:-}" = move-after-state ] &&
+    [ "$branch" = "$PWT_TEST_PRUNE_BRANCH" ]; then
+    "$PWT_TEST_REAL_GIT" -C "$PWT_TEST_PRUNE_PRIMARY" worktree move \
+      "$PWT_TEST_PRUNE_TARGET" "$PWT_TEST_PRUNE_MOVED"
+  elif [ "${PWT_TEST_PRUNE_MUTATION:-}" = head-after-state ] &&
+    [ "$branch" = "$PWT_TEST_PRUNE_BRANCH" ]; then
+    printf 'new committed head\n' >"$PWT_TEST_PRUNE_TARGET/prune-head-change.txt"
+    "$PWT_TEST_REAL_GIT" -C "$PWT_TEST_PRUNE_TARGET" add prune-head-change.txt
+    "$PWT_TEST_REAL_GIT" -C "$PWT_TEST_PRUNE_TARGET" \
+      commit -qm 'advance during prune classification'
+  fi
+  exit 0
+fi
 if [ "$1" = pr ] && [ "$2" = checkout ]; then
-  printf '%s\n' "$*" >>"$PWT_GH_LOG"
   number=$3
   meta="$meta_root/$number"
   if [ ! -f "$meta" ]; then
@@ -602,6 +710,20 @@ pr_meta() {
   printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
     "$2" "$3" "${4:-owner}" "${5:-project}" \
     "https://github.com/owner/project/pull/$1" "$oid" >"$PWT_GH_PRS/$1"
+}
+
+pr_state() {
+  local branch=$1 state=$2 oid=${3:-} cross=${4:-false}
+  local head_owner=${5:-owner} head_repo=${6:-project} url=${7:-}
+  [ -n "$oid" ] || oid=$(git -C "$PRIMARY" rev-parse "$branch") || return 1
+  [ -n "$url" ] || url=https://github.com/owner/project/pull/9000
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    "$state" "$branch" "$cross" "$head_owner" "$head_repo" "$url" "$oid" \
+    >"$PWT_GH_STATES/$(printf '%s' "$branch" | tr '/' '-')"
+}
+
+pr_state_failure() {
+  : >"$PWT_GH_FAILURES/$(printf '%s' "$1" | tr '/' '-')"
 }
 
 sync_pr_metadata_oid() {
@@ -805,6 +927,9 @@ pwt_in() {
   (cd "$dir" && "$PWT" "$@")
 }
 pwt() { pwt_in "$PRIMARY" "$@"; }
+pwt_utf8() {
+  (export LC_ALL=en_US.UTF-8; pwt "$@")
+}
 pwt_with_pi_env() {
   local agent_dir=$1 session_dir=$2 package_dir=$3
   shift 3
@@ -1020,6 +1145,15 @@ check_not_contains 'a malformed credentialed remote is not echoed in an error' \
   'user:supersecret' "$credentialed_output"
 check_contains 'a malformed credentialed remote still gives a useful error' \
   'cannot derive repository from origin remote' "$credentialed_output"
+
+utf8_remote_output=$(LC_ALL=en_US.UTF-8 \
+  probe_remote 'https://host/ownér/repo' || true)
+check_equals 'a UTF-8 locale cannot widen remote identity allowlists' '' \
+  "$(root_value "$utf8_remote_output" managed_root)"
+utf8_host_output=$(LC_ALL=en_US.UTF-8 \
+  probe_remote 'https://höst/owner/repo' || true)
+check_equals 'a UTF-8 locale cannot widen remote host allowlists' '' \
+  "$(root_value "$utf8_host_output" managed_root)"
 
 (cd "$PRIMARY" && git remote set-url origin "$REMOTE")
 
@@ -1273,6 +1407,12 @@ check_fails 'new rejects a ref-valid branch unsafe as a path segment' \
   pwt new 'feat/a;b'
 check_output 'new reports its safe path-segment guard' \
   'safe directory name' pwt new 'feat/a;b'
+check 'git accepts the UTF-8 branch used to isolate locale collation' \
+  git -C "$PRIMARY" check-ref-format --branch 'feat/ownér'
+check_output 'a UTF-8 locale cannot widen the worktree-name allowlist' \
+  'safe directory name' pwt_utf8 new 'feat/ownér'
+check_ref_absent 'the rejected UTF-8 path segment leaves no branch' \
+  'refs/heads/feat/ownér'
 check_fails 'new requires exactly one branch' pwt new
 check 'branch validation cannot escape the managed root' \
   test ! -e "$HOME/github/.worktrees/owner/evil"
@@ -1614,6 +1754,8 @@ check_equals 'include-copy failure never launches Pi' '' "$(launched pwd)"
 
 check_fails 'pr requires a pull request number' pwt pr
 check_fails 'pr rejects a non-numeric pull request number' pwt pr not-a-number
+check_output 'PR numbers stay ASCII-only under a UTF-8 locale' \
+  'pull request must be a number' pwt_utf8 pr 'ↅ'
 check_fails 'pr rejects an unknown option before the separator' pwt pr 101 --wat
 check_fails 'pr exits non-zero when the pull request does not exist' pwt pr 999
 check_output 'pr names the unresolved pull request number' '999' pwt pr 999
@@ -1630,6 +1772,22 @@ mv "$PWT_GH_PRS/106.tmp" "$PWT_GH_PRS/106"
 launch_reset
 check_fails 'pr rejects malformed head object metadata' pwt pr 106
 check_equals 'malformed head object metadata never launches Pi' '' "$(launched pwd)"
+
+pr_meta 109 feat/pr-utf8-invalid-oid false
+utf8_invalid_oid=''
+utf8_oid_i=0
+while [ "$utf8_oid_i" -lt 40 ]; do
+  utf8_invalid_oid="${utf8_invalid_oid}ↅ"
+  utf8_oid_i=$((utf8_oid_i + 1))
+done
+sed "s/^headRefOid=.*/headRefOid=$utf8_invalid_oid/" "$PWT_GH_PRS/109" \
+  >"$PWT_GH_PRS/109.tmp"
+mv "$PWT_GH_PRS/109.tmp" "$PWT_GH_PRS/109"
+launch_reset
+check_output 'head object IDs stay ASCII-only under a UTF-8 locale' \
+  'invalid head object ID' pwt_utf8 pr 109
+check_equals 'a locale-collating non-hex object ID never launches Pi' \
+  '' "$(launched pwd)"
 
 pr_meta 107 feat/pr-invalid-url false
 sed 's#^url=.*#url=not-a-canonical-pr-url#' "$PWT_GH_PRS/107" \
@@ -3054,6 +3212,18 @@ check 'the removed worktree directory is gone' test ! -d "$MANAGED/feat-removabl
 check 'remove keeps the branch by default' \
   git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/removable
 
+# Bash 3.2 expands ASCII ranges with locale collation, where uppercase H can
+# match [a-z]. Run the real hidden-index check under UTF-8 so ordinary tracked
+# files cannot be mistaken for assume-unchanged state.
+launch_reset
+pwt new feat/locale-collation >/dev/null 2>&1
+check 'remove recognizes an ordinary clean worktree under a UTF-8 locale' \
+  pwt_utf8 remove feat/locale-collation
+check 'UTF-8 removal deletes the clean worktree' \
+  test ! -e "$MANAGED/feat-locale-collation"
+check 'hidden-index inspection pins bytewise collation locally' \
+  grep -qF 'local LC_ALL=C path=$1 list_file record flag rel' "$PWT"
+
 # An interrupted preparation leaves shared Git state that blocks reuse. Explicit
 # removal is the recovery path, so it must clear that state after Git removes
 # the worktree.
@@ -3605,6 +3775,580 @@ else
 fi
 check 'remove status explicitly inspects dirty submodules' \
   grep -qF -- '--ignore-submodules=none' "$PWT"
+
+# ---------------------------------------------------- dry-run-first pruning
+
+section 'prune'
+
+# Cover every PR state that controls candidacy. A missing state fixture is an
+# explicit no-PR result from the gh boundary, not a command failure.
+launch_reset
+for b in prune-merged prune-open prune-none prune-closed prune-dirty; do
+  pwt new "feat/$b" >/dev/null 2>&1
+done
+pr_state feat/prune-merged MERGED
+pr_state feat/prune-open OPEN
+pr_state feat/prune-closed CLOSED
+pr_state feat/prune-dirty MERGED
+printf 'wip\n' >"$MANAGED/feat-prune-dirty/wip.txt"
+
+: >"$PWT_GH_LOG"
+prune_dry_status=0
+prune_dry=$(pwt prune 2>&1) || prune_dry_status=$?
+if [ "$prune_dry_status" -eq 0 ]; then
+  ok 'prune dry run succeeds'
+else
+  not_ok "prune dry run succeeds (got: $(printf '%s' "$prune_dry" | tr '\n' '|'))"
+fi
+check 'prune without --yes removes nothing' \
+  test -d "$MANAGED/feat-prune-merged"
+check_contains 'prune dry run lists the merged candidate' \
+  'feat/prune-merged' "$prune_dry"
+check_output 'prune pins merge-state queries to the resolved origin' \
+  '--repo github.com/owner/project' cat "$PWT_GH_LOG"
+check_equals 'prune probes GitHub authentication once per run' '1' \
+  "$(grep -c '^auth status$' "$PWT_GH_LOG")"
+check_contains 'prune reports an incomplete PR marker as unverified' \
+  'feat/pr-reuse-partial-marker — pull request is UNVERIFIED' "$prune_dry"
+check_contains 'prune reports a malformed PR marker as unverified' \
+  'feat/pr-reuse-malformed-marker — pull request is UNVERIFIED' "$prune_dry"
+
+# The candidate and left-alone reports share a branch/path shape, so scope
+# assertions to the correct output block instead of grepping the whole result.
+prune_candidates=$(printf '%s\n' "$prune_dry" | sed -n '/would remove/,$p')
+prune_left_alone=$(printf '%s\n' "$prune_dry" | sed -n '1,/would remove/p')
+for pair in \
+  'prune-open:still open' \
+  'prune-none:no pull request' \
+  'prune-closed:closed but unmerged' \
+  'prune-dirty:merged but dirty'; do
+  b=${pair%%:*}
+  why=${pair#*:}
+  check_not_contains "prune never selects a worktree that is $why (feat/$b)" \
+    "feat/$b" "$prune_candidates"
+  check_contains "prune explains why it left feat/$b alone" \
+    "feat/$b" "$prune_left_alone"
+done
+
+PRUNE_REMOVE_LOG="$TMP/prune-remove.log"
+: >"$PRUNE_REMOVE_LOG"
+PWT_TEST_REMOVE_LOG="$PRUNE_REMOVE_LOG" pwt prune --yes >/dev/null 2>&1
+check 'prune --yes removes the merged clean worktree' \
+  test ! -e "$MANAGED/feat-prune-merged"
+check 'prune --yes leaves the still-open worktree' \
+  test -d "$MANAGED/feat-prune-open"
+check 'prune --yes leaves the worktree with no pull request' \
+  test -d "$MANAGED/feat-prune-none"
+check 'prune --yes leaves the closed-but-unmerged worktree' \
+  test -d "$MANAGED/feat-prune-closed"
+check 'prune --yes leaves the merged-but-dirty worktree' \
+  test -d "$MANAGED/feat-prune-dirty"
+check 'prune --yes preserves a worktree with incomplete PR markers' \
+  test -d "$MANAGED/feat-pr-reuse-partial-marker"
+check 'prune --yes preserves a worktree with malformed PR markers' \
+  test -d "$MANAGED/feat-pr-reuse-malformed-marker"
+check 'prune keeps the branch of every removed worktree' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/prune-merged
+check_output 'applied pruning removes the exact dry-run candidate path' \
+  "worktree remove $MANAGED/feat-prune-merged" cat "$PRUNE_REMOVE_LOG"
+
+# A branch name is not a PR identity. An old merged PR cannot authorize
+# deletion after the local branch advances, and a same-named fork PR cannot
+# authorize deletion of an ordinary same-repository worktree.
+launch_reset
+pwt new feat/prune-advanced-after-merge >/dev/null 2>&1
+pr_state feat/prune-advanced-after-merge MERGED
+printf 'advanced locally\n' \
+  >"$MANAGED/feat-prune-advanced-after-merge/advanced.txt"
+git -C "$MANAGED/feat-prune-advanced-after-merge" add advanced.txt
+git -C "$MANAGED/feat-prune-advanced-after-merge" \
+  commit -qm 'advance after merged pull request'
+prune_advanced=$(pwt prune 2>&1)
+prune_advanced_candidates=$(printf '%s\n' "$prune_advanced" | \
+  sed -n '/would remove/,$p')
+check_not_contains 'prune does not advertise a branch advanced after its merge' \
+  'feat/prune-advanced-after-merge' "$prune_advanced_candidates"
+check_contains 'prune reports the advanced branch as unverified' \
+  'feat/prune-advanced-after-merge — pull request is UNVERIFIED' \
+  "$prune_advanced"
+check 'prune --yes preserves a branch advanced after its merge' \
+  pwt prune --yes
+check 'the advanced clean worktree survives applied pruning' \
+  test -d "$MANAGED/feat-prune-advanced-after-merge"
+
+launch_reset
+pwt new feat/prune-same-name-fork >/dev/null 2>&1
+pr_state feat/prune-same-name-fork MERGED '' true fork-owner fork-project
+prune_fork_name=$(pwt prune 2>&1)
+prune_fork_candidates=$(printf '%s\n' "$prune_fork_name" | \
+  sed -n '/would remove/,$p')
+check_not_contains 'prune does not advertise a same-named fork PR' \
+  'feat/prune-same-name-fork' "$prune_fork_candidates"
+check 'prune --yes preserves the ordinary branch matched by a fork PR' \
+  pwt prune --yes
+check 'the worktree matched only by a same-named fork survives pruning' \
+  test -d "$MANAGED/feat-prune-same-name-fork"
+
+# A fork worktree made by `pwt pr` has an exact canonical-URL marker, so its
+# merged PR can be verified without weakening the ordinary branch-name lookup.
+pr_meta 901 feat/prune-recorded-fork true fork-owner fork-project
+pwt pr 901 >/dev/null 2>&1
+pr_state feat/prune-recorded-fork MERGED
+: >"$PWT_GH_LOG"
+prune_recorded_fork=$(pwt prune 2>&1)
+prune_recorded_candidates=$(printf '%s\n' "$prune_recorded_fork" | \
+  sed -n '/would remove/,$p')
+check_contains 'prune accepts a merged fork worktree with an exact PR marker' \
+  'feat/prune-recorded-fork' "$prune_recorded_candidates"
+check_output 'prune verifies a recorded fork by its canonical PR URL' \
+  'pr view https://github.com/owner/project/pull/901' cat "$PWT_GH_LOG"
+pwt prune --yes >/dev/null 2>&1
+check 'prune removes the exactly verified merged fork worktree' \
+  test ! -e "$MANAGED/feat-prune-recorded-fork"
+check 'prune preserves the branch of a removed fork worktree' \
+  git -C "$PRIMARY" show-ref --verify --quiet \
+    refs/heads/feat/prune-recorded-fork
+
+rm -f "$PWT_GH_STATES/feat-prune-advanced-after-merge" \
+  "$PWT_GH_STATES/feat-prune-same-name-fork" \
+  "$PWT_GH_STATES/feat-prune-recorded-fork"
+pwt remove feat/prune-advanced-after-merge >/dev/null 2>&1
+pwt remove feat/prune-same-name-fork >/dev/null 2>&1
+
+# A worktree containing the caller is reported but never removed.
+launch_reset
+pwt new feat/prune-self >/dev/null 2>&1
+pr_state feat/prune-self MERGED
+prune_self_out=$(pwt_in "$MANAGED/feat-prune-self" prune --yes 2>&1)
+check 'prune leaves the worktree containing the caller' \
+  test -d "$MANAGED/feat-prune-self"
+check_contains 'prune explains the caller-current skip' \
+  'you are standing in it' "$prune_self_out"
+check 'prune removes that worktree once the caller is elsewhere' pwt prune --yes
+check 'the former caller-current worktree is gone afterwards' \
+  test ! -e "$MANAGED/feat-prune-self"
+
+# Git's lock is an explicit keep signal. The dry run must report it accurately
+# instead of promising a removal that the later Git command will refuse.
+launch_reset
+pwt new feat/prune-locked >/dev/null 2>&1
+pr_state feat/prune-locked MERGED
+git -C "$PRIMARY" worktree lock --reason 'keep for another process' \
+  "$MANAGED/feat-prune-locked"
+prune_locked=$(pwt prune 2>&1)
+prune_locked_candidates=$(printf '%s\n' "$prune_locked" | \
+  sed -n '/would remove/,$p')
+check_not_contains 'prune does not advertise a locked worktree as removable' \
+  'feat/prune-locked' "$prune_locked_candidates"
+check_contains 'prune reports a locked worktree as left alone' \
+  'feat/prune-locked — worktree is locked' "$prune_locked"
+check 'prune --yes succeeds while leaving a locked worktree alone' \
+  pwt prune --yes
+check 'applied pruning preserves the locked worktree' \
+  test -d "$MANAGED/feat-prune-locked"
+git -C "$PRIMARY" worktree unlock "$MANAGED/feat-prune-locked"
+rm -f "$PWT_GH_STATES/feat-prune-locked"
+pwt remove feat/prune-locked >/dev/null 2>&1
+
+# GitHub availability is checked before any candidate can be removed.
+launch_reset
+pwt new feat/prune-auth >/dev/null 2>&1
+pr_state feat/prune-auth MERGED
+touch "$PWT_GH_UNAVAILABLE"
+check_fails 'prune fails when gh is unauthenticated' pwt prune
+check_output 'prune explains the authentication failure' \
+  'prune needs gh' pwt prune
+check_fails 'prune --yes fails when gh is unauthenticated' pwt prune --yes
+check 'prune removes nothing while gh is unauthenticated' \
+  test -d "$MANAGED/feat-prune-auth"
+rm -f "$PWT_GH_UNAVAILABLE"
+
+NOGH="$TMP/nogh"
+mkdir -p "$NOGH"
+for binary in bash git sed tr head grep; do
+  ln -s "$(command -v "$binary")" "$NOGH/$binary"
+done
+pwt_without_gh() { pwt_in_with_path "$PRIMARY" "$NOGH" "$@"; }
+missing_gh_status=0
+missing_gh_out=$(pwt_without_gh prune 2>&1) || missing_gh_status=$?
+check 'prune fails when gh is not on PATH' test "$missing_gh_status" -ne 0
+if printf '%s\n' "$missing_gh_out" | grep -qF 'not on PATH'; then
+  ok 'prune distinguishes missing gh from failed authentication'
+else
+  not_ok "prune distinguishes missing gh from failed authentication (got: $missing_gh_out)"
+fi
+
+# Parser tests use a clean merged fixture, so they fail only if their intended
+# guards run rather than because a later dirty-state check happens to reject.
+check_output 'prune rejects positional arguments' \
+  'prune takes no positional arguments' pwt prune something
+check_output 'prune rejects unknown flags' \
+  'unknown option: --force' pwt prune --force
+check_equals 'prune --help prints the shared usage' \
+  "$(pwt help)" "$(pwt prune --help)"
+
+# Keep the remaining checks focused and fast by clearing the baseline fixtures
+# that no longer participate in pruning behavior.
+rm -f "$MANAGED/feat-prune-dirty/wip.txt"
+for branch in \
+  feat/prune-open feat/prune-none feat/prune-closed \
+  feat/prune-dirty feat/prune-auth; do
+  pwt remove "$branch" >/dev/null 2>&1
+done
+
+# A per-branch API failure is not a PR state. Classification finishes before
+# removal begins, so even an earlier merged candidate survives the failed run.
+launch_reset
+pwt new feat/prune-a-before-api-failure >/dev/null 2>&1
+pwt new feat/prune-z-api-failure >/dev/null 2>&1
+pr_state feat/prune-a-before-api-failure MERGED
+pr_state_failure feat/prune-z-api-failure
+PRUNE_API_REMOVE_LOG="$TMP/prune-api-remove.log"
+: >"$PRUNE_API_REMOVE_LOG"
+: >"$PWT_GH_LOG"
+prune_api_status=0
+prune_api_out=$(
+  PWT_TEST_REMOVE_LOG="$PRUNE_API_REMOVE_LOG" pwt prune --yes 2>&1
+) || prune_api_status=$?
+check 'prune fails when one branch state query fails' \
+  test "$prune_api_status" -ne 0
+check_contains 'prune names the branch whose state is unavailable' \
+  'cannot determine pull request state for feat/prune-z-api-failure' \
+  "$prune_api_out"
+check 'a branch-state failure preserves an earlier merged candidate' \
+  test -d "$MANAGED/feat-prune-a-before-api-failure"
+check 'a branch-state failure preserves its own worktree' \
+  test -d "$MANAGED/feat-prune-z-api-failure"
+check_equals 'a branch-state failure starts no removals' '' \
+  "$(sed -n '1p' "$PRUNE_API_REMOVE_LOG")"
+prune_a_query_line=$(grep -n -- '--head feat/prune-a-before-api-failure' \
+  "$PWT_GH_LOG" | head -1 | cut -d: -f1)
+prune_z_query_line=$(grep -n -- '--head feat/prune-z-api-failure' \
+  "$PWT_GH_LOG" | head -1 | cut -d: -f1)
+check 'the merged candidate is classified before the simulated API failure' \
+  test "$prune_a_query_line" -lt "$prune_z_query_line"
+rm -f "$PWT_GH_FAILURES/feat-prune-z-api-failure" \
+  "$PWT_GH_STATES/feat-prune-a-before-api-failure"
+pwt remove feat/prune-a-before-api-failure >/dev/null 2>&1
+pwt remove feat/prune-z-api-failure >/dev/null 2>&1
+
+# Git enumeration and status failures are safety failures, never empty or clean
+# states. Each leaves the intended target untouched.
+launch_reset
+pwt new feat/prune-git-failure >/dev/null 2>&1
+pr_state feat/prune-git-failure MERGED
+check_fails 'prune fails closed when Git cannot enumerate worktrees' \
+  pwt_git_fail worktree-list prune --yes
+check_output 'prune reports failed worktree enumeration' \
+  'cannot list repository worktrees; refusing to prune' \
+  pwt_git_fail worktree-list prune --yes
+check 'worktree enumeration failure preserves the merged candidate' \
+  test -d "$MANAGED/feat-prune-git-failure"
+
+PRUNE_STATUS_ATTEMPT="$TMP/prune-status-attempt"
+prune_status=0
+prune_status_out=$(
+  export PWT_TEST_GIT_FAIL=prune-status
+  export PWT_TEST_PRUNE_TARGET="$MANAGED/feat-prune-git-failure"
+  export PWT_TEST_REMOVE_ATTEMPT="$PRUNE_STATUS_ATTEMPT"
+  pwt prune --yes 2>&1
+) || prune_status=$?
+check 'prune fails closed when candidate status inspection fails' \
+  test "$prune_status" -ne 0
+check_contains 'prune reports failed candidate status inspection' \
+  'refusing to prune' "$prune_status_out"
+check 'failed candidate status inspection never reaches removal' \
+  test ! -e "$PRUNE_STATUS_ATTEMPT"
+check 'failed candidate status inspection preserves the worktree' \
+  test -d "$MANAGED/feat-prune-git-failure"
+check_fails 'prune fails closed when index-flag inspection fails' \
+  pwt_git_fail remove-index-list prune --yes
+check_output 'prune reports failed index-flag inspection' \
+  'cannot inspect tracked-file index flags' \
+  pwt_git_fail remove-index-list prune --yes
+check 'failed index-flag inspection preserves the merged candidate' \
+  test -d "$MANAGED/feat-prune-git-failure"
+rm -f "$PWT_GH_STATES/feat-prune-git-failure"
+pwt remove feat/prune-git-failure >/dev/null 2>&1
+
+# Unexpected API output is not a new state that may silently alter deletion.
+launch_reset
+pwt new feat/prune-invalid-state >/dev/null 2>&1
+pr_state feat/prune-invalid-state UNKNOWN
+check_fails 'prune rejects an unexpected pull request state' pwt prune --yes
+check_output 'unexpected PR state fails with the branch diagnostic' \
+  'cannot determine pull request state for feat/prune-invalid-state' \
+  pwt prune --yes
+check 'unexpected PR state preserves the worktree' \
+  test -d "$MANAGED/feat-prune-invalid-state"
+rm -f "$PWT_GH_STATES/feat-prune-invalid-state"
+pwt remove feat/prune-invalid-state >/dev/null 2>&1
+
+# Bash 3.2 locale collation can make non-ASCII numerals match [0-9]. Both API
+# metadata and stored PR URLs must retain an ASCII-only pull-request identity.
+launch_reset
+pwt new feat/prune-nonascii-api-number >/dev/null 2>&1
+pr_state feat/prune-nonascii-api-number MERGED '' false owner project \
+  'https://github.com/owner/project/pull/ↅ'
+prune_nonascii_api_status=0
+prune_nonascii_api_out=$(pwt_utf8 prune --yes 2>&1) || \
+  prune_nonascii_api_status=$?
+check 'prune rejects a non-ASCII PR number from API metadata' \
+  test "$prune_nonascii_api_status" -ne 0
+check_contains 'non-ASCII API metadata fails at PR-state validation' \
+  'cannot determine pull request state for feat/prune-nonascii-api-number' \
+  "$prune_nonascii_api_out"
+check 'invalid non-ASCII API metadata never authorizes removal' \
+  test -d "$MANAGED/feat-prune-nonascii-api-number"
+rm -f "$PWT_GH_STATES/feat-prune-nonascii-api-number"
+pwt remove feat/prune-nonascii-api-number >/dev/null 2>&1
+
+launch_reset
+pwt new feat/prune-nonascii-marker-number >/dev/null 2>&1
+prune_nonascii_marker_head=$(git -C \
+  "$MANAGED/feat-prune-nonascii-marker-number" rev-parse HEAD)
+git -C "$PRIMARY" config \
+  branch.feat/prune-nonascii-marker-number.worktree-pr-url \
+  'https://github.com/owner/project/pull/ↅ'
+git -C "$PRIMARY" config \
+  branch.feat/prune-nonascii-marker-number.worktree-pr-head \
+  "$prune_nonascii_marker_head"
+prune_nonascii_marker=$(pwt_utf8 prune 2>&1)
+check_contains 'prune treats a non-ASCII recorded PR number as unverified' \
+  'feat/prune-nonascii-marker-number — pull request is UNVERIFIED' \
+  "$prune_nonascii_marker"
+check 'prune preserves a worktree with a non-ASCII recorded PR number' \
+  pwt_utf8 prune --yes
+check 'the invalid recorded PR identity survives applied pruning' \
+  test -d "$MANAGED/feat-prune-nonascii-marker-number"
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/prune-nonascii-marker-number.worktree-pr-url
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/prune-nonascii-marker-number.worktree-pr-head
+pwt remove feat/prune-nonascii-marker-number >/dev/null 2>&1
+
+# Every unsafe shape is made merged-and-clean alongside a valid control. This
+# makes the containment guards, rather than PR-state filtering, decide survival.
+launch_reset
+pwt new feat/prune-containment-control >/dev/null 2>&1
+pr_state feat/prune-containment-control MERGED
+pr_state feat/stray MERGED
+primary_branch_now=$(git -C "$PRIMARY" symbolic-ref --short HEAD)
+pr_state "$primary_branch_now" MERGED
+
+git -C "$PRIMARY" worktree add -q -b feat/prune-symlink \
+  "$MANAGED/feat-prune-symlink" origin/stable 2>/dev/null
+PRUNE_SYMLINK_REAL="$MANAGED/feat-prune-symlink-real"
+mv "$MANAGED/feat-prune-symlink" "$PRUNE_SYMLINK_REAL"
+ln -s "$PRUNE_SYMLINK_REAL" "$MANAGED/feat-prune-symlink"
+pr_state feat/prune-symlink MERGED
+
+mkdir -p "$MANAGED/prune-intermediate"
+git -C "$PRIMARY" worktree add -q -b feat/prune-escape \
+  "$MANAGED/prune-intermediate/feat-prune-escape" origin/stable 2>/dev/null
+mv "$MANAGED/prune-intermediate" "$TMP/prune-outside"
+ln -s "$TMP/prune-outside" "$MANAGED/prune-intermediate"
+pr_state feat/prune-escape MERGED
+
+prune_containment_dry=$(pwt prune 2>&1)
+prune_containment_candidates=$(printf '%s\n' "$prune_containment_dry" | \
+  sed -n '/would remove/,$p')
+check_contains 'prune dry run still lists the valid containment control' \
+  'feat/prune-containment-control' "$prune_containment_candidates"
+check_not_contains 'prune dry run never advertises a physical escape' \
+  'feat/prune-escape' "$prune_containment_candidates"
+check_not_contains 'prune dry run never advertises a symlinked registration' \
+  'feat/prune-symlink' "$prune_containment_candidates"
+check_not_contains 'prune dry run never advertises an unmanaged registration' \
+  'feat/stray' "$prune_containment_candidates"
+
+pwt prune --yes >/dev/null 2>&1
+check 'prune removes a valid control beside unsafe registrations' \
+  test ! -e "$MANAGED/feat-prune-containment-control"
+check 'prune never removes an unmanaged merged worktree' test -d "$UNMANAGED"
+check 'prune never removes the primary checkout' test -d "$PRIMARY"
+check 'prune never follows a substituted worktree symlink' \
+  test -L "$MANAGED/feat-prune-symlink"
+check 'the substituted symlink target also survives pruning' \
+  test -d "$PRUNE_SYMLINK_REAL"
+check 'prune never removes a physically escaped worktree' \
+  test -d "$TMP/prune-outside/feat-prune-escape"
+check 'prune keeps an explicit primary-checkout exclusion' \
+  grep -qF 'if [[ -n $path && -n $branch && $path != "$primary" && ! -L $path ]]; then' \
+  "$PWT"
+
+rm -f "$MANAGED/feat-prune-symlink"
+mv "$PRUNE_SYMLINK_REAL" "$MANAGED/feat-prune-symlink"
+pwt remove feat/prune-symlink >/dev/null 2>&1
+git -C "$PRIMARY" worktree remove --force \
+  "$TMP/prune-outside/feat-prune-escape" >/dev/null 2>&1
+rm -f "$MANAGED/prune-intermediate"
+rm -rf "$TMP/prune-outside"
+rm -f "$PWT_GH_STATES/feat-prune-containment-control" \
+  "$PWT_GH_STATES/feat-stray" \
+  "$PWT_GH_STATES/feat-prune-symlink" \
+  "$PWT_GH_STATES/feat-prune-escape" \
+  "$PWT_GH_STATES/$(printf '%s' "$primary_branch_now" | tr '/' '-')"
+
+# State lookup is an external boundary. A late edit must be caught by the
+# shared removal guard before Git receives a destructive command.
+launch_reset
+pwt new feat/prune-late-dirty >/dev/null 2>&1
+pr_state feat/prune-late-dirty MERGED
+PRUNE_LATE_DIRTY_ATTEMPT="$TMP/prune-late-dirty-attempt"
+prune_late_dirty_status=0
+prune_late_dirty_out=$(
+  export PWT_TEST_PRUNE_MUTATION=dirty-after-state
+  export PWT_TEST_PRUNE_BRANCH=feat/prune-late-dirty
+  export PWT_TEST_PRUNE_TARGET="$MANAGED/feat-prune-late-dirty"
+  export PWT_TEST_REMOVE_ATTEMPT="$PRUNE_LATE_DIRTY_ATTEMPT"
+  pwt prune --yes 2>&1
+) || prune_late_dirty_status=$?
+check 'prune refuses work created after candidate classification' \
+  test "$prune_late_dirty_status" -ne 0
+check_contains 'late-work refusal identifies local work' \
+  'uncommitted or untracked work' "$prune_late_dirty_out"
+check 'late-work refusal never reaches Git removal' \
+  test ! -e "$PRUNE_LATE_DIRTY_ATTEMPT"
+check 'late-work refusal preserves the new file' \
+  test -f "$MANAGED/feat-prune-late-dirty/late.txt"
+rm -f "$MANAGED/feat-prune-late-dirty/late.txt" \
+  "$PWT_GH_STATES/feat-prune-late-dirty"
+pwt remove feat/prune-late-dirty >/dev/null 2>&1
+
+# A post-classification path substitution must be rejected by the same physical
+# ownership checks used by explicit removal.
+launch_reset
+pwt new feat/prune-late-symlink >/dev/null 2>&1
+pr_state feat/prune-late-symlink MERGED
+PRUNE_SYMLINK_OUTSIDE="$TMP/prune-late-symlink-real"
+PRUNE_SYMLINK_ATTEMPT="$TMP/prune-late-symlink-attempt"
+prune_symlink_status=0
+prune_symlink_out=$(
+  export PWT_TEST_PRUNE_MUTATION=symlink-after-state
+  export PWT_TEST_PRUNE_BRANCH=feat/prune-late-symlink
+  export PWT_TEST_PRUNE_TARGET="$MANAGED/feat-prune-late-symlink"
+  export PWT_TEST_PRUNE_OUTSIDE="$PRUNE_SYMLINK_OUTSIDE"
+  export PWT_TEST_REMOVE_ATTEMPT="$PRUNE_SYMLINK_ATTEMPT"
+  pwt prune --yes 2>&1
+) || prune_symlink_status=$?
+check 'prune refuses a symlink substituted after classification' \
+  test "$prune_symlink_status" -ne 0
+check_contains 'late symlink refusal names the unsafe path shape' \
+  'must not be a symlink' "$prune_symlink_out"
+check 'late symlink refusal never reaches Git removal' \
+  test ! -e "$PRUNE_SYMLINK_ATTEMPT"
+check 'late symlink refusal preserves the outside worktree' \
+  test -d "$PRUNE_SYMLINK_OUTSIDE"
+rm -f "$MANAGED/feat-prune-late-symlink"
+mv "$PRUNE_SYMLINK_OUTSIDE" "$MANAGED/feat-prune-late-symlink"
+rm -f "$PWT_GH_STATES/feat-prune-late-symlink"
+pwt remove feat/prune-late-symlink >/dev/null 2>&1
+
+# The apply phase is tied to both the branch and the physical path printed by
+# the dry-run classifier. Moving a valid registration invalidates that identity.
+launch_reset
+pwt new feat/prune-moved >/dev/null 2>&1
+pr_state feat/prune-moved MERGED
+PRUNE_MOVED="$MANAGED/feat-prune-moved-destination"
+PRUNE_MOVED_ATTEMPT="$TMP/prune-moved-attempt"
+prune_moved_status=0
+prune_moved_out=$(
+  export PWT_TEST_PRUNE_MUTATION=move-after-state
+  export PWT_TEST_PRUNE_BRANCH=feat/prune-moved
+  export PWT_TEST_PRUNE_TARGET="$MANAGED/feat-prune-moved"
+  export PWT_TEST_PRUNE_MOVED="$PRUNE_MOVED"
+  export PWT_TEST_PRUNE_PRIMARY="$PRIMARY"
+  export PWT_TEST_REMOVE_ATTEMPT="$PRUNE_MOVED_ATTEMPT"
+  pwt prune --yes 2>&1
+) || prune_moved_status=$?
+check 'prune refuses a candidate moved after classification' \
+  test "$prune_moved_status" -ne 0
+check_contains 'moved-candidate refusal names changed classification' \
+  'changed after prune classification' "$prune_moved_out"
+check 'moved-candidate refusal never reaches Git removal' \
+  test ! -e "$PRUNE_MOVED_ATTEMPT"
+check 'moved-candidate refusal preserves the registered worktree' \
+  test -d "$PRUNE_MOVED"
+rm -f "$PWT_GH_STATES/feat-prune-moved"
+pwt remove feat/prune-moved >/dev/null 2>&1
+
+# Even a clean commit created after GitHub classification invalidates the
+# candidate. This specifically pins the stored-OID guard rather than dirtiness.
+launch_reset
+pwt new feat/prune-head-changed >/dev/null 2>&1
+pr_state feat/prune-head-changed MERGED
+PRUNE_HEAD_ATTEMPT="$TMP/prune-head-attempt"
+prune_head_status=0
+prune_head_out=$(
+  export PWT_TEST_PRUNE_MUTATION=head-after-state
+  export PWT_TEST_PRUNE_BRANCH=feat/prune-head-changed
+  export PWT_TEST_PRUNE_TARGET="$MANAGED/feat-prune-head-changed"
+  export PWT_TEST_REMOVE_ATTEMPT="$PRUNE_HEAD_ATTEMPT"
+  pwt prune --yes 2>&1
+) || prune_head_status=$?
+check 'prune refuses a clean HEAD changed after classification' \
+  test "$prune_head_status" -ne 0
+check_contains 'changed-HEAD refusal names the invalidated classification' \
+  'worktree HEAD changed after prune classification' "$prune_head_out"
+check 'changed-HEAD refusal never reaches Git removal' \
+  test ! -e "$PRUNE_HEAD_ATTEMPT"
+check 'the newly committed HEAD survives pruning' \
+  test -f "$MANAGED/feat-prune-head-changed/prune-head-change.txt"
+rm -f "$PWT_GH_STATES/feat-prune-head-changed"
+pwt remove feat/prune-head-changed >/dev/null 2>&1
+
+# The first expected-HEAD check is not enough: status/ignored-file inspection
+# is another process boundary before removal. Commit after status so only the
+# final expected-HEAD comparison can stop Git.
+launch_reset
+pwt new feat/prune-head-after-status >/dev/null 2>&1
+pr_state feat/prune-head-after-status MERGED
+PRUNE_LATE_HEAD_ATTEMPT="$TMP/prune-late-head-attempt"
+PRUNE_LATE_HEAD_STATUS_COUNT="$TMP/prune-late-head-status-count"
+prune_late_head_status=0
+prune_late_head_out=$(
+  export PWT_TEST_GIT_FAIL=prune-head-after-status
+  export PWT_TEST_PRUNE_TARGET="$MANAGED/feat-prune-head-after-status"
+  export PWT_TEST_REMOVE_ATTEMPT="$PRUNE_LATE_HEAD_ATTEMPT"
+  export PWT_TEST_PRUNE_STATUS_COUNT="$PRUNE_LATE_HEAD_STATUS_COUNT"
+  pwt prune --yes 2>&1
+) || prune_late_head_status=$?
+check 'prune refuses a clean HEAD changed during removal inspection' \
+  test "$prune_late_head_status" -ne 0
+check_contains 'late HEAD refusal names the final removal boundary' \
+  'worktree HEAD changed while preparing removal' "$prune_late_head_out"
+check_equals 'late HEAD fixture mutates only during removal inspection' '2' \
+  "$(sed -n 1p "$PRUNE_LATE_HEAD_STATUS_COUNT" 2>/dev/null)"
+check 'late HEAD refusal never reaches Git removal' \
+  test ! -e "$PRUNE_LATE_HEAD_ATTEMPT"
+check 'the commit created after status survives pruning' \
+  test -f "$MANAGED/feat-prune-head-after-status/prune-late-head.txt"
+rm -f "$PWT_GH_STATES/feat-prune-head-after-status"
+pwt remove feat/prune-head-after-status >/dev/null 2>&1
+
+# Git status hides assume-unchanged edits. An accurate dry run must classify
+# that local state as skipped instead of advertising a removal that will fail.
+launch_reset
+pwt new feat/prune-hidden >/dev/null 2>&1
+printf 'hidden prune edit\n' >>"$MANAGED/feat-prune-hidden/README.md"
+git -C "$MANAGED/feat-prune-hidden" update-index --assume-unchanged README.md
+pr_state feat/prune-hidden MERGED
+prune_hidden=$(pwt prune 2>&1)
+prune_hidden_candidates=$(printf '%s\n' "$prune_hidden" | sed -n '/would remove/,$p')
+prune_hidden_left=$(printf '%s\n' "$prune_hidden" | sed -n '1,/nothing to prune/p')
+check_not_contains 'prune does not advertise hidden local state as removable' \
+  'feat/prune-hidden' "$prune_hidden_candidates"
+check_contains 'prune reports hidden local state as left alone' \
+  'feat/prune-hidden' "$prune_hidden_left"
+check 'prune --yes preserves hidden local state' \
+  pwt prune --yes
+check 'hidden local edits survive applied pruning' \
+  grep -qF 'hidden prune edit' "$MANAGED/feat-prune-hidden/README.md"
+git -C "$MANAGED/feat-prune-hidden" update-index --no-assume-unchanged README.md
+git -C "$MANAGED/feat-prune-hidden" checkout -- README.md
+rm -f "$PWT_GH_STATES/feat-prune-hidden"
+pwt remove feat/prune-hidden >/dev/null 2>&1
 
 # -------------------------------------------------------------------- summary
 

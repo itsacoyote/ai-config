@@ -125,14 +125,19 @@ parse_remote_identity() {
   # Local-path remotes are useful in tests and still represent github.com when
   # pwt reaches the GitHub-only gh interface.
   origin_host=${origin_host:-github.com}
-  case $origin_host in
-    '' | .* | *[!A-Za-z0-9.-]*) die 'cannot derive host from origin remote' ;;
-  esac
+  valid_host "$origin_host" || die 'cannot derive host from origin remote'
   origin_host=$(printf '%s' "$origin_host" | tr '[:upper:]' '[:lower:]')
   origin_gh_repo="$origin_host/$owner/$repo"
 }
 
+valid_host() {
+  local LC_ALL=C host=$1
+  case $host in '' | .* | *[!A-Za-z0-9.-]*) return 1 ;; esac
+  return 0
+}
+
 valid_identity_part() {
+  local LC_ALL=C
   case $1 in
     '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;;
   esac
@@ -546,6 +551,7 @@ worktree_name_for_branch() {
 # check-ref-format protects Git's ref namespace; this second allowlist protects
 # the filesystem path segment derived from that ref.
 validate_worktree_name() {
+  local LC_ALL=C
   case $1 in
     '' | . | .. | *..* | */* | *[!A-Za-z0-9._-]*)
       die "branch name does not produce a safe directory name: $1"
@@ -770,11 +776,17 @@ require_gh() {
 }
 
 valid_head_oid() {
-  local oid=$1
+  local LC_ALL=C oid=$1
   case $oid in
     '' | *[!0-9A-Fa-f]*) return 1 ;;
   esac
   [[ ${#oid} == 40 || ${#oid} == 64 ]]
+}
+
+valid_pr_number() {
+  local LC_ALL=C number=$1
+  case $number in '' | *[!0-9]*) return 1 ;; esac
+  return 0
 }
 
 # A failed status query must never read as a clean reusable worktree. The exit
@@ -801,15 +813,20 @@ worktree_ignored_files() {
 
 # Git status intentionally trusts index suppression flags. Inspect them
 # losslessly so assume-unchanged edits and materialized skip-worktree entries
-# cannot make local tracked content look clean before removal.
-refuse_hidden_index_state() {
-  local path=$1 list_file record flag rel problem=''
+# cannot make local tracked content look clean. Returns 0 for hidden state, 1
+# for none, and 2 when inspection itself fails; the problem is global because
+# callers use this predicate in conditionals where a subshell would lose it.
+worktree_has_hidden_index_state() {
+  local LC_ALL=C path=$1 list_file record flag rel
+  HIDDEN_INDEX_PROBLEM=''
   list_file=$(mktemp "${TMPDIR:-/tmp}/pwt.XXXXXX") ||
-    die 'cannot create tracked-file inspection state; refusing to remove'
+    return 2
   PWT_LIST_FILE=$list_file
 
   if ! git -C "$path" ls-files -v -z >"$list_file"; then
-    die "cannot inspect tracked-file index flags in $path; refusing to remove"
+    rm -f "$list_file" >/dev/null 2>&1 || true
+    PWT_LIST_FILE=''
+    return 2
   fi
 
   while IFS= read -r -d '' record; do
@@ -817,23 +834,33 @@ refuse_hidden_index_state() {
     rel=${record#??}
     case $flag in
       [a-z])
-        problem="assume-unchanged tracked file: $rel"
+        HIDDEN_INDEX_PROBLEM="assume-unchanged tracked file: $rel"
         break
         ;;
       S)
         if [[ -e "$path/$rel" || -L "$path/$rel" ]]; then
-          problem="materialized skip-worktree tracked file: $rel"
+          HIDDEN_INDEX_PROBLEM="materialized skip-worktree tracked file: $rel"
           break
         fi
         ;;
     esac
   done <"$list_file"
 
-  rm -f "$list_file" ||
-    die 'cannot clear tracked-file inspection state; refusing to remove'
+  rm -f "$list_file" || return 2
   PWT_LIST_FILE=''
-  [[ -z $problem ]] ||
-    die "worktree has hidden local state ($problem), refusing to remove: $path"
+  [[ -n $HIDDEN_INDEX_PROBLEM ]]
+}
+
+refuse_hidden_index_state() {
+  local path=$1 action=${2:-remove} status=0
+  worktree_has_hidden_index_state "$path" || status=$?
+  case $status in
+    0)
+      die "worktree has hidden local state ($HIDDEN_INDEX_PROBLEM), refusing to $action: $path"
+      ;;
+    1) return 0 ;;
+    *) die "cannot inspect tracked-file index flags in $path; refusing to $action" ;;
+  esac
 }
 
 remote_matches_identity() {
@@ -866,9 +893,7 @@ pr_url_identity() {
   PR_BASE_REPO=${base##*/}
   rest=${base%/*}
   PR_BASE_OWNER=${rest##*/}
-  case $PR_BASE_HOST in
-    '' | .* | *[!A-Za-z0-9.-]*) return 1 ;;
-  esac
+  valid_host "$PR_BASE_HOST" || return 1
   valid_identity_part "$PR_BASE_OWNER" || return 1
   valid_identity_part "$PR_BASE_REPO" || return 1
   PR_BASE_HOST=$(printf '%s' "$PR_BASE_HOST" | tr '[:upper:]' '[:lower:]')
@@ -1172,12 +1197,21 @@ resolve_removable() {
 # Inspect local content, then repeat ownership at the final mutation boundary
 # before asking Git to remove anything.
 remove_worktree() {
-  local branch=$1 delete_branch=$2 target ignored_before ignored_after
+  local branch=$1 delete_branch=$2 expected_target=${3:-} expected_head=${4:-}
+  local target ignored_before ignored_after current_head
   local f status marker
   local -a doomed=()
 
   resolve_removable "$branch"
   target=$resolved_worktree
+  [[ -z $expected_target || $target == "$expected_target" ]] ||
+    die "worktree changed after prune classification: $branch"
+  if [[ -n $expected_head ]]; then
+    current_head=$(git -C "$target" rev-parse HEAD 2>/dev/null) ||
+      die "cannot verify worktree HEAD before pruning: $branch"
+    [[ $current_head == "$expected_head" ]] ||
+      die "worktree HEAD changed after prune classification: $branch"
+  fi
 
   ignored_before=$(worktree_ignored_files "$target") ||
     die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
@@ -1195,6 +1229,12 @@ remove_worktree() {
   resolve_removable "$branch"
   [[ $resolved_worktree == "$target" ]] ||
     die "worktree registration changed while preparing removal: $branch"
+  if [[ -n $expected_head ]]; then
+    current_head=$(git -C "$target" rev-parse HEAD 2>/dev/null) ||
+      die "cannot reverify worktree HEAD before pruning: $branch"
+    [[ $current_head == "$expected_head" ]] ||
+      die "worktree HEAD changed while preparing removal: $branch"
+  fi
 
   while IFS= read -r f; do
     [[ -n $f ]] && doomed+=("$f")
@@ -1381,9 +1421,8 @@ cmd_pr() {
   local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross head_owner head_repo
   local pr_url head_oid existing status name target checkout_ok=1
   local branch_existed=0 auto_force=0 hint=''
-  case $number in
-    '' | *[!0-9]*) die "pull request must be a number: $number" ;;
-  esac
+  valid_pr_number "$number" ||
+    die "pull request must be a number: $number"
   validate_pr_launch_args
   validate_pr_path
 
@@ -1515,6 +1554,262 @@ cmd_remove() {
   remove_worktree "$branch" "$delete_branch"
 }
 
+# Parse one seven-line gh record and return its state only when it describes
+# the exact local commit. Identity mismatches are safe skips, while malformed
+# API output remains an error that aborts the whole pruning run.
+verified_pr_state() {
+  local meta=$1 branch=$2 expected_head=$3 allow_fork=$4 expected_url=${5:-}
+  local state head_ref cross head_owner head_repo pr_url head_oid number extra
+  local origin_owner origin_repo
+
+  state=$(printf '%s\n' "$meta" | sed -n 1p)
+  head_ref=$(printf '%s\n' "$meta" | sed -n 2p)
+  cross=$(printf '%s\n' "$meta" | sed -n 3p)
+  head_owner=$(printf '%s\n' "$meta" | sed -n 4p | tr '[:upper:]' '[:lower:]')
+  head_repo=$(printf '%s\n' "$meta" | sed -n 5p | tr '[:upper:]' '[:lower:]')
+  pr_url=$(printf '%s\n' "$meta" | sed -n 6p)
+  head_oid=$(printf '%s\n' "$meta" | sed -n 7p)
+  extra=$(printf '%s\n' "$meta" | sed -n 8p)
+
+  case $state in MERGED | OPEN | CLOSED) ;; *) return 2 ;; esac
+  [[ $head_ref == "$branch" ]] || {
+    printf 'UNVERIFIED\n'
+    return 0
+  }
+  [[ $cross == true || $cross == false ]] || return 2
+  valid_identity_part "$head_owner" && valid_identity_part "$head_repo" || return 2
+  valid_head_oid "$head_oid" || return 2
+  [[ -z $extra ]] || return 2
+
+  number=${pr_url##*/}
+  valid_pr_number "$number" || return 2
+  pr_url_identity "$pr_url" "$number" || return 2
+  origin_owner=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+  origin_repo=$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')
+  [[ $PR_BASE_HOST == "$origin_host" && $PR_BASE_OWNER == "$origin_owner" &&
+    $PR_BASE_REPO == "$origin_repo" ]] || {
+    printf 'UNVERIFIED\n'
+    return 0
+  }
+  [[ -z $expected_url || $pr_url == "$expected_url" ]] || {
+    printf 'UNVERIFIED\n'
+    return 0
+  }
+  [[ $head_oid == "$expected_head" ]] || {
+    printf 'UNVERIFIED\n'
+    return 0
+  }
+  if ((allow_fork == 0)); then
+    [[ $cross == false && $head_owner == "$origin_owner" &&
+      $head_repo == "$origin_repo" ]] || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+  fi
+  printf '%s\n' "$state"
+}
+
+# Prefer the exact PR URL recorded by `pwt pr`, including for fork PRs. A
+# normal branch has no marker, so its branch-name lookup is accepted only when
+# GitHub also reports the origin repository and the exact local HEAD.
+branch_pr_state() {
+  local branch=$1 expected_head=$2 marker_url marker_head meta rc number
+
+  if marker_url=$(git -C "$primary" config --get \
+    "branch.$branch.worktree-pr-url" 2>/dev/null); then
+    :
+  else
+    rc=$?
+    ((rc == 1)) || return 1
+    marker_url=''
+  fi
+  if marker_head=$(git -C "$primary" config --get \
+    "branch.$branch.worktree-pr-head" 2>/dev/null); then
+    :
+  else
+    rc=$?
+    ((rc == 1)) || return 1
+    marker_head=''
+  fi
+
+  if [[ -n $marker_url || -n $marker_head ]]; then
+    [[ -n $marker_url && -n $marker_head ]] || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    valid_head_oid "$marker_head" || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    [[ $marker_head == "$expected_head" ]] || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    number=${marker_url##*/}
+    valid_pr_number "$number" || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    pr_url_identity "$marker_url" "$number" || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    [[ $PR_BASE_HOST == "$origin_host" &&
+      $PR_BASE_OWNER == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" &&
+      $PR_BASE_REPO == "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]] ||
+      {
+        printf 'UNVERIFIED\n'
+        return 0
+      }
+    meta=$(gh pr view "$marker_url" --repo "$origin_gh_repo" \
+      --json state,headRefName,isCrossRepository,headRepositoryOwner,headRepository,url,headRefOid \
+      --jq '.state, .headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name, .url, .headRefOid' \
+      2>/dev/null) || return 1
+    verified_pr_state "$meta" "$branch" "$expected_head" 1 "$marker_url"
+    return
+  fi
+
+  meta=$(gh pr list --head "$branch" --state all --limit 1 \
+    --repo "$origin_gh_repo" \
+    --json state,headRefName,isCrossRepository,headRepositoryOwner,headRepository,url,headRefOid \
+    --jq '.[] | .state, .headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name, .url, .headRefOid' \
+    2>/dev/null) || return 1
+  if [[ -z $meta ]]; then
+    printf 'NONE\n'
+    return 0
+  fi
+  verified_pr_state "$meta" "$branch" "$expected_head" 0
+}
+
+cmd_prune() {
+  local apply=0
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --yes) apply=1 ;;
+      -h | --help)
+        usage
+        return 0
+        ;;
+      -*) die "unknown option: $1 (run 'pwt help')" ;;
+      *) die 'prune takes no positional arguments' ;;
+    esac
+    shift
+  done
+
+  require_gh prune
+
+  local records line path='' branch='' locked=0 physical state here i common actual_branch
+  local local_head
+  local hidden_status
+  local -a ripe_branches=() ripe_paths=() ripe_heads=() skipped=()
+  records=$(git -C "$primary" worktree list --porcelain) ||
+    die 'cannot list repository worktrees; refusing to prune'
+  records+=$'\n'
+  here=$(pwd -P 2>/dev/null) ||
+    die 'cannot determine the current directory; refusing to prune'
+
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        branch=''
+        locked=0
+        ;;
+      'branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        ;;
+      locked | 'locked '*)
+        locked=1
+        ;;
+      '')
+        # The explicit primary exclusion is defense in depth on the tool's
+        # only bulk-delete path; managed-root containment also excludes it.
+        if [[ -n $path && -n $branch && $path != "$primary" && ! -L $path ]]; then
+          case $path in
+            "$managed_root"/*)
+              physical=$(cd -P "$path" 2>/dev/null && pwd -P) || physical=''
+              # Git records a lexical path. Resolve it again so an intermediate
+              # symlink cannot make an outside directory look managed.
+              case "$physical/" in
+                "$managed_root"/*) ;;
+                *) physical='' ;;
+              esac
+              if [[ -n $physical ]]; then
+                common=$(git_common_dir "$physical" 2>/dev/null) || common=''
+                actual_branch=$(git -C "$physical" symbolic-ref \
+                  --quiet --short HEAD 2>/dev/null) || actual_branch=''
+                if [[ $common != "$primary_common" || $actual_branch != "$branch" ]]; then
+                  skipped+=("$branch — worktree ownership cannot be verified")
+                elif ((locked)); then
+                  skipped+=("$branch — worktree is locked")
+                elif [[ $here == "$physical" || $here == "$physical"/* ]]; then
+                  skipped+=("$branch — you are standing in it")
+                else
+                  hidden_status=0
+                  worktree_has_hidden_index_state "$physical" || hidden_status=$?
+                  case $hidden_status in
+                    0)
+                      skipped+=("$branch — hidden local state ($HIDDEN_INDEX_PROBLEM)")
+                      ;;
+                    1)
+                      if worktree_is_dirty "$physical" prune; then
+                        skipped+=("$branch — uncommitted or untracked work")
+                      else
+                        local_head=$(git -C "$physical" rev-parse HEAD 2>/dev/null) ||
+                          die "cannot determine worktree HEAD for $branch; refusing to prune"
+                        valid_head_oid "$local_head" ||
+                          die "worktree returned an invalid HEAD for $branch; refusing to prune"
+                        state=$(branch_pr_state "$branch" "$local_head") ||
+                          die "cannot determine pull request state for $branch; refusing to prune"
+                        if [[ $state == MERGED ]]; then
+                          ripe_branches+=("$branch")
+                          ripe_paths+=("$physical")
+                          ripe_heads+=("$local_head")
+                        else
+                          skipped+=("$branch — pull request is $state")
+                        fi
+                      fi
+                      ;;
+                    *)
+                      die "cannot inspect tracked-file index flags in $physical; refusing to prune"
+                      ;;
+                  esac
+                fi
+              fi
+              ;;
+          esac
+        fi
+        path=''
+        ;;
+    esac
+  done <<< "$records"
+
+  if ((${#skipped[@]})); then
+    note "left alone (${#skipped[@]}):"
+    printf '  %s\n' "${skipped[@]}"
+  fi
+
+  if ((${#ripe_branches[@]} == 0)); then
+    note 'nothing to prune'
+    return 0
+  fi
+
+  if ((apply == 0)); then
+    note "would remove ${#ripe_branches[@]} worktree(s) — re-run with --yes to apply:"
+    for i in "${!ripe_branches[@]}"; do
+      printf '  %s  %s\n' "${ripe_branches[i]}" "${ripe_paths[i]}"
+    done
+    return 0
+  fi
+
+  # Worktrees are disposable; branches are history and stay intact.
+  for i in "${!ripe_branches[@]}"; do
+    remove_worktree "${ripe_branches[i]}" 0 "${ripe_paths[i]}" \
+      "${ripe_heads[i]}"
+  done
+}
+
 cmd_open() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'open requires exactly one branch name'
@@ -1615,12 +1910,12 @@ main() {
       require_repo
       cmd_pr "$@"
       ;;
-    list | open | new | branch | remove)
+    list | open | new | branch | remove | prune)
       shift || true
       require_repo
       "cmd_$command" "$@"
       ;;
-    prune | install)
+    install)
       die "$command is not implemented yet"
       ;;
     *)
