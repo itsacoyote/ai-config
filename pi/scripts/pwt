@@ -21,12 +21,16 @@ warn() { printf '%s: warning: %s\n' "$PROGRAM" "$*" >&2; }
 # scratch file out of /tmp no matter which exit path the command takes.
 PWT_LIST_FILE=''
 PWT_PR_FETCH_WORKTREE=''
+PWT_INSTALL_LOCK=''
 cleanup_on_exit() {
   if [[ -n ${PWT_LIST_FILE:-} ]]; then
     rm -f "$PWT_LIST_FILE"
   fi
   if [[ -n ${PWT_PR_FETCH_WORKTREE:-} ]]; then
     cleanup_pr_fetch_worktree >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${PWT_INSTALL_LOCK:-} ]]; then
+    rmdir "$PWT_INSTALL_LOCK" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup_on_exit EXIT
@@ -366,10 +370,10 @@ validate_pr_startup_paths() {
   fi
 }
 
-# Pi's interpreter and helper lookups happen after launch enters the PR
-# worktree. A relative PATH entry would then resolve against untrusted content.
-validate_pr_path() {
-  local remaining=${PATH-} entry more
+# Rejects PATH entries whose meaning changes with the working directory. The
+# caller label keeps the refusal specific at each trust boundary.
+validate_absolute_path_entries() {
+  local context=$1 remaining=${PATH-} entry more
   while :; do
     more=0
     case $remaining in
@@ -383,10 +387,16 @@ validate_pr_path() {
 
     case $entry in
       /*) ;;
-      *) die 'pwt pr requires absolute PATH entries' ;;
+      *) die "$context requires absolute PATH entries" ;;
     esac
     ((more)) || break
   done
+}
+
+# Pi's interpreter and helper lookups happen after launch enters the PR
+# worktree. A relative PATH entry would then resolve against untrusted content.
+validate_pr_path() {
+  validate_absolute_path_entries 'pwt pr'
 }
 
 # Keep the enforced suffix adjacent to exec so no later PR preparation can
@@ -1879,6 +1889,151 @@ cmd_list() {
   done
 }
 
+# Resolves this script's real path, following symlinks without GNU-only
+# `readlink -f`. This matters when `pwt install` is invoked through the symlink it
+# previously installed: the link must continue pointing at the repository copy,
+# not be repointed at itself.
+resolve_self() {
+  local src=$0 dir base
+  case $src in
+    */*) ;;
+    *) src=$(command -v -- "$src" 2>/dev/null) || return 1 ;;
+  esac
+  while [[ -L $src ]]; do
+    dir=${src%/*}
+    [[ -n $dir ]] || dir=/
+    dir=$(cd -P "$dir" 2>/dev/null && pwd -P) || return 1
+    src=$(readlink "$src") || return 1
+    case $src in
+      /*) ;;
+      *) src="$dir/$src" ;;
+    esac
+  done
+  dir=${src%/*}
+  base=${src##*/}
+  [[ -n $dir ]] || dir=/
+  dir=$(cd -P "$dir" 2>/dev/null && pwd -P) || return 1
+  [[ -n $base ]] || return 1
+  printf '%s/%s\n' "$dir" "$base"
+}
+
+path_contains() {
+  case ":${PATH-}:" in
+    *":$1:"*) return 0 ;;
+  esac
+  return 1
+}
+
+# Replaces the symlink that was actually inspected without `ln -f`. Moving the
+# observed entry aside first means a regular file raced into its place is
+# retained at the named staging path, never deleted or restored over new data.
+repoint_symlink() {
+  local source=$1 target=$2 expected=$3
+  local staging="${target}.pwt-install.$$" displaced observed
+  displaced="$staging/previous"
+
+  mkdir "$staging" || die "cannot reserve symlink update: $target"
+  if ! mv "$target" "$displaced"; then
+    rmdir "$staging" >/dev/null 2>&1 || true
+    die "target changed while updating symlink: $target"
+  fi
+
+  observed=''
+  if [[ -L $displaced ]]; then
+    observed=$(readlink "$displaced") || observed=''
+  fi
+  if [[ ! -L $displaced || $observed != "$expected" ]]; then
+    die "target changed while updating symlink; preserved it at: $displaced"
+  fi
+
+  if ! ln -s "$source" "$target"; then
+    die "cannot update symlink; previous link preserved at: $displaced"
+  fi
+
+  rm -f "$displaced" ||
+    die "updated $target but could not clear the previous symlink: $displaced"
+  rmdir "$staging" ||
+    die "updated $target but could not clear symlink staging: $staging"
+  note "repointed $target -> $source"
+}
+
+# Symlinks keep the installed command and completion current with this checkout.
+# Existing symlinks are ours to repoint; anything else is user-owned and must not
+# be replaced.
+link_into_place() {
+  local source=$1 target=$2 current
+
+  mkdir -p "${target%/*}" || die "cannot create ${target%/*}"
+
+  if [[ -L $target ]]; then
+    current=$(readlink "$target")
+    if [[ $current == "$source" ]]; then
+      note "already installed: $target -> $source"
+      return 0
+    fi
+    repoint_symlink "$source" "$target" "$current"
+    return 0
+  fi
+
+  [[ ! -e $target ]] ||
+    die "$target exists and is not a symlink; move it aside and retry"
+
+  ln -s "$source" "$target" || die "cannot create symlink: $target"
+  note "installed $target -> $source"
+}
+
+install_path_warning() {
+  path_contains "$1" && return 0
+  printf '%s: warning: %s is not on your PATH; add it to use `pwt` directly\n' \
+    "$PROGRAM" "$1" >&2
+}
+
+cmd_install() {
+  [[ $# -eq 0 ]] || die 'install takes no arguments'
+  validate_absolute_path_entries 'pwt install'
+  case ${HOME-} in
+    /*) ;;
+    *) die 'pwt install requires an absolute HOME' ;;
+  esac
+
+  local bin_dir="$HOME/.local/bin"
+  local source completion_source completion_dir install_target install_lock
+  install_target="$bin_dir/pwt"
+
+  mkdir -p "$bin_dir" || die "cannot create $bin_dir"
+  PWT_INSTALL_LOCK="$bin_dir/.pwt-install.lock"
+  if ! mkdir "$PWT_INSTALL_LOCK"; then
+    PWT_INSTALL_LOCK=''
+    die "another pwt install is already running: $bin_dir"
+  fi
+
+  source=$(resolve_self) || die 'cannot resolve the pwt source path'
+  [[ -f $source && -x $source && ! -L $source ]] ||
+    die "resolved pwt source is not an executable regular file: $source"
+  [[ $source != "$install_target" ]] ||
+    die 'resolved pwt source is the install target itself'
+  completion_source="${source%/*}/pwt-completion.bash"
+
+  link_into_place "$source" "$install_target"
+
+  # bash-completion 2.x autoloads a file named after the command from here, so a
+  # new shell can complete pwt without an rc-file edit.
+  case ${XDG_DATA_HOME-} in
+    /*) completion_dir="$XDG_DATA_HOME/bash-completion/completions" ;;
+    *) completion_dir="$HOME/.local/share/bash-completion/completions" ;;
+  esac
+  if [[ -f $completion_source ]]; then
+    link_into_place "$completion_source" "$completion_dir/pwt"
+  else
+    note "no completion script beside pwt, skipping: $completion_source"
+  fi
+
+  install_path_warning "$bin_dir"
+  install_lock=$PWT_INSTALL_LOCK
+  PWT_INSTALL_LOCK=''
+  rmdir "$install_lock" || die "cannot release pwt install lock: $install_lock"
+}
+
 # Undocumented diagnostic seam for the self-contained suite.
 cmd_debug_roots() {
   printf 'owner=%s\n' "$owner"
@@ -1916,7 +2071,8 @@ main() {
       "cmd_$command" "$@"
       ;;
     install)
-      die "$command is not implemented yet"
+      shift || true
+      cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
     *)
       die "unknown command: $command (run 'pwt help')"

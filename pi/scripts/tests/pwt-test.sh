@@ -18,6 +18,7 @@ pass=0
 fail=0
 ok() { printf '  ok   - %s\n' "$1"; pass=$((pass + 1)); }
 not_ok() { printf '  FAIL - %s\n' "$1"; fail=$((fail + 1)); }
+skip() { printf '  skip - %s\n' "$1"; }
 
 # check <label> <command...> — passes when the command exits 0.
 check() {
@@ -121,6 +122,18 @@ PWT_TEST_REAL_CP=$(command -v cp)
 # the suite prove pwt distinguishes Git errors from ordinary missing records.
 cat >"$BIN/git" <<'STUB'
 #!/usr/bin/env bash
+if [ -n "${PWT_TEST_COMPLETION_AUDIT_LOG:-}" ]; then
+  printf '%s\n' "$*" >>"$PWT_TEST_COMPLETION_AUDIT_LOG"
+  case $* in
+    'config --get remote.origin.url' | \
+      'for-each-ref --format=%(refname) refs/heads refs/remotes/origin' | \
+      'worktree list --porcelain -z') ;;
+    *)
+      printf 'UNEXPECTED GIT: %s\n' "$*" >>"$PWT_TEST_COMPLETION_AUDIT_LOG"
+      exit 97
+      ;;
+  esac
+fi
 args=" $* "
 case $args in
   *' worktree remove '*)
@@ -4349,6 +4362,684 @@ git -C "$MANAGED/feat-prune-hidden" update-index --no-assume-unchanged README.md
 git -C "$MANAGED/feat-prune-hidden" checkout -- README.md
 rm -f "$PWT_GH_STATES/feat-prune-hidden"
 pwt remove feat/prune-hidden >/dev/null 2>&1
+
+# -------------------------------------------------------------------- install
+
+section 'install'
+
+LOCAL_BIN="$HOME/.local/bin"
+COMP_DIR="$HOME/.local/share/bash-completion/completions"
+COMP_LINK="$COMP_DIR/pwt"
+EXPECTED_COMPLETION=${PWT_COMPLETION_UNDER_TEST:-"$REPO_ROOT/pi/scripts/pwt-completion.bash"}
+
+reset_install() {
+  rm -rf "$LOCAL_BIN" "$HOME/.local/share/bash-completion"
+}
+
+# Install is repository-independent and creates both autoloadable symlinks.
+reset_install
+export PATH="$LOCAL_BIN:$PATH"
+check 'install succeeds outside a Git repository' pwt_in "$OUTSIDE" install
+check 'install creates the ~/.local/bin directory' test -d "$LOCAL_BIN"
+check 'install creates a symlink at ~/.local/bin/pwt' test -L "$LOCAL_BIN/pwt"
+check_equals 'the installed pwt symlink points at the repository script' \
+  "$PWT" "$(readlink "$LOCAL_BIN/pwt" 2>/dev/null)"
+check 'install creates the per-user bash-completion directory' test -d "$COMP_DIR"
+check 'install creates an autoloadable pwt completion symlink' test -L "$COMP_LINK"
+check_equals 'the installed completion points at the repository script' \
+  "$EXPECTED_COMPLETION" "$(readlink "$COMP_LINK" 2>/dev/null)"
+
+# Both links are idempotent.
+check 'install is idempotent when both symlinks are current' pwt_in "$OUTSIDE" install
+check_output 'repeat install reports the existing links' \
+  'already installed' pwt_in "$OUTSIDE" install
+
+# Stale links are owned by this installer and may be safely repointed.
+rm -f "$LOCAL_BIN/pwt" "$COMP_LINK"
+ln -s "$TMP/stale-pwt" "$LOCAL_BIN/pwt"
+ln -s "$TMP/stale-pwt-completion" "$COMP_LINK"
+check 'install repoints stale binary and completion symlinks' \
+  pwt_in "$OUTSIDE" install
+check_equals 'the stale binary symlink is repointed to the repository script' \
+  "$PWT" "$(readlink "$LOCAL_BIN/pwt" 2>/dev/null)"
+check_equals 'the stale completion symlink is repointed to the repository script' \
+  "$EXPECTED_COMPLETION" "$(readlink "$COMP_LINK" 2>/dev/null)"
+
+# A stale-link update must not delete a regular file that appears after the
+# initial lstat. The readlink shim makes that race deterministic.
+reset_install
+mkdir -p "$LOCAL_BIN"
+ln -s "$TMP/stale-pwt" "$LOCAL_BIN/pwt"
+INSTALL_RACE_BIN="$TMP/install-race-bin"
+INSTALL_RACE_MARKER="$TMP/install-race-marker"
+mkdir -p "$INSTALL_RACE_BIN"
+PWT_TEST_REAL_READLINK=$(command -v readlink)
+export PWT_TEST_REAL_READLINK INSTALL_RACE_MARKER
+export PWT_TEST_INSTALL_RACE_TARGET="$LOCAL_BIN/pwt"
+cat >"$INSTALL_RACE_BIN/readlink" <<'STUB'
+#!/bin/bash
+if [ "$1" = "$PWT_TEST_INSTALL_RACE_TARGET" ] && [ ! -e "$INSTALL_RACE_MARKER" ]; then
+  original=$($PWT_TEST_REAL_READLINK "$1") || exit
+  /bin/rm -f "$1"
+  printf 'raced-in user file\n' >"$1"
+  : >"$INSTALL_RACE_MARKER"
+  printf '%s\n' "$original"
+  exit 0
+fi
+exec "$PWT_TEST_REAL_READLINK" "$@"
+STUB
+chmod +x "$INSTALL_RACE_BIN/readlink"
+install_race_status=0
+install_race_out=$(cd "$OUTSIDE" && \
+  PATH="$INSTALL_RACE_BIN:/usr/bin:/bin" "$PWT" install 2>&1) || \
+  install_race_status=$?
+check 'install refuses a target changed during stale-link replacement' \
+  test "$install_race_status" -ne 0
+check_contains 'install reports the concurrent target change' \
+  'changed while updating' "$install_race_out"
+install_race_preserved=$(printf '%s\n' "$install_race_out" | \
+  sed -n 's/.*preserved it at: //p' | tail -1)
+check 'install discloses where it preserved the raced-in file' \
+  test -n "$install_race_preserved"
+check 'install preserves a raced-in user file at the disclosed staging path' \
+  grep -qF 'raced-in user file' "$install_race_preserved"
+check 'install does not restore raced-in data over another target change' \
+  test ! -e "$LOCAL_BIN/pwt"
+
+# A real file is user-owned. The explicit diagnostic pins the no-clobber guard;
+# relying on ln to fail would preserve the file for the wrong reason.
+reset_install
+mkdir -p "$LOCAL_BIN"
+printf 'user-owned binary\n' >"$LOCAL_BIN/pwt"
+check_fails 'install refuses to clobber a non-symlink pwt file' \
+  pwt_in "$OUTSIDE" install
+check_output 'binary collision names the non-symlink refusal' \
+  'exists and is not a symlink' pwt_in "$OUTSIDE" install
+check 'the user-owned pwt file survives a refused install' \
+  grep -qF 'user-owned binary' "$LOCAL_BIN/pwt"
+
+reset_install
+mkdir -p "$COMP_DIR"
+printf 'user-owned completion\n' >"$COMP_LINK"
+check_fails 'install refuses to clobber a non-symlink completion file' \
+  pwt_in "$OUTSIDE" install
+check_output 'completion collision names the non-symlink refusal' \
+  'exists and is not a symlink' pwt_in "$OUTSIDE" install
+check 'the user-owned completion survives a refused install' \
+  grep -qF 'user-owned completion' "$COMP_LINK"
+
+# Invoking install through its installed link must resolve back to this checkout,
+# not repoint the link at itself.
+reset_install
+pwt_in "$OUTSIDE" install >/dev/null 2>&1
+via_symlink=$(cd "$OUTSIDE" && "$LOCAL_BIN/pwt" install 2>&1)
+check_equals 'install through its symlink still targets the repository script' \
+  "$PWT" "$(readlink "$LOCAL_BIN/pwt" 2>/dev/null)"
+check_contains 'install through its symlink succeeds idempotently' \
+  'already installed' "$via_symlink"
+
+# The lock must be acquired before resolving an installed symlink. Otherwise a
+# concurrent installer can move that link mid-resolution and make it resolve to
+# the install target itself.
+INSTALL_LOCK_BIN="$TMP/install-lock-bin"
+INSTALL_LOCK_READLINK_MARKER="$TMP/install-lock-readlink-marker"
+mkdir -p "$INSTALL_LOCK_BIN"
+cat >"$INSTALL_LOCK_BIN/readlink" <<'STUB'
+#!/bin/bash
+: >"$PWT_TEST_INSTALL_LOCK_READLINK_MARKER"
+exec "$PWT_TEST_REAL_READLINK" "$@"
+STUB
+chmod +x "$INSTALL_LOCK_BIN/readlink"
+mkdir "$LOCAL_BIN/.pwt-install.lock"
+locked_install_status=0
+locked_install_out=$(cd "$OUTSIDE" && \
+  PWT_TEST_INSTALL_LOCK_READLINK_MARKER="$INSTALL_LOCK_READLINK_MARKER" \
+    PATH="$INSTALL_LOCK_BIN:/usr/bin:/bin" "$LOCAL_BIN/pwt" install 2>&1) || \
+  locked_install_status=$?
+check 'install through its symlink refuses a concurrent installer' \
+  test "$locked_install_status" -ne 0
+check_contains 'concurrent install refusal names the active install' \
+  'another pwt install is already running' "$locked_install_out"
+check 'concurrent install refuses before resolving its installed symlink' \
+  test ! -e "$INSTALL_LOCK_READLINK_MARKER"
+check_equals 'concurrent install leaves the installed pwt link unchanged' \
+  "$PWT" "$(readlink "$LOCAL_BIN/pwt" 2>/dev/null)"
+check "refused install preserves the other installer's lock" \
+  test -d "$LOCAL_BIN/.pwt-install.lock"
+check 'concurrent-install fixture lock is removable afterwards' \
+  rmdir "$LOCAL_BIN/.pwt-install.lock"
+
+# Releasing the lock makes its pathname available to a successor. If release
+# then reports failure, EXIT cleanup must not remove the successor's directory.
+INSTALL_RELEASE_BIN="$TMP/install-release-bin"
+INSTALL_RELEASE_MARKER="$TMP/install-release-marker"
+PWT_TEST_REAL_RMDIR=$(command -v rmdir)
+export PWT_TEST_REAL_RMDIR INSTALL_RELEASE_MARKER
+export PWT_TEST_INSTALL_RELEASE_LOCK="$LOCAL_BIN/.pwt-install.lock"
+mkdir -p "$INSTALL_RELEASE_BIN"
+cat >"$INSTALL_RELEASE_BIN/rmdir" <<'STUB'
+#!/bin/bash
+if [ "$1" = "$PWT_TEST_INSTALL_RELEASE_LOCK" ] && [ ! -e "$INSTALL_RELEASE_MARKER" ]; then
+  "$PWT_TEST_REAL_RMDIR" "$1" || exit
+  /bin/mkdir "$1" || exit
+  : >"$INSTALL_RELEASE_MARKER"
+  exit 70
+fi
+exec "$PWT_TEST_REAL_RMDIR" "$@"
+STUB
+chmod +x "$INSTALL_RELEASE_BIN/rmdir"
+release_install_status=0
+release_install_out=$(cd "$OUTSIDE" && \
+  PATH="$INSTALL_RELEASE_BIN:/usr/bin:/bin" "$PWT" install 2>&1) || \
+  release_install_status=$?
+check 'install surfaces a lock-release failure' \
+  test "$release_install_status" -ne 0
+check_contains 'lock-release failure names the retained lock' \
+  'cannot release pwt install lock' "$release_install_out"
+check 'lock release reached the successor-install fixture' \
+  test -e "$INSTALL_RELEASE_MARKER"
+check "failed release preserves the successor installer's lock" \
+  test -d "$LOCAL_BIN/.pwt-install.lock"
+check 'successor-install fixture lock is removable afterwards' \
+  "$PWT_TEST_REAL_RMDIR" "$LOCAL_BIN/.pwt-install.lock"
+
+# Bash 3.2 disables errexit inside command substitutions. An explicit failure
+# path in resolve_self must therefore reject a broken readlink and release the
+# whole-installer lock without changing the installed link.
+INSTALL_FAILURE_BIN="$TMP/install-failure-bin"
+INSTALL_FAILURE_MARKER="$TMP/install-failure-marker"
+mkdir -p "$INSTALL_FAILURE_BIN"
+cat >"$INSTALL_FAILURE_BIN/readlink" <<'STUB'
+#!/bin/bash
+if [ ! -e "$PWT_TEST_FAILED_READLINK_MARKER" ]; then
+  : >"$PWT_TEST_FAILED_READLINK_MARKER"
+  printf '%s\n' "$PWT_TEST_FAILED_READLINK_VALUE"
+  exit 70
+fi
+exec "$PWT_TEST_REAL_READLINK" "$@"
+STUB
+chmod +x "$INSTALL_FAILURE_BIN/readlink"
+readlink_failure_status=0
+readlink_failure_out=$(cd "$OUTSIDE" && \
+  PWT_TEST_FAILED_READLINK_VALUE="$PWT" \
+    PWT_TEST_FAILED_READLINK_MARKER="$INSTALL_FAILURE_MARKER" \
+    PATH="$INSTALL_FAILURE_BIN:/usr/bin:/bin" "$LOCAL_BIN/pwt" install 2>&1) || \
+  readlink_failure_status=$?
+check 'install rejects a failed symlink resolution' \
+  test "$readlink_failure_status" -ne 0
+check_contains 'failed symlink resolution reports the source-path error' \
+  'cannot resolve the pwt source path' "$readlink_failure_out"
+check_equals 'failed symlink resolution leaves the installed link unchanged' \
+  "$PWT" "$(readlink "$LOCAL_BIN/pwt" 2>/dev/null)"
+check 'failed symlink resolution releases the installer lock' \
+  test ! -e "$LOCAL_BIN/.pwt-install.lock"
+
+# The path warning is guidance only; installation still succeeds.
+reset_install
+off_path_status=0
+off_path_out=$(cd "$OUTSIDE" && PATH="$BIN:/usr/bin:/bin" "$PWT" install 2>&1) || \
+  off_path_status=$?
+check_equals 'install succeeds when ~/.local/bin is not on PATH' '0' "$off_path_status"
+check_contains 'install warns when ~/.local/bin is not on PATH' 'PATH' "$off_path_out"
+check_fails 'install rejects unexpected arguments' pwt_in "$OUTSIDE" install extra
+
+# Install resolves utilities before it has any repository trust boundary. A
+# relative PATH entry would let the caller's checkout provide those utilities.
+INSTALL_PATH_MARKER="$TMP/install-path-marker"
+cat >"$OUTSIDE/mkdir" <<'STUB'
+#!/bin/bash
+: >"$PWT_TEST_INSTALL_PATH_MARKER"
+exit 70
+STUB
+chmod +x "$OUTSIDE/mkdir"
+install_path_status=0
+install_path_out=$(
+  cd "$OUTSIDE" || exit 1
+  PWT_TEST_INSTALL_PATH_MARKER="$INSTALL_PATH_MARKER" \
+    PATH=".:$BIN:/usr/bin:/bin" "$PWT" install 2>&1
+) || install_path_status=$?
+check 'install rejects relative PATH entries before utility lookup' \
+  test "$install_path_status" -ne 0
+check_contains 'install relative-PATH refusal names the absolute-entry rule' \
+  'absolute PATH entries' "$install_path_out"
+check 'install never executes a cwd-provided utility' \
+  test ! -e "$INSTALL_PATH_MARKER"
+rm -f "$OUTSIDE/mkdir"
+
+# HOME is the installation authority and must be an absolute location. A
+# relative XDG_DATA_HOME is invalid by the XDG contract and falls back safely.
+relative_home_status=0
+relative_home_out=$(
+  cd "$OUTSIDE" || exit 1
+  HOME=relative-home PATH="$BIN:/usr/bin:/bin" "$PWT" install 2>&1
+) || relative_home_status=$?
+check 'install rejects a relative HOME' test "$relative_home_status" -ne 0
+check_contains 'relative HOME refusal names the absolute-path requirement' \
+  'absolute HOME' "$relative_home_out"
+check 'relative HOME creates no cwd-relative install directory' \
+  test ! -e "$OUTSIDE/relative-home"
+
+reset_install
+relative_xdg_status=0
+(
+  export XDG_DATA_HOME=relative-data
+  pwt_in "$OUTSIDE" install >/dev/null 2>&1
+) || relative_xdg_status=$?
+check_equals 'install ignores a relative XDG_DATA_HOME' '0' "$relative_xdg_status"
+check 'relative XDG data falls back to the HOME completion directory' \
+  test -L "$COMP_LINK"
+check 'relative XDG data creates no cwd-relative directory' \
+  test ! -e "$OUTSIDE/relative-data"
+
+# ------------------------------------------------------------- bash completion
+
+section 'completion'
+
+COMPLETION=${PWT_COMPLETION_UNDER_TEST:-"$REPO_ROOT/pi/scripts/pwt-completion.bash"}
+
+check 'the completion script exists' test -f "$COMPLETION"
+check 'the completion script parses as valid bash' bash -n "$COMPLETION"
+
+# zsh does not autoload Bash completions. bashcompinit must be able to source the
+# installed-format file and register pwt's public completion function.
+if command -v zsh >/dev/null 2>&1; then
+  if zsh -f -c '
+    autoload -Uz compinit && compinit -u -d "$1"
+    autoload -Uz bashcompinit && bashcompinit
+    source "$2"
+    complete -p pwt | grep -qxF "complete -o nospace -F _pwt pwt"
+  ' pwt-test "$TMP/zcompdump" "$COMPLETION" >/dev/null 2>&1; then
+    ok 'zsh bashcompinit registers the pwt completion'
+  else
+    not_ok 'zsh bashcompinit registers the pwt completion'
+  fi
+else
+  skip 'zsh bashcompinit registration (zsh unavailable)'
+fi
+
+# Prove each source detector catches its named regression before asking it to
+# reject the real completion. Without these positive controls, a broken pattern
+# could make the security negatives pass vacuously.
+completion_source_has_network_call() {
+  sed 's/#.*//' |
+    grep -qE '\b(gh|curl|wget|nc|netcat|ssh|scp|sftp|ftp|telnet|rsync)\b|git[[:space:]]+(clone|fetch|pull|push|ls-remote)([[:space:]]|$)|git[[:space:]]+remote[[:space:]]+(update|prune)([[:space:]]|$)|git[[:space:]]+submodule[[:space:]]+(update|sync|foreach)([[:space:]]|$)|/dev/(tcp|udp)/'
+}
+completion_source_uses_bash4() {
+  sed 's/#.*//' |
+    grep -qE '\b(mapfile|readarray|compopt)\b|(^|[[:space:]])(declare|local)[[:space:]]+-A([[:space:]]|$)'
+}
+
+if printf '%s\n' 'git remote update' | completion_source_has_network_call; then
+  ok 'the network detector rejects a network-capable Git command'
+else
+  not_ok 'the network detector rejects a network-capable Git command'
+fi
+if completion_source_has_network_call <"$COMPLETION"; then
+  not_ok 'the completion script makes no network calls'
+else
+  ok 'the completion script makes no network calls'
+fi
+if printf '%s\n' 'declare -A values' | completion_source_uses_bash4; then
+  ok 'the Bash 3.2 detector rejects associative arrays'
+else
+  not_ok 'the Bash 3.2 detector rejects associative arrays'
+fi
+if completion_source_uses_bash4 <"$COMPLETION"; then
+  not_ok 'the completion script avoids Bash 4-only builtins'
+else
+  ok 'the completion script avoids Bash 4-only builtins'
+fi
+
+if [ -f "$COMPLETION" ]; then
+  # shellcheck disable=SC1090
+  . "$COMPLETION"
+
+  complete_for() {
+    COMP_WORDS=("$@")
+    COMP_CWORD=$((${#COMP_WORDS[@]} - 1))
+    COMPREPLY=()
+    _pwt >/dev/null 2>&1 || true
+    # Runtime completion uses a trailing delimiter under the global `nospace`
+    # registration. Strip it only for value-oriented unit assertions here.
+    printf '%s\n' "${COMPREPLY[@]-}" | sed 's/ $//'
+  }
+
+  cd "$PRIMARY" || exit 1
+
+  subs=$(complete_for pwt '')
+  expected_subs=$(printf '%s\n' \
+    new branch open pr root list remove prune install help | sort)
+  actual_subs=$(printf '%s\n' "$subs" | sed '/^$/d' | sort)
+  check_equals 'completion offers exactly the ten pwt subcommands' \
+    "$expected_subs" "$actual_subs"
+
+  filtered=$(complete_for pwt 'pr')
+  if printf '%s\n' "$filtered" | grep -qx 'pr' &&
+    printf '%s\n' "$filtered" | grep -qx 'prune' &&
+    ! printf '%s\n' "$filtered" | grep -qx 'new'; then
+    ok 'completion filters pwt subcommands by prefix'
+  else
+    not_ok 'completion filters pwt subcommands by prefix'
+  fi
+
+  types=$(complete_for pwt new '')
+  if printf '%s\n' "$types" | grep -qx 'feat/' &&
+    printf '%s\n' "$types" | grep -qx 'fix/'; then
+    ok 'completion offers conventional-commit type prefixes for new'
+  else
+    not_ok 'completion offers conventional-commit type prefixes for new'
+  fi
+
+  branches=$(complete_for pwt branch '')
+  if printf '%s\n' "$branches" | grep -qx 'feat/alpha'; then
+    ok 'completion offers local branches for branch'
+  else
+    not_ok 'completion offers local branches for branch'
+  fi
+  if printf '%s\n' "$branches" | grep -qx 'feat/remote-only'; then
+    ok 'completion offers origin branches for branch'
+  else
+    not_ok 'completion offers origin branches for branch'
+  fi
+  git -C "$PRIMARY" branch origin/local-topic
+  branches=$(complete_for pwt branch 'origin/')
+  if printf '%s\n' "$branches" | grep -qx 'origin/local-topic'; then
+    ok 'completion preserves origin-prefixed local branch names'
+  else
+    not_ok 'completion preserves origin-prefixed local branch names'
+  fi
+
+  # Git's NUL-delimited porcelain keeps worktree paths literal. A physical
+  # managed root containing a backslash must still match its registered branch.
+  BACKSLASH_HOME="$TMP/home\\completion"
+  BACKSLASH_MANAGED="$BACKSLASH_HOME/github/.worktrees/owner/project"
+  BACKSLASH_WORKTREE="$BACKSLASH_MANAGED/completion-backslash"
+  mkdir -p "$BACKSLASH_MANAGED"
+  git -C "$PRIMARY" worktree add -q -b feat/completion-backslash \
+    "$BACKSLASH_WORKTREE" HEAD 2>/dev/null
+  backslash_opens=$(HOME="$BACKSLASH_HOME" complete_for pwt open '')
+  if printf '%s\n' "$backslash_opens" | grep -qx 'feat/completion-backslash'; then
+    ok 'completion preserves a backslash in the physical managed root'
+  else
+    not_ok 'completion preserves a backslash in the physical managed root'
+  fi
+  git -C "$PRIMARY" worktree remove --force "$BACKSLASH_WORKTREE" >/dev/null 2>&1
+  git -C "$PRIMARY" branch -D feat/completion-backslash >/dev/null 2>&1
+
+  # A worktree for this repository can still sit below another repository's
+  # managed subtree. Completion must use pwt's repo-specific root, not the broad
+  # shared worktree directory.
+  SIBLING_MANAGED="$HOME/github/.worktrees/other/repository"
+  SIBLING_WORKTREE="$SIBLING_MANAGED/completion-stray"
+  mkdir -p "$SIBLING_MANAGED"
+  git -C "$PRIMARY" worktree add -q -b feat/completion-stray \
+    "$SIBLING_WORKTREE" HEAD 2>/dev/null
+
+  opens=$(complete_for pwt open '')
+  if printf '%s\n' "$opens" | grep -qx 'feat/alpha'; then
+    ok 'completion offers managed worktree branches for open'
+  else
+    not_ok 'completion offers managed worktree branches for open'
+  fi
+  if printf '%s\n' "$opens" | grep -qx 'feat/stray'; then
+    not_ok 'completion excludes worktrees outside the managed root'
+  else
+    ok 'completion excludes worktrees outside the managed root'
+  fi
+  if printf '%s\n' "$opens" | grep -qx 'feat/completion-stray'; then
+    not_ok 'completion excludes worktrees under another managed repository root'
+  else
+    ok 'completion excludes worktrees under another managed repository root'
+  fi
+
+  removes=$(complete_for pwt remove '')
+  if printf '%s\n' "$removes" | grep -qx 'feat/alpha'; then
+    ok 'completion offers managed worktree branches for remove'
+  else
+    not_ok 'completion offers managed worktree branches for remove'
+  fi
+  if printf '%s\n' "$removes" | grep -qx 'feat/completion-stray'; then
+    not_ok 'remove completion excludes another repository managed root'
+  else
+    ok 'remove completion excludes another repository managed root'
+  fi
+
+  # Positive controls for the complete flag matrix come before its negative
+  # assertions. Each supported flag must be observable on its owning command.
+  pr_flags=$(complete_for pwt pr 701 '--')
+  remove_flags=$(complete_for pwt remove feat/alpha '--')
+  prune_flags=$(complete_for pwt prune '--')
+  if printf '%s\n' "$pr_flags" | grep -qx -- '--force' &&
+    printf '%s\n' "$remove_flags" | grep -qx -- '--delete-branch' &&
+    printf '%s\n' "$prune_flags" | grep -qx -- '--yes'; then
+    ok 'completion offers each supported flag to its owning command'
+  else
+    not_ok 'completion offers each supported flag to its owning command'
+  fi
+
+  all_flags=''
+  for sub in new branch open pr root list remove prune install help; do
+    command_flags=$(complete_for pwt "$sub" operand '--')
+    all_flags=$(printf '%s\n%s\n' "$all_flags" "$command_flags")
+    case $sub in
+      pr) expected_flag='--force' ;;
+      remove) expected_flag='--delete-branch' ;;
+      prune) expected_flag='--yes' ;;
+      *) expected_flag='' ;;
+    esac
+    actual_flags=$(printf '%s\n' "$command_flags" | sed '/^$/d')
+    if [ "$actual_flags" = "$expected_flag" ]; then
+      ok "completion limits flags to pwt $sub"
+    else
+      not_ok "completion limits flags to pwt $sub (got: $actual_flags)"
+    fi
+  done
+  if printf '%s\n' "$all_flags" | grep -qx -- '--yolo'; then
+    not_ok 'completion never offers yolo mode'
+  else
+    ok 'completion never offers yolo mode'
+  fi
+
+  # Once `--` has been entered, following options belong to Pi, not pwt. The
+  # working pr flag check above prevents this negative from passing vacuously.
+  forwarded=$(complete_for pwt pr 701 -- '--f')
+  if [ -z "$(printf '%s' "$forwarded" | tr -d '[:space:]')" ]; then
+    ok 'completion leaves arguments after -- to Pi'
+  else
+    not_ok 'completion leaves arguments after -- to Pi'
+  fi
+
+  # Never put Git output through compgen -W: it re-expands command substitutions
+  # embedded in a valid branch name. Assert the safe matcher exists before the
+  # negative source check so a missing implementation cannot pass silently.
+  if sed 's/#.*//' "$COMPLETION" | grep -q '_pwt_add_matches'; then
+    ok 'completion routes untrusted branch names through the inert matcher'
+  else
+    not_ok 'completion routes untrusted branch names through the inert matcher'
+  fi
+  if sed 's/#.*//' "$COMPLETION" | grep -q 'compgen -W "$('; then
+    not_ok 'completion never passes command output to compgen -W'
+  else
+    ok 'completion never passes command output to compgen -W'
+  fi
+
+  if sed 's/#.*//' "$COMPLETION" |
+    grep -q "printf -v quoted '%q' \"\$candidate\"" &&
+    sed 's/#.*//' "$COMPLETION" |
+      grep -q 'complete -o nospace -F _pwt pwt'; then
+    ok 'untrusted completion candidates are shell-escaped before insertion'
+  else
+    not_ok 'untrusted completion candidates are shell-escaped before insertion'
+  fi
+
+  # This branch is valid Git data but dangerous if a completion implementation
+  # asks the shell to expand it. Prove the fixture exists and is offered in its
+  # Bash-escaped form before driving a real interactive Tab followed by Enter.
+  RCE_MARKER="$PRIMARY/completion-rce-marker"
+  HOSTILE_BRANCH='feat/x$(touch${IFS}completion-rce-marker)'
+  HOSTILE_WORKTREE="$MANAGED/hostile-completion"
+  rm -f "$RCE_MARKER"
+  hostile_branch_err=$(git -C "$PRIMARY" worktree add -q -b "$HOSTILE_BRANCH" \
+    "$HOSTILE_WORKTREE" HEAD 2>&1)
+  if git -C "$PRIMARY" show-ref --verify --quiet "refs/heads/$HOSTILE_BRANCH"; then
+    ok 'the hostile completion branch fixture exists'
+  else
+    not_ok "the hostile completion branch fixture exists ($hostile_branch_err)"
+  fi
+
+  printf -v HOSTILE_QUOTED '%q' "$HOSTILE_BRANCH"
+  hostile_completion=$(complete_for pwt open 'feat/x')
+  if printf '%s\n' "$hostile_completion" | grep -qxF "$HOSTILE_QUOTED"; then
+    ok 'completion offers the hostile branch as shell-escaped inert data'
+  else
+    not_ok "completion offers the hostile branch as shell-escaped inert data (got: $hostile_completion)"
+  fi
+  if [ -e "$RCE_MARKER" ]; then
+    not_ok 'completing a hostile branch does not execute it'
+  else
+    ok 'completing a hostile branch does not execute it'
+  fi
+
+  # COMPREPLY-only tests cannot observe how Readline inserts a unique match. A
+  # real Bash 3.2 PTY catches the historical failure where Tab inserted `$()`
+  # unquoted and Enter executed it. `expect` ships with macOS; keep a graceful
+  # skip for other environments while the source-level guard remains mandatory.
+  if command -v expect >/dev/null 2>&1; then
+    launch_reset
+    completion_pty_status=0
+    COMPLETION_PTY_LOG="$TMP/completion-pty.log"
+    PWT_TEST_COMPLETION_PATH="$COMPLETION" \
+      PWT_TEST_COMPLETION_PRIMARY="$PRIMARY" expect -c '
+      set timeout 10
+      spawn -noecho /bin/bash --noprofile --norc -i
+      expect -re {[$#] $}
+      send -- "PS1=\u0027PWT-PTY> \u0027\r"
+      expect "PWT-PTY> "
+      send -- "source $env(PWT_TEST_COMPLETION_PATH)\r"
+      expect "PWT-PTY> "
+      send -- "cd $env(PWT_TEST_COMPLETION_PRIMARY)\r"
+      expect "PWT-PTY> "
+      send -- "pwt open feat/x\t\r"
+      expect "PWT-PTY> "
+      send -- "exit\r"
+      expect eof
+    ' >"$COMPLETION_PTY_LOG" 2>&1 || \
+      completion_pty_status=$?
+    if [ "$completion_pty_status" -ne 0 ]; then
+      sed 's/^/    PTY: /' "$COMPLETION_PTY_LOG" >&2
+    fi
+    check_equals 'Bash 3.2 completes and executes the hostile branch safely' \
+      '0' "$completion_pty_status"
+    check_equals 'interactive completion launches the literal hostile worktree' \
+      "$HOSTILE_WORKTREE" "$(launched pwd)"
+    if [ -e "$RCE_MARKER" ]; then
+      not_ok 'interactive Tab and Enter keep the hostile branch inert'
+    else
+      ok 'interactive Tab and Enter keep the hostile branch inert'
+    fi
+  else
+    skip 'interactive hostile-branch completion (expect unavailable)'
+  fi
+
+  # Completion must also refuse cwd-provided Git helpers when PATH contains a
+  # relative entry. Existing branch results above are the positive control.
+  COMPLETION_PATH_MARKER="$TMP/completion-path-marker"
+  cat >"$OUTSIDE/git" <<'STUB'
+#!/bin/bash
+: >"$PWT_TEST_COMPLETION_PATH_MARKER"
+exit 70
+STUB
+  chmod +x "$OUTSIDE/git"
+  path_attack_completion=$(
+    cd "$OUTSIDE" || exit 1
+    PWT_TEST_COMPLETION_PATH_MARKER="$COMPLETION_PATH_MARKER" \
+      PATH=".:$PATH" complete_for pwt branch ''
+  )
+  if [ -z "$(printf '%s' "$path_attack_completion" | tr -d '[:space:]')" ]; then
+    ok 'completion returns no dynamic candidates for a relative PATH'
+  else
+    not_ok 'completion returns no dynamic candidates for a relative PATH'
+  fi
+  check 'completion never executes a cwd-provided Git helper' \
+    test ! -e "$COMPLETION_PATH_MARKER"
+  rm -f "$OUTSIDE/git"
+
+  # Run every completion context with only its allowed local tools available.
+  # Positive controls first prove both rejection paths record a forbidden call.
+  COMPLETION_AUDIT_BIN="$TMP/completion-audit-bin"
+  COMPLETION_AUDIT_LOG="$TMP/completion-audit-log"
+  mkdir -p "$COMPLETION_AUDIT_BIN"
+  for tool in bash env sed grep sort; do
+    ln -s "$(command -v "$tool")" "$COMPLETION_AUDIT_BIN/$tool"
+  done
+  ln -s "$BIN/git" "$COMPLETION_AUDIT_BIN/git"
+  cat >"$COMPLETION_AUDIT_BIN/network-tripwire" <<'STUB'
+#!/bin/bash
+printf 'UNEXPECTED COMMAND: %s\n' "${0##*/}" >>"$PWT_TEST_COMPLETION_AUDIT_LOG"
+exit 97
+STUB
+  chmod +x "$COMPLETION_AUDIT_BIN/network-tripwire"
+  for tool in gh curl wget nc netcat ssh scp sftp ftp telnet rsync; do
+    ln -s "$COMPLETION_AUDIT_BIN/network-tripwire" "$COMPLETION_AUDIT_BIN/$tool"
+  done
+  : >"$COMPLETION_AUDIT_LOG"
+  (
+    export PATH="$COMPLETION_AUDIT_BIN"
+    export PWT_TEST_COMPLETION_AUDIT_LOG="$COMPLETION_AUDIT_LOG"
+    curl example.invalid >/dev/null 2>&1 || true
+  )
+  check 'completion audit tripwire records a forbidden executable' \
+    grep -qxF 'UNEXPECTED COMMAND: curl' "$COMPLETION_AUDIT_LOG"
+  : >"$COMPLETION_AUDIT_LOG"
+  (
+    export PATH="$COMPLETION_AUDIT_BIN"
+    export PWT_TEST_COMPLETION_AUDIT_LOG="$COMPLETION_AUDIT_LOG"
+    git remote update >/dev/null 2>&1 || true
+  )
+  check 'completion Git audit rejects a network-capable subcommand' \
+    grep -qxF 'UNEXPECTED GIT: remote update' "$COMPLETION_AUDIT_LOG"
+  : >"$COMPLETION_AUDIT_LOG"
+  (
+    export PATH="$COMPLETION_AUDIT_BIN"
+    export PWT_TEST_COMPLETION_AUDIT_LOG="$COMPLETION_AUDIT_LOG"
+    for sub in new branch open pr root list remove prune install help; do
+      complete_for pwt "$sub" '' >/dev/null
+      complete_for pwt "$sub" operand '' >/dev/null
+      complete_for pwt "$sub" operand '--' >/dev/null
+    done
+  )
+  check 'completion audit observes the local branch query' \
+    grep -qxF 'for-each-ref --format=%(refname) refs/heads refs/remotes/origin' \
+      "$COMPLETION_AUDIT_LOG"
+  check 'completion audit observes the local origin query' \
+    grep -qxF 'config --get remote.origin.url' "$COMPLETION_AUDIT_LOG"
+  check 'completion audit observes the local worktree query' \
+    grep -qxF 'worktree list --porcelain -z' "$COMPLETION_AUDIT_LOG"
+  if grep -q '^UNEXPECTED ' "$COMPLETION_AUDIT_LOG"; then
+    not_ok 'completion uses only the allowlisted local commands'
+  else
+    ok 'completion uses only the allowlisted local commands'
+  fi
+
+  git -C "$PRIMARY" worktree remove --force "$HOSTILE_WORKTREE" >/dev/null 2>&1
+  git -C "$PRIMARY" branch -D "$HOSTILE_BRANCH" >/dev/null 2>&1
+  git -C "$PRIMARY" worktree remove --force "$SIBLING_WORKTREE" >/dev/null 2>&1
+  git -C "$PRIMARY" branch -D feat/completion-stray >/dev/null 2>&1
+
+  cd "$OUTSIDE" || exit 1
+  outside=$(complete_for pwt '')
+  if printf '%s\n' "$outside" | grep -qx 'new'; then
+    ok 'completion still offers subcommands outside a Git repository'
+  else
+    not_ok 'completion still offers subcommands outside a Git repository'
+  fi
+  outside_branches=$(complete_for pwt open '')
+  if [ -z "$(printf '%s' "$outside_branches" | tr -d '[:space:]')" ]; then
+    ok 'completion returns no branches outside a Git repository'
+  else
+    not_ok 'completion returns no branches outside a Git repository'
+  fi
+fi
 
 # -------------------------------------------------------------------- summary
 
