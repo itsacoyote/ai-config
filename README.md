@@ -307,6 +307,25 @@ test command are documented in the [Codex cwt guide](codex/README.md#cwt--worktr
 The independent-port rationale is recorded in
 [ADR 0011](docs/decisions/0011-cwt-worktree-cli.md).
 
+## `pwt` — Pi worktree CLI
+
+`pi/scripts/pwt` is the developer-facing Pi launcher for the same ten-command worktree
+lifecycle. It shares the managed `~/github/.worktrees/<owner>/<repo>/` root with `clwt`
+and `cwt`, physically enters the selected checkout, exports `PWT_REPO_ROOT`, and executes
+Pi. Run its launching commands from your shell, not from inside an active Pi session.
+
+Pi has no yolo mode. For pull requests, `pwt` keeps context-file discovery but disables
+extensions and restricts the model to the `read`, `grep`, `find`, and `ls` tools without
+project approval. This is a Pi tool boundary for trusted PRs, not an OS sandbox.
+
+```bash
+pi/scripts/pwt install
+```
+
+Installation, completion, all ten commands, safety boundaries, and the manual test command
+are documented in the [Pi pwt guide](pi/README.md#pwt--worktree-cli). The independent-port
+rationale is recorded in [ADR 0012](docs/decisions/0012-pwt-worktree-cli.md).
+
 ## Codex command approval rules
 
 The Codex-specific command allowlist lives in codex/rules/ai-config.rules using Codex's
@@ -393,11 +412,12 @@ This repo ships harness-specific configuration plus a portable Agent Skills libr
   `~/.agents/skills/`; use the human-run `agents/install.sh` for an additive personal install.
 - **[`codex/`](codex/)** — Codex-specific `AGENTS.md` guidance, manually merged into a
   project when wanted. Skill installation is documented in [`codex/README.md`](codex/README.md).
-- **[`pi/`](pi/)** — for [Pi](https://pi.dev): a **personal global context file**
-  (communication rules, conventions, workflow, change gate, execution guardrails),
-  manually installed once as `~/.pi/agent/AGENTS.md` and active in every repo
-  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). Pi also auto-discovers the
-  shared Agent Skills locations
+- **[`pi/`](pi/)** — Pi-specific guidance and developer tooling. `pi/AGENTS.md` is a
+  **personal global context file** (communication rules, conventions, workflow, change
+  gate, execution guardrails), manually maintained at `~/.pi/agent/AGENTS.md` and active
+  in every repo ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). The
+  [Pi guide](pi/README.md) documents the developer-run `pwt` CLI and its separate install.
+  Pi also auto-discovers the shared Agent Skills locations
   ([official Pi skills documentation](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md)).
 
 The shared `agents/skills/` tree is one portable source, not synchronized harness copies.
@@ -445,7 +465,7 @@ claude/
 └── statusline-command.sh  # statusline script, installed to ~/.claude
 agents/            # shared skills + human-run additive installer for ~/.agents/skills
 codex/             # Codex guidance plus cwt, completion, and tests
-pi/                # Pi config: personal global AGENTS.md, installed to ~/.pi/agent (not synced)
+pi/                # Pi personal global context plus pwt, completion, tests, and guide
 archive/           # the previous automated pipeline, kept for reference
 AGENTS.md          # how to work IN this repo (read by all three harnesses)
 CLAUDE.md          # symlink to AGENTS.md — how Claude Code reads it
