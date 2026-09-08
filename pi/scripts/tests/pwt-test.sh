@@ -13,6 +13,7 @@ set -uo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)
 PWT=${PWT_UNDER_TEST:-"$REPO_ROOT/pi/scripts/pwt"}
+TEST_SOURCE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/${BASH_SOURCE[0]##*/}
 
 pass=0
 fail=0
@@ -88,6 +89,8 @@ section() {
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/pwt-test.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
+PWT_TEST_COMMAND_LOG="$TMP/public-commands.log"
+: >"$PWT_TEST_COMMAND_LOG"
 
 export HOME="$TMP/home"
 export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
@@ -937,7 +940,11 @@ pwt_with_failing_git() {
 pwt_in() {
   local dir=$1
   shift
-  (cd "$dir" && "$PWT" "$@")
+  (
+    cd "$dir" || exit 1
+    printf '%s\n' "${1-}" >>"$PWT_TEST_COMMAND_LOG"
+    "$PWT" "$@"
+  )
 }
 pwt() { pwt_in "$PRIMARY" "$@"; }
 pwt_utf8() {
@@ -1128,8 +1135,8 @@ check_output 'the wrong-repository PWT_REPO_ROOT error names the repository mism
 section 'remote URL cannot escape the managed root'
 
 # owner/repo become filesystem path segments, so remote identity is untrusted
-# input. This is ported from the cwt suite and also pins the rule that errors do
-# not echo credential-bearing remote URLs.
+# input. This also pins the rule that errors do not echo credential-bearing
+# remote URLs.
 probe_remote() {
   (cd "$PRIMARY" && git remote set-url origin "$1" && "$PWT" debug-roots 2>&1)
 }
@@ -5039,6 +5046,148 @@ STUB
   else
     not_ok 'completion returns no branches outside a Git repository'
   fi
+fi
+
+# ------------------------------------------------------------- suite contract
+
+section 'suite contract'
+
+# This specifically fails if pwt_in records an attempted command before its
+# requested working directory has been entered successfully.
+command_count_before=$(wc -l <"$PWT_TEST_COMMAND_LOG" | tr -d '[:space:]')
+pwt_in "$TMP/missing-command-log-cwd" help >/dev/null 2>&1 || true
+command_count_after=$(wc -l <"$PWT_TEST_COMMAND_LOG" | tr -d '[:space:]')
+check_equals 'command coverage records only invocations reached after directory entry' \
+  "$command_count_before" "$command_count_after"
+
+missing=''
+for sub in $SUBCOMMANDS; do
+  grep -qxF "$sub" "$PWT_TEST_COMMAND_LOG" || missing="$missing $sub"
+done
+if [ -z "$missing" ]; then
+  ok 'the suite executes every public subcommand'
+else
+  not_ok "the suite executes every public subcommand (missing:$missing)"
+fi
+
+source_has_normalized_term() {
+  local first=$1 second=${2-}
+  awk -v first="$first" -v second="$second" '
+    BEGIN {
+      first = tolower(first)
+      second = tolower(second)
+    }
+    {
+      normalized = tolower($0)
+      gsub(/["\047]/, "", normalized)
+      if (index(normalized, first) ||
+          (second != "" && index(normalized, second))) {
+        print NR ":" $0
+        found = 1
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  '
+}
+old_harness_lower=code
+old_harness_lower=${old_harness_lower}x
+old_harness_upper=C
+old_harness_upper=${old_harness_upper}WT
+source_has_stale_harness_term() {
+  source_has_normalized_term "$old_harness_lower" "$old_harness_upper"
+}
+if printf '%s\n' "$old_harness_lower" | \
+    source_has_stale_harness_term >/dev/null &&
+  printf '%s\n' "$old_harness_upper" | \
+    source_has_stale_harness_term >/dev/null; then
+  ok 'the stale-harness detector recognizes its literal tokens'
+else
+  not_ok 'the stale-harness detector recognizes its literal tokens'
+fi
+split_harness_lower="${old_harness_lower%dex}''${old_harness_lower#co}"
+split_harness_upper="${old_harness_upper%WT}''${old_harness_upper#C}"
+if printf '%s\n' "$split_harness_lower" | \
+    source_has_stale_harness_term >/dev/null &&
+  printf '%s\n' "$split_harness_upper" | \
+    source_has_stale_harness_term >/dev/null; then
+  ok 'the stale-harness detector recognizes split shell tokens'
+else
+  not_ok 'the stale-harness detector recognizes split shell tokens'
+fi
+stale_harness_mentions=''
+for source_file in "$PWT" "$COMPLETION" "$TEST_SOURCE"; do
+  mentions=$(source_has_stale_harness_term <"$source_file" 2>/dev/null || true)
+  if [ -n "$mentions" ]; then
+    stale_harness_mentions="$stale_harness_mentions
+$source_file:
+$mentions"
+  fi
+done
+if [ -z "$stale_harness_mentions" ]; then
+  ok 'runtime, completion, and suite contain no stale harness terminology'
+else
+  not_ok "runtime, completion, and suite contain stale harness terminology:$stale_harness_mentions"
+fi
+
+permission_alias=yo
+permission_alias=${permission_alias}lo
+source_has_permission_alias() {
+  source_has_normalized_term "$permission_alias"
+}
+# Awk normally exits zero even when it prints no matching lines. Pin the
+# detector's explicit no-match status so its positive controls cannot lie.
+if printf '%s\n' 'ordinary source line' | \
+  source_has_permission_alias >/dev/null; then
+  not_ok 'the normalized-term detector returns non-zero without a match'
+else
+  ok 'the normalized-term detector returns non-zero without a match'
+fi
+permission_mention_is_negative() {
+  local source_line
+  source_line=$(printf '%s\n' "${1#*:}" | sed 's/^[[:space:]]*//')
+  case $source_line in
+    "check_not_contains 'pwt help omits $permission_alias mode' '$permission_alias' \"\$help_text\"" | \
+      "check_fails 'an unknown pwt-side flag fails before pi launches' pwt root --$permission_alias" | \
+      "check_output 'the unknown pwt-side flag is named in the error' '$permission_alias' pwt root --$permission_alias" | \
+      "if printf '%s\n' \"\$all_flags\" | grep -qx -- '--$permission_alias'; then" | \
+      "not_ok 'completion never offers $permission_alias mode'" | \
+      "ok 'completion never offers $permission_alias mode'")
+      return 0
+      ;;
+  esac
+  return 1
+}
+if printf '%s\n' "$permission_alias" | source_has_permission_alias >/dev/null; then
+  ok 'the permission-bypass detector recognizes its literal token'
+else
+  not_ok 'the permission-bypass detector recognizes its literal token'
+fi
+split_permission_alias="${permission_alias%lo}''${permission_alias#yo}"
+if printf '%s\n' "$split_permission_alias" | \
+  source_has_permission_alias >/dev/null; then
+  ok 'the permission-bypass detector recognizes a split shell token'
+else
+  not_ok 'the permission-bypass detector recognizes a split shell token'
+fi
+if permission_mention_is_negative \
+  "launch Pi with --$permission_alias enabled"; then
+  not_ok 'the permission-bypass classifier rejects a launch expectation'
+else
+  ok 'the permission-bypass classifier rejects a launch expectation'
+fi
+stale_permission_mentions=''
+while IFS= read -r mention; do
+  [ -n "$mention" ] || continue
+  permission_mention_is_negative "$mention" ||
+    stale_permission_mentions="$stale_permission_mentions
+$mention"
+done <<MENTIONS
+$(source_has_permission_alias <"$TEST_SOURCE" 2>/dev/null || true)
+MENTIONS
+if [ -z "$stale_permission_mentions" ]; then
+  ok 'the suite contains no stale permission-bypass launch expectation'
+else
+  not_ok "the suite contains a stale permission-bypass launch expectation:$stale_permission_mentions"
 fi
 
 # -------------------------------------------------------------------- summary
