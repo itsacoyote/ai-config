@@ -138,6 +138,11 @@ if [ -n "${PWT_TEST_COMPLETION_AUDIT_LOG:-}" ]; then
   esac
 fi
 args=" $* "
+swap_test_managed_ancestor() {
+  /bin/mv "$PWT_TEST_MANAGED_ANCESTOR" "$PWT_TEST_MANAGED_SAVED" || exit
+  /bin/ln -s "$PWT_TEST_MANAGED_SAVED" \
+    "$PWT_TEST_MANAGED_ANCESTOR" || exit
+}
 case $args in
   *' worktree remove '*)
     case $args in
@@ -421,6 +426,40 @@ case ${PWT_TEST_GIT_FAIL:-} in
         ;;
     esac
     ;;
+  pr-fetch-root-after-head)
+    case $args in
+      *' rev-parse HEAD '*)
+        for argument in "$@"; do
+          case $argument in
+            "$PWT_TEST_FETCH_PREFIX"*)
+              "$PWT_TEST_REAL_GIT" "$@" || exit
+              swap_test_managed_ancestor
+              exit 0
+              ;;
+          esac
+        done
+        ;;
+    esac
+    ;;
+  pr-root-after-ignored-scan)
+    case $args in
+      *' check-ignore -z --stdin '*)
+        "$PWT_TEST_REAL_GIT" "$@"
+        status=$?
+        swap_test_managed_ancestor
+        exit "$status"
+        ;;
+    esac
+    ;;
+  pr-root-after-head-marker)
+    case $args in
+      *" config branch.$PWT_TEST_PR_ROOT_BRANCH.worktree-pr-head "*)
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        swap_test_managed_ancestor
+        exit 0
+        ;;
+    esac
+    ;;
 esac
 exec "$PWT_TEST_REAL_GIT" "$@"
 STUB
@@ -644,6 +683,15 @@ if [ "$1" = pr ] && [ "$2" = checkout ]; then
     printf "fatal: couldn't find remote ref %s\n" "$head_ref" >&2
     exit 1
   fi
+  swap_managed_ancestor() {
+    local ancestor saved
+    ancestor=$(sed -n 's/^swapManagedAncestor=//p' "$meta")
+    saved=$(sed -n 's/^saveManagedAncestor=//p' "$meta")
+    [ -n "$ancestor" ] || return 0
+    [ -n "$saved" ] || return 1
+    /bin/mv "$ancestor" "$saved" || return 1
+    /bin/ln -s "$saved" "$ancestor"
+  }
   if [ "$detach" = 1 ]; then
     if grep -q '^checkoutOidMismatch=true$' "$meta"; then
       git checkout -q --detach HEAD
@@ -659,6 +707,9 @@ if [ "$1" = pr ] && [ "$2" = checkout ]; then
     if [ -n "$hidden_target" ]; then
       git -C "$hidden_target" update-index --assume-unchanged README.md || exit
       printf 'hidden during disposable fetch\n' >"$hidden_target/README.md"
+    fi
+    if [ "$checkout_status" -eq 0 ]; then
+      swap_managed_ancestor || exit
     fi
     exit "$checkout_status"
   fi
@@ -676,7 +727,11 @@ if [ "$1" = pr ] && [ "$2" = checkout ]; then
   fi
   if ! git show-ref --verify --quiet "refs/heads/$head_ref"; then
     git checkout -q -b "$head_ref" "refs/remotes/origin/$head_ref"
-    exit $?
+    checkout_status=$?
+    if [ "$checkout_status" -eq 0 ]; then
+      swap_managed_ancestor || exit
+    fi
+    exit "$checkout_status"
   fi
   git checkout -q "$head_ref" || exit 1
   if [ "$force" = 1 ]; then
@@ -1817,6 +1872,34 @@ check_equals 'fresh PR checkout records its exact head marker' \
   "$(git -C "$PRIMARY" config --get branch.feat/from-pr.worktree-pr-head 2>/dev/null)"
 check 'fresh PR checkout clears its preparation marker' \
   test ! -e "$PRIMARY/.git/pwt/preparing-feat-from-pr"
+
+# A successful gh checkout can move the managed-root ancestor and replace it
+# with a symlink to the moved directory. Repository/branch checks still pass
+# through that link, so containment must be re-established before copy/launch.
+pr_meta 329 feat/pr-fresh-root-race false
+FRESH_PR_ROOT_ANCESTOR=${MANAGED%/project}
+FRESH_PR_ROOT_SAVED="$TMP/pr-fresh-root-saved-owner"
+printf 'swapManagedAncestor=%s\nsaveManagedAncestor=%s\n' \
+  "$FRESH_PR_ROOT_ANCESTOR" "$FRESH_PR_ROOT_SAVED" >>"$PWT_GH_PRS/329"
+launch_reset
+fresh_pr_root_status=0
+fresh_pr_root_out=$(pwt pr 329 2>&1) || fresh_pr_root_status=$?
+check 'fresh PR refuses a managed-root ancestor substituted during gh checkout' \
+  test "$fresh_pr_root_status" -ne 0
+check_contains 'fresh PR root substitution names the changed root' \
+  'managed worktree root changed' "$fresh_pr_root_out"
+check 'fresh PR root substitution copies no included file outside the trusted root' \
+  test ! -e "$FRESH_PR_ROOT_SAVED/project/feat-pr-fresh-root-race/.env"
+check_equals 'fresh PR root substitution never launches Pi' '' "$(launched pwd)"
+check 'fresh PR root substitution leaves preparation state for safe recovery' \
+  test -d "$PRIMARY/.git/pwt/preparing-feat-pr-fresh-root-race"
+rm -f "$FRESH_PR_ROOT_ANCESTOR"
+mv "$FRESH_PR_ROOT_SAVED" "$FRESH_PR_ROOT_ANCESTOR"
+git -C "$PRIMARY" worktree remove --force \
+  "$MANAGED/feat-pr-fresh-root-race" >/dev/null 2>&1 || true
+rmdir "$PRIMARY/.git/pwt/preparing-feat-pr-fresh-root-race" \
+  >/dev/null 2>&1 || true
+git -C "$PRIMARY" branch -D feat/pr-fresh-root-race >/dev/null 2>&1 || true
 
 launch_reset
 fork_out=$(pwt pr 102 2>&1)
@@ -3032,6 +3115,133 @@ check_equals 'mid-fetch hidden state preserves the last verified head marker' \
   "$(pr_marker feat/pr-reuse-hidden-during-fetch worktree-pr-head)"
 check_equals 'mid-fetch hidden state never launches Pi' '' "$(launched pwd)"
 
+# Reused PR fetching has the same ancestor-substitution boundary, but its
+# disposable worktree must remain blocked rather than be removed through the
+# substituted path. The real PR worktree must not refresh or launch.
+pr_meta 330 feat/pr-reuse-root-race false
+pwt pr 330 >/dev/null 2>&1
+reuse_root_head=$(git -C "$MANAGED/feat-pr-reuse-root-race" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-root-race >/dev/null
+REUSE_PR_ROOT_ANCESTOR=${MANAGED%/project}
+REUSE_PR_ROOT_SAVED="$TMP/pr-reuse-root-saved-owner"
+printf 'swapManagedAncestor=%s\nsaveManagedAncestor=%s\n' \
+  "$REUSE_PR_ROOT_ANCESTOR" "$REUSE_PR_ROOT_SAVED" >>"$PWT_GH_PRS/330"
+launch_reset
+reuse_root_status=0
+reuse_root_out=$(pwt pr 330 2>&1) || reuse_root_status=$?
+check 'reused PR refuses a managed-root ancestor substituted during gh fetch' \
+  test "$reuse_root_status" -ne 0
+check_contains 'reused PR reports its blocked disposable fetch worktree' \
+  'temporary PR fetch worktree remains blocked' "$reuse_root_out"
+check_equals 'reused PR root substitution preserves the branch head' \
+  "$reuse_root_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-root-race" rev-parse HEAD)"
+check_equals 'reused PR root substitution never launches Pi' '' "$(launched pwd)"
+reuse_root_fetch=$(git -C "$PRIMARY" worktree list --porcelain | \
+  sed -n 's#^worktree \(.*\.pwt-pr-fetch\.[^/]*\)$#\1#p' | head -1)
+check 'reused PR preserves the disposable worktree when containment changed' \
+  test -n "$reuse_root_fetch"
+rm -f "$REUSE_PR_ROOT_ANCESTOR"
+mv "$REUSE_PR_ROOT_SAVED" "$REUSE_PR_ROOT_ANCESTOR"
+if [ -n "$reuse_root_fetch" ]; then
+  git -C "$PRIMARY" worktree remove --force "$reuse_root_fetch" \
+    >/dev/null 2>&1 || true
+fi
+
+# If containment changes after the post-gh check but before scratch cleanup,
+# cleanup must preserve the disposable worktree rather than remove it through
+# the substituted root.
+pr_meta 331 feat/pr-reuse-root-cleanup-race false
+pwt pr 331 >/dev/null 2>&1
+reuse_cleanup_head=$(git -C \
+  "$MANAGED/feat-pr-reuse-root-cleanup-race" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-root-cleanup-race >/dev/null
+REUSE_CLEANUP_ANCESTOR=${MANAGED%/project}
+REUSE_CLEANUP_SAVED="$TMP/pr-reuse-cleanup-saved-owner"
+launch_reset
+reuse_cleanup_status=0
+reuse_cleanup_out=$(
+  export PWT_TEST_GIT_FAIL=pr-fetch-root-after-head
+  export PWT_TEST_MANAGED_ANCESTOR="$REUSE_CLEANUP_ANCESTOR"
+  export PWT_TEST_MANAGED_SAVED="$REUSE_CLEANUP_SAVED"
+  pwt pr 331 2>&1
+) || reuse_cleanup_status=$?
+check 'reused PR refuses root substitution immediately before fetch cleanup' \
+  test "$reuse_cleanup_status" -ne 0
+check_contains 'fetch-cleanup root substitution reports the blocked worktree' \
+  'temporary PR fetch worktree remains blocked' "$reuse_cleanup_out"
+check_equals 'fetch-cleanup root substitution preserves the reused branch head' \
+  "$reuse_cleanup_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-root-cleanup-race" rev-parse HEAD)"
+check_equals 'fetch-cleanup root substitution never launches Pi' '' "$(launched pwd)"
+reuse_cleanup_fetch=$(git -C "$PRIMARY" worktree list --porcelain | \
+  sed -n 's#^worktree \(.*\.pwt-pr-fetch\.[^/]*\)$#\1#p' | head -1)
+check 'fetch-cleanup root substitution preserves the disposable worktree' \
+  test -n "$reuse_cleanup_fetch"
+rm -f "$REUSE_CLEANUP_ANCESTOR"
+mv "$REUSE_CLEANUP_SAVED" "$REUSE_CLEANUP_ANCESTOR"
+if [ -n "$reuse_cleanup_fetch" ]; then
+  git -C "$PRIMARY" worktree remove --force "$reuse_cleanup_fetch" \
+    >/dev/null 2>&1 || true
+fi
+
+# The root can also change after the scratch fetch has been safely removed.
+# Inject at the final ignored-path scan so the refresh-boundary ownership check
+# alone prevents the real branch from moving.
+pr_meta 332 feat/pr-reuse-root-refresh-race false
+pwt pr 332 >/dev/null 2>&1
+reuse_refresh_head=$(git -C \
+  "$MANAGED/feat-pr-reuse-root-refresh-race" rev-parse HEAD)
+force_advance_pr_head feat/pr-reuse-root-refresh-race >/dev/null
+REUSE_REFRESH_ANCESTOR=${MANAGED%/project}
+REUSE_REFRESH_SAVED="$TMP/pr-reuse-refresh-saved-owner"
+launch_reset
+reuse_refresh_status=0
+reuse_refresh_out=$(
+  export PWT_TEST_GIT_FAIL=pr-root-after-ignored-scan
+  export PWT_TEST_MANAGED_ANCESTOR="$REUSE_REFRESH_ANCESTOR"
+  export PWT_TEST_MANAGED_SAVED="$REUSE_REFRESH_SAVED"
+  pwt pr 332 2>&1
+) || reuse_refresh_status=$?
+check 'reused PR refuses root substitution at the refresh boundary' \
+  test "$reuse_refresh_status" -ne 0
+check_contains 'refresh-boundary root substitution names the changed root' \
+  'managed worktree root changed' "$reuse_refresh_out"
+check_equals 'refresh-boundary root substitution preserves the branch head' \
+  "$reuse_refresh_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-root-refresh-race" rev-parse HEAD)"
+check_equals 'refresh-boundary root substitution never launches Pi' '' "$(launched pwd)"
+rm -f "$REUSE_REFRESH_ANCESTOR"
+mv "$REUSE_REFRESH_SAVED" "$REUSE_REFRESH_ANCESTOR"
+
+# Finally, move the root after a successful refresh records its marker. The
+# launch-boundary check must refuse to enter the moved worktree.
+pr_meta 333 feat/pr-reuse-root-launch-race false
+pwt pr 333 >/dev/null 2>&1
+force_advance_pr_head feat/pr-reuse-root-launch-race >/dev/null
+reuse_launch_oid=$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/333")
+REUSE_LAUNCH_ANCESTOR=${MANAGED%/project}
+REUSE_LAUNCH_SAVED="$TMP/pr-reuse-launch-saved-owner"
+launch_reset
+reuse_launch_status=0
+reuse_launch_out=$(
+  export PWT_TEST_GIT_FAIL=pr-root-after-head-marker
+  export PWT_TEST_MANAGED_ANCESTOR="$REUSE_LAUNCH_ANCESTOR"
+  export PWT_TEST_MANAGED_SAVED="$REUSE_LAUNCH_SAVED"
+  export PWT_TEST_PR_ROOT_BRANCH=feat/pr-reuse-root-launch-race
+  pwt pr 333 2>&1
+) || reuse_launch_status=$?
+check 'reused PR refuses root substitution at the launch boundary' \
+  test "$reuse_launch_status" -ne 0
+check_contains 'launch-boundary root substitution names the changed root' \
+  'managed worktree root changed' "$reuse_launch_out"
+check_equals 'launch-boundary fixture reaches the advertised PR head' \
+  "$reuse_launch_oid" \
+  "$(git -C "$MANAGED/feat-pr-reuse-root-launch-race" rev-parse HEAD)"
+check_equals 'launch-boundary root substitution never launches Pi' '' "$(launched pwd)"
+rm -f "$REUSE_LAUNCH_ANCESTOR"
+mv "$REUSE_LAUNCH_SAVED" "$REUSE_LAUNCH_ANCESTOR"
+
 pr_meta 322 feat/pr-reuse-partial-fetch-add false
 pwt pr 322 >/dev/null 2>&1
 partial_fetch_head=$(git -C "$MANAGED/feat-pr-reuse-partial-fetch-add" rev-parse HEAD)
@@ -3285,8 +3495,11 @@ else
 fi
 check_contains 'a cleanup error reports the retained blocked worktree' \
   'cleanup failed and the worktree remains blocked' "$cleanup_failure_out"
-check 'a cleanup error leaves its worktree registered for explicit recovery' \
-  worktree_registered_at "$MANAGED/feat-cleanup-failure"
+cleanup_failure_registration=$("$PWT_TEST_REAL_GIT" -C "$PRIMARY" \
+  worktree list --porcelain | \
+  sed -n "\\#^worktree $MANAGED/feat-cleanup-failure\$#p")
+check_equals 'a cleanup error leaves its worktree registered for explicit recovery' \
+  "worktree $MANAGED/feat-cleanup-failure" "$cleanup_failure_registration"
 launch_reset
 retry_status=0
 retry_out=$(pwt branch feat/cleanup-failure 2>&1) || retry_status=$?
