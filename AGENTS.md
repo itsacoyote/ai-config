@@ -31,12 +31,14 @@ For the catalog of skills/agents and the feature workflow they implement, see
   directory.
 - `codex/scripts/<name>` — Codex-specific executable tooling. `cwt` is a developer-facing
   CLI with its completion beside it and tests under `codex/scripts/tests/`.
+- `pi/scripts/<name>` — Pi-specific executable tooling. `pwt` is a developer-facing Pi launcher
+  with its completion beside it and tests under `pi/scripts/tests/`.
 - `codex/rules/ai-config.rules` — Codex command approval rules; install with the human-run
   `codex/install.sh`, which writes only its dedicated file under `~/.codex/rules/`.
 - `agents/skills/<name>/SKILL.md` — portable Open Agent Skills shared by Codex and Pi.
   New cross-harness skills belong here; harness-specific behavior stays in its own tree.
-- `codex/`, `pi/` — harness-specific configuration and guidance. See `codex/README.md`
-  and the root README's distribution section.
+- `codex/`, `pi/` — harness-specific configuration and guidance. See `codex/README.md`,
+  `pi/README.md`, and the root README's distribution section.
 - `docs/decisions/` — architectural decisions and their rationale.
 
 Decide by intent: a discoverable technique → **skill**; an always-on convention →
@@ -44,11 +46,13 @@ Decide by intent: a discoverable technique → **skill**; an always-on conventio
 **reference**; something that must *run* → **script**.
 
 A script that a human runs directly is worth calling out, because an agent cannot always
-invoke one. `clwt` and `cwt` launch their harnesses by replacing the current process — only
-a process outside the active agent can do that. `claude/install.sh` is the same: it writes into
-`~/.claude`, which agents are denied. `agents/install.sh` likewise writes only shared skills
-into `~/.agents/skills/` and is human-run. When a script has that shape, say so in its skill
-or README so agents recommend the command instead of trying to run it.
+invoke one. `clwt`, `cwt`, and `pwt` launch their harnesses by replacing the current process —
+only a process outside the active agent can do that. `pwt pr` also enforces Pi's
+`--no-extensions --tools read,grep,find,ls --no-approve` boundary; document it as a model-tool
+restriction for trusted pull requests, not an OS sandbox. `claude/install.sh` is the same:
+it writes into `~/.claude`, which agents are denied. `agents/install.sh` likewise writes only
+shared skills into `~/.agents/skills/` and is human-run. When a script has that shape, say so
+in its skill or README so agents recommend the command instead of trying to run it.
 
 ## Authoring conventions
 
@@ -83,6 +87,7 @@ There is no CI, no package manager, and no test runner here. A script under
 ```bash
 bash claude/scripts/tests/clwt-test.sh        # exits non-zero on any failure
 bash codex/scripts/tests/cwt-test.sh
+bash pi/scripts/tests/pwt-test.sh
 bash codex/scripts/tests/install-test.sh
 bash claude/scripts/tests/beads-gate-test.sh
 bash claude/scripts/tests/install-test.sh
@@ -92,9 +97,10 @@ bash agents/scripts/tests/repository-contract-test.sh
 
 Build the world the script needs under `mktemp -d` with a fake `$HOME` — a bare remote,
 a clone, stub binaries on `PATH` that log how they were invoked. Stubbing the thing the
-script *launches* is what makes its behavior observable; the `clwt` and `cwt` suites stub
-`claude` and `codex` respectively, recording `$PWD`, arguments, and environment. That is
-the only honest way to assert that a launched session really is rooted where it should be.
+script *launches* is what makes its behavior observable; the `clwt`, `cwt`, and `pwt` suites
+stub `claude`, `codex`, and `pi` respectively, recording `$PWD`, arguments, and environment.
+That is the only honest way to assert that a launched session really is rooted where it
+should be.
 
 **Target stock macOS bash 3.2** — scripts and their suites both. A bash 4+ builtin
 (`mapfile`, associative arrays) does not fail loudly here; `mapfile` left `COMPREPLY`
@@ -141,10 +147,11 @@ The three trees install differently — this is the crux of what each tree *is*:
   it never reads or manages `AGENTS.md`, `~/.codex`, or Pi configuration.
 - **`codex/` contains Codex-specific guidance.** Its `AGENTS.md` remains a manually merged
   project template; portable skills no longer live in this tree.
-- **`pi/` is a personal global file, never copied into a project.** `pi/AGENTS.md`
-  is manually installed once as `~/.pi/agent/AGENTS.md` and applies in every repo
-  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). It carries personal
-  accommodations — copying it into a shared repo is the failure mode.
+- **`pi/` contains Pi-specific guidance and developer tooling.** `pi/AGENTS.md` is a
+  personal global file, manually installed once as `~/.pi/agent/AGENTS.md`; copying it
+  into a shared repo is the failure mode
+  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). `pi/scripts/pwt` remains a
+  developer-run CLI and installs itself plus completion as symlinks; see `pi/README.md`.
 
 ## Workflow state: beads is required
 

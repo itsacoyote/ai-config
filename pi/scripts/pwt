@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # pwt — manage this repository's git worktrees and launch Pi inside them.
 #
 # Pi inherits its process working directory. Every launching subcommand therefore
@@ -15,6 +15,25 @@ die() {
 }
 
 note() { printf '%s: %s\n' "$PROGRAM" "$*"; }
+warn() { printf '%s: warning: %s\n' "$PROGRAM" "$*" >&2; }
+
+# Include copying can return from the middle of its loop. Keep its NUL-delimited
+# scratch file out of /tmp no matter which exit path the command takes.
+PWT_LIST_FILE=''
+PWT_PR_FETCH_WORKTREE=''
+PWT_INSTALL_LOCK=''
+cleanup_on_exit() {
+  if [[ -n ${PWT_LIST_FILE:-} ]]; then
+    rm -f "$PWT_LIST_FILE"
+  fi
+  if [[ -n ${PWT_PR_FETCH_WORKTREE:-} ]]; then
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${PWT_INSTALL_LOCK:-} ]]; then
+    rmdir "$PWT_INSTALL_LOCK" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_on_exit EXIT
 
 usage() {
   cat <<'EOF'
@@ -45,6 +64,15 @@ Commands:
 Managed worktrees live in:
   ~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/
 
+`--force` on `pwt pr` passes --force to `gh pr checkout`, resetting a leftover
+local branch to the pull request head. An existing managed PR worktree is
+refreshed only after pwt verifies its PR identity and its clean local state;
+`--force` does not bypass those reuse guards.
+Without the flag, `pwt pr` resets a leftover branch on its own only when the
+branch is provably contained in `origin/<branch>` (no local-only commits);
+otherwise the checkout runs plain, and if it then fails, the error names this
+flag.
+
 Arguments after `--` are passed through to `pi` unchanged.
 EOF
 }
@@ -70,7 +98,23 @@ resolve_path() {
 }
 
 parse_remote_identity() {
-  local url=$1 rest
+  local url=$1 rest authority
+  origin_host=''
+  case $url in
+    *://*)
+      authority=${url#*://}
+      authority=${authority%%/*}
+      authority=${authority##*@}
+      origin_host=${authority%%:*}
+      ;;
+    *@*:*/*)
+      authority=${url%%:*}
+      origin_host=${authority##*@}
+      ;;
+    *:*/*)
+      origin_host=${url%%:*}
+      ;;
+  esac
   url=${url%.git}
   url=${url%/}
 
@@ -82,9 +126,22 @@ parse_remote_identity() {
   # Do not echo the remote URL here: HTTPS remotes can contain credentials.
   valid_identity_part "$owner" || die 'cannot derive owner from origin remote'
   valid_identity_part "$repo" || die 'cannot derive repository from origin remote'
+  # Local-path remotes are useful in tests and still represent github.com when
+  # pwt reaches the GitHub-only gh interface.
+  origin_host=${origin_host:-github.com}
+  valid_host "$origin_host" || die 'cannot derive host from origin remote'
+  origin_host=$(printf '%s' "$origin_host" | tr '[:upper:]' '[:lower:]')
+  origin_gh_repo="$origin_host/$owner/$repo"
+}
+
+valid_host() {
+  local LC_ALL=C host=$1
+  case $host in '' | .* | *[!A-Za-z0-9.-]*) return 1 ;; esac
+  return 0
 }
 
 valid_identity_part() {
+  local LC_ALL=C
   case $1 in
     '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;;
   esac
@@ -156,6 +213,9 @@ resolve_primary() {
 require_repo() {
   resolve_primary
 
+  primary_common=$(git_common_dir "$primary") ||
+    die 'cannot resolve the primary git common directory'
+
   local remote_url
   remote_url=$(git -C "$primary" remote get-url origin 2>/dev/null) ||
     die 'repository has no origin remote'
@@ -191,6 +251,71 @@ parse_launch_args() {
         ;;
     esac
     shift
+  done
+}
+
+# PR sessions keep context-file discovery, but must not let forwarded Pi
+# options replace the tool/trust policy, load executable extensions, or resume
+# a session whose stored cwd escapes the selected worktree. Validate first so
+# a dangling value-taking option cannot consume an enforcement token.
+validate_pr_launch_args() {
+  local index=0 arg next count=${#LAUNCH_ARGS[@]}
+
+  # Pi handles these commands before it creates the restricted agent session.
+  # Some can print credentials, modify package configuration, or self-update.
+  case ${LAUNCH_ARGS[0]-} in
+    auth | install | remove | uninstall | update | list | config)
+      die "pwt pr does not allow Pi command: ${LAUNCH_ARGS[0]}"
+      ;;
+  esac
+
+  while ((index < count)); do
+    arg=${LAUNCH_ARGS[$index]}
+    case $arg in
+      --provider | --model | --api-key | --system-prompt | \
+        --append-system-prompt | --name | \
+        --models | --thinking | --skill | --prompt-template | --theme | -n)
+        index=$((index + 1))
+        ((index < count)) ||
+          die "pwt pr needs a value after Pi option: $arg"
+        ;;
+      --mode)
+        index=$((index + 1))
+        ((index < count)) ||
+          die 'pwt pr needs text or json after Pi option: --mode'
+        case ${LAUNCH_ARGS[$index]} in
+          text | json) ;;
+          *) die 'pwt pr does not allow Pi mode outside the tool boundary' ;;
+        esac
+        ;;
+      --tui-mode)
+        index=$((index + 1))
+        ((index < count)) ||
+          die 'pwt pr needs regular or fullscreen after Pi option: --tui-mode'
+        case ${LAUNCH_ARGS[$index]} in
+          regular | fullscreen) ;;
+          *) die 'pwt pr needs regular or fullscreen after Pi option: --tui-mode' ;;
+        esac
+        ;;
+      --print | -p)
+        if ((index + 1 < count)); then
+          next=${LAUNCH_ARGS[$((index + 1))]}
+          case $next in
+            ---*) index=$((index + 1)) ;;
+          esac
+        fi
+        ;;
+      --help | -h | --version | -v | --no-session | \
+        --no-tools | -nt | --no-builtin-tools | -nbt | \
+        --no-extensions | -ne | --no-skills | -ns | \
+        --no-prompt-templates | -np | --no-themes | --list-models | \
+        --verbose | --no-approve | -na | --offline)
+        ;;
+      -*)
+        die "pwt pr does not allow Pi option: $arg"
+        ;;
+    esac
+    index=$((index + 1))
   done
 }
 
@@ -231,12 +356,1904 @@ launch() {
   exec "$pi_command"
 }
 
+# Pi migrates a project .pi/commands directory before it creates the agent
+# session. Refuse that write, and reject a .pi symlink that could redirect it
+# outside the selected worktree before this check reaches exec.
+validate_pr_startup_paths() {
+  local config="$1/.pi"
+  [[ ! -L $config ]] ||
+    die 'pwt pr does not allow a symlinked .pi directory'
+  [[ ! -e $config/settings.json && ! -L $config/settings.json ]] ||
+    die 'pwt pr does not allow .pi/settings.json before trust enforcement'
+  if [[ -e $config/commands && ! -e $config/prompts ]]; then
+    die 'pwt pr refuses a worktree where Pi would migrate .pi/commands to .pi/prompts before launch'
+  fi
+}
+
+# Rejects PATH entries whose meaning changes with the working directory. The
+# caller label keeps the refusal specific at each trust boundary.
+validate_absolute_path_entries() {
+  local context=$1 remaining=${PATH-} entry more
+  while :; do
+    more=0
+    case $remaining in
+      *:*)
+        entry=${remaining%%:*}
+        remaining=${remaining#*:}
+        more=1
+        ;;
+      *) entry=$remaining ;;
+    esac
+
+    case $entry in
+      /*) ;;
+      *) die "$context requires absolute PATH entries" ;;
+    esac
+    ((more)) || break
+  done
+}
+
+# Pi's interpreter and helper lookups happen after launch enters the PR
+# worktree. A relative PATH entry would then resolve against untrusted content.
+validate_pr_path() {
+  validate_absolute_path_entries 'pwt pr'
+}
+
+# Keep the enforced suffix adjacent to exec so no later PR preparation can
+# accidentally append an argument after the last-value-wins tool/trust policy.
+launch_pr() {
+  local branch=$1 target=$2
+  validate_pr_startup_paths "$target"
+  # Cwd-sensitive Pi overrides can redirect configuration, migrations, or
+  # session writes through tracked PR paths. Use only trusted locations here.
+  unset PI_CODING_AGENT_DIR PI_PACKAGE_DIR
+  PI_CODING_AGENT_SESSION_DIR="$primary_common/pwt/sessions/${target##*/}"
+  export PI_CODING_AGENT_SESSION_DIR
+  LAUNCH_ARGS+=(--no-extensions --tools read,grep,find,ls --no-approve)
+  require_managed_worktree "$branch" "$target"
+  launch "$target"
+}
+
 # ------------------------------------------------------------------- commands
+
+validate_branch() {
+  git -C "$primary" check-ref-format --branch "$1" >/dev/null 2>&1 ||
+    die "invalid branch name: $1"
+}
+
+# Prints the path of the worktree holding a local branch, if any. Porcelain
+# output keeps paths and branch names unambiguous without depending on columns.
+branch_worktree() {
+  local wanted=$1 line path='' records
+  records=$(git -C "$primary" worktree list --porcelain) || return 2
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        ;;
+      "branch refs/heads/$wanted")
+        printf '%s\n' "$path"
+        return 0
+        ;;
+    esac
+  done <<< "$records"
+  return 1
+}
+
+# True only when resetting a local branch cannot discard local-only commits.
+# Fully qualified refs keep the pull-request-controlled branch name from
+# resolving to an unrelated tag or other ref.
+branch_contained_in_origin() {
+  local branch=$1
+  if ! git -C "$primary" show-ref --verify --quiet \
+    "refs/remotes/origin/$branch"; then
+    return 1
+  fi
+  if git -C "$primary" merge-base --is-ancestor \
+    "refs/heads/$branch" "refs/remotes/origin/$branch"; then
+    return 0
+  fi
+  return 1
+}
+
+# pwt records preparation state before Git creates the worktree. The marker
+# lives in shared Git metadata so cleanup failure cannot hide it, while a
+# manually created legacy worktree with no marker remains reusable.
+worktree_preparation_marker() {
+  printf '%s/pwt/preparing-%s\n' "$primary_common" "${1##*/}"
+}
+
+begin_worktree_preparation() {
+  local target=$1 marker
+  marker=$(worktree_preparation_marker "$target")
+  mkdir -p "$primary_common/pwt" ||
+    die 'cannot create pwt preparation state'
+  if ! mkdir "$marker" 2>/dev/null; then
+    if [[ -e $marker || -L $marker ]]; then
+      die "stale worktree preparation state must be removed before retrying: $target"
+    fi
+    die "cannot record worktree preparation state: $target"
+  fi
+}
+
+finish_worktree_preparation() {
+  local marker
+  marker=$(worktree_preparation_marker "$1")
+  rmdir "$marker"
+}
+
+# A registered path is not automatically pwt-owned. Refuse symlinks and require
+# the physical directory to remain below the physical shared managed root.
+require_managed_worktree() {
+  local branch=$1 path=$2 physical common actual_branch
+  [[ ! -L $path ]] || die "managed worktree path must not be a symlink: $path"
+  # Diagnose a changed trusted root separately from an ordinary worktree that
+  # is registered outside pwt's ownership boundary.
+  require_current_managed_path "$managed_root"
+  physical=$(cd -P "$path" 2>/dev/null && pwd -P) ||
+    die "cannot resolve worktree directory: $path"
+  case $physical in
+    "$managed_root"/*) ;;
+    *) die "worktree is not under the managed root, so pwt does not manage it: $path" ;;
+  esac
+
+  common=$(git_common_dir "$physical") ||
+    die "registered worktree path is not a git worktree: $path"
+  [[ $common == "$primary_common" ]] ||
+    die "registered worktree belongs to a different repository: $path"
+  actual_branch=$(git -C "$physical" symbolic-ref --quiet --short HEAD 2>/dev/null) ||
+    die "registered worktree is not on the expected branch: $branch"
+  [[ $actual_branch == "$branch" ]] ||
+    die "registered worktree is on $actual_branch, not the expected branch: $branch"
+}
+
+require_prepared_worktree() {
+  local path=$1 marker
+  marker=$(worktree_preparation_marker "$path")
+  [[ ! -e $marker && ! -L $marker ]] ||
+    die "worktree preparation is incomplete and must be removed before reuse: $path"
+}
+
+require_reusable_worktree() {
+  local branch=$1 existing=$2
+  if [[ $existing == "$primary" ]]; then
+    die "$branch is checked out in the primary checkout ($primary); use 'pwt root' to work there"
+  fi
+
+  case $existing in
+    "$managed_root"/*) ;;
+    *) die "$branch is checked out at $existing, which pwt does not manage" ;;
+  esac
+  require_managed_worktree "$branch" "$existing"
+  require_prepared_worktree "$existing"
+}
+
+reuse_or_refuse() {
+  local branch=$1 existing=$2
+  require_reusable_worktree "$branch" "$existing"
+  note "reusing existing worktree for $branch"
+  launch "$existing"
+}
+
+# Query the remote rather than cached origin/HEAD, which can remain stale after
+# a repository changes its default branch.
+default_remote_branch() {
+  local ref
+  if ! ref=$(git -C "$primary" ls-remote --symref origin HEAD 2>/dev/null |
+    sed -n 's|^ref: refs/heads/\([^[:space:]]*\).*|\1|p' | head -1); then
+    die 'cannot determine the current origin default branch'
+  fi
+  [[ -n $ref ]] || die 'cannot determine the current origin default branch'
+  printf '%s\n' "$ref"
+}
+
+local_branch_exists() {
+  local branch=$1 status
+  if git -C "$primary" show-ref --verify --quiet "refs/heads/$branch"; then
+    return 0
+  else
+    status=$?
+  fi
+  ((status == 1)) && return 1
+  return 2
+}
+
+worktree_name_for_branch() {
+  printf '%s\n' "${1//\//-}"
+}
+
+# check-ref-format protects Git's ref namespace; this second allowlist protects
+# the filesystem path segment derived from that ref.
+validate_worktree_name() {
+  local LC_ALL=C
+  case $1 in
+    '' | . | .. | *..* | */* | *[!A-Za-z0-9._-]*)
+      die "branch name does not produce a safe directory name: $1"
+      ;;
+  esac
+}
+
+registered_at() {
+  local wanted=$1 line records
+  records=$(git -C "$primary" worktree list --porcelain) || return 2
+  while IFS= read -r line; do
+    if [[ $line == "worktree $wanted" ]]; then
+      return 0
+    fi
+  done <<< "$records"
+  return 1
+}
+
+# Repository discovery records managed_root as a physical path. Re-resolve it
+# before every managed-root write so a later ancestor substitution cannot turn
+# that trusted string into a path outside the original root.
+managed_path_is_current() {
+  local path=$1 resolved_root resolved_path
+  resolved_root=$(resolve_path "$managed_root") || return 1
+  [[ $resolved_root == "$managed_root" ]] || return 1
+  resolved_path=$(resolve_path "$path") || return 1
+  case $resolved_path in
+    "$managed_root" | "$managed_root"/*) return 0 ;;
+  esac
+  return 1
+}
+
+require_current_managed_path() {
+  managed_path_is_current "$1" ||
+    die "managed worktree root changed after repository discovery: $managed_root"
+}
+
+ensure_managed_root() {
+  local physical
+  require_current_managed_path "$managed_root"
+  mkdir -p "$managed_root" || die "cannot create managed worktree root: $managed_root"
+  physical=$(cd -P "$managed_root" 2>/dev/null && pwd -P) ||
+    die "cannot resolve managed worktree root after creation: $managed_root"
+  [[ $physical == "$managed_root" ]] ||
+    die "managed worktree root changed while it was being created: $managed_root"
+}
+
+ensure_available_path() {
+  local path=$1 status
+  [[ ! -L $path ]] || die "target path must not be a symlink: $path"
+  require_current_managed_path "$path"
+  if registered_at "$path"; then
+    die "target path is already registered for another branch: $path"
+  else
+    status=$?
+  fi
+  ((status == 1)) || die 'cannot list repository worktrees'
+  [[ ! -e $path ]] ||
+    die "target path exists but is not a registered worktree: $path"
+}
+
+# Removes a newly created worktree that could not be prepared. Leaving it
+# registered would make the next `pwt branch` silently reuse an incomplete tree.
+abandon_worktree() {
+  local target=$1 status
+  if ! managed_path_is_current "$target"; then
+    warn "managed worktree root changed; refusing incomplete-worktree cleanup: $managed_root"
+    return 1
+  fi
+  if ! git -C "$primary" worktree remove --force "$target" 2>/dev/null; then
+    warn "cannot remove the incomplete worktree: $target"
+    return 1
+  fi
+  if [[ -e $target || -L $target ]]; then
+    warn "incomplete worktree path remains after cleanup: $target"
+    return 1
+  fi
+  if registered_at "$target"; then
+    warn "incomplete worktree remains registered after cleanup: $target"
+    return 1
+  else
+    status=$?
+  fi
+  ((status == 1)) || {
+    warn 'cannot verify incomplete worktree cleanup'
+    return 1
+  }
+}
+
+# Copies untracked local files selected by the primary checkout's
+# .worktreeinclude into a newly created worktree. Both pattern discovery and
+# sources stay rooted at the physical primary checkout.
+copy_worktree_includes() {
+  local target=$1 pattern_file="$primary/.worktreeinclude"
+  [[ -f $pattern_file ]] || return 0
+
+  if ! managed_path_is_current "$target"; then
+    warn "managed worktree root changed while preparing includes: $managed_root"
+    return 1
+  fi
+
+  # Command substitution cannot preserve NUL bytes. A temporary file keeps the
+  # Git result lossless and, separately, lets us distinguish a Git failure from
+  # an empty match set. Every fallible operation returns rather than exits so the
+  # caller always gets a chance to abandon the incomplete worktree.
+  local list_file
+  list_file=$(mktemp "${TMPDIR:-/tmp}/pwt.XXXXXX") || {
+    warn 'cannot create a temporary file'
+    return 1
+  }
+  PWT_LIST_FILE=$list_file
+
+  if ! (cd "$primary" &&
+    git ls-files --others --ignored --exclude-from="$pattern_file" -z) \
+    >"$list_file"; then
+    warn 'cannot list .worktreeinclude matches'
+    return 1
+  fi
+
+  local resolved_target
+  resolved_target=$(cd -P "$target" 2>/dev/null && pwd -P) || {
+    warn "cannot resolve the worktree directory: $target"
+    return 1
+  }
+
+  local rel src dst dst_dir resolved_dir copied=0 refused_beads=0
+  while IFS= read -r -d '' rel; do
+    case $rel in
+      .beads | .beads/*)
+        refused_beads=1
+        continue
+        ;;
+    esac
+
+    # git ls-files currently guarantees normalized repository-relative paths.
+    # State that invariant again immediately before turning its output into a
+    # destination path rather than trusting it implicitly.
+    case $rel in
+      /* | .. | ../* | */.. | */../*)
+        warn "refusing to copy a path that escapes the worktree: $rel"
+        return 1
+        ;;
+    esac
+
+    src="$primary/$rel"
+    if [[ -L $src ]]; then
+      warn "refusing to copy a symlink from the primary checkout: $rel"
+      return 1
+    fi
+    [[ -f $src ]] || continue
+    dst="$target/$rel"
+
+    # A branch controls the fresh target's tracked contents. Refuse the shapes
+    # through which cp could follow a committed symlink or copy into a directory
+    # and write outside the managed worktree.
+    if [[ -L $dst ]]; then
+      warn "refusing to copy onto a symlink inside the worktree: $rel"
+      return 1
+    fi
+    if [[ -e $dst && -f $dst ]]; then
+      warn "refusing to overwrite an existing file inside the worktree: $rel"
+      return 1
+    fi
+    if [[ -e $dst ]]; then
+      warn "refusing to copy onto a non-regular destination inside the worktree: $rel"
+      return 1
+    fi
+    # Check before mkdir: mkdir -p follows a symlink at any existing ancestor
+    # and could otherwise create an attacker-chosen directory outside the tree.
+    dst_dir=${dst%/*}
+    if ! managed_path_is_current "$target"; then
+      warn "managed worktree root changed while preparing includes: $managed_root"
+      return 1
+    fi
+    resolved_dir=$(resolve_path "$dst_dir") || {
+      warn "cannot resolve the destination directory for $rel"
+      return 1
+    }
+    case "$resolved_dir/" in
+      "$resolved_target"/*) ;;
+      *)
+        warn "refusing to copy $rel — its destination resolves outside the worktree"
+        return 1
+        ;;
+    esac
+    mkdir -p "$dst_dir" || {
+      warn "cannot create the directory for $rel"
+      return 1
+    }
+
+    # Re-check after creating the directory. This closes the remaining same-user
+    # substitution window as far as a portable Bash implementation can before cp.
+    resolved_dir=$(cd -P "$dst_dir" 2>/dev/null && pwd -P) || {
+      warn "cannot resolve the destination directory for $rel"
+      return 1
+    }
+    case "$resolved_dir/" in
+      "$resolved_target"/*) ;;
+      *)
+        warn "refusing to copy $rel — its destination resolves outside the worktree"
+        return 1
+        ;;
+    esac
+
+    if ! managed_path_is_current "$target"; then
+      warn "managed worktree root changed while preparing includes: $managed_root"
+      return 1
+    fi
+    cp -p "$src" "$dst" || {
+      warn "cannot copy $rel into the worktree"
+      return 1
+    }
+    copied=$((copied + 1))
+  done <"$list_file"
+
+  rm -f "$list_file"
+  PWT_LIST_FILE=''
+
+  if ((refused_beads)); then
+    warn 'refusing to copy .beads/ — worktrees share the primary checkout issue database'
+  fi
+  note "copied $copied file(s) matching .worktreeinclude"
+}
+
+prepare_worktree() {
+  local target=$1
+  copy_worktree_includes "$target" || return 1
+  finish_worktree_preparation "$target" || {
+    warn "cannot clear completed worktree preparation: $target"
+    return 1
+  }
+}
+
+fail_preparation() {
+  local branch=$1 target=$2
+  if ! abandon_worktree "$target"; then
+    die "could not prepare $branch; cleanup failed and the worktree remains blocked: $target"
+  fi
+  finish_worktree_preparation "$target" ||
+    die "could not clear failed worktree preparation state: $target"
+  die "could not prepare the worktree for $branch"
+}
+
+fail_worktree_creation() {
+  local branch=$1 target=$2 status
+  if registered_at "$target"; then
+    if ! abandon_worktree "$target"; then
+      die "could not create $branch; cleanup failed and the worktree remains blocked: $target"
+    fi
+  else
+    status=$?
+    ((status == 1)) ||
+      die "could not create $branch and cannot verify whether cleanup is needed: $target"
+    if [[ -e $target || -L $target ]]; then
+      die "could not create $branch and a partial path remains blocked: $target"
+    fi
+  fi
+  finish_worktree_preparation "$target" ||
+    die "could not clear failed worktree creation state: $target"
+  die "could not create the worktree for $branch"
+}
+
+require_gh() {
+  local what=$1
+  command -v gh >/dev/null 2>&1 ||
+    die "$what needs gh to reach GitHub, but gh is not on PATH"
+  gh auth status >/dev/null 2>&1 ||
+    die "$what needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)"
+}
+
+valid_head_oid() {
+  local LC_ALL=C oid=$1
+  case $oid in
+    '' | *[!0-9A-Fa-f]*) return 1 ;;
+  esac
+  [[ ${#oid} == 40 || ${#oid} == 64 ]]
+}
+
+valid_pr_number() {
+  local LC_ALL=C number=$1
+  case $number in '' | *[!0-9]*) return 1 ;; esac
+  return 0
+}
+
+# A failed status query must never read as a clean reusable worktree. The exit
+# status is captured explicitly because errexit is disabled inside $(...).
+worktree_is_dirty() {
+  local path=$1 action=${2:-remove} out rc
+  out=$(git -C "$path" status --porcelain --untracked-files=all \
+    --ignore-submodules=none)
+  rc=$?
+  ((rc == 0)) ||
+    die "cannot determine whether $path is clean (git exited $rc); refusing to $action"
+  [[ -n $out ]]
+}
+
+# Newline-delimited output is safe here: ls-files C-quotes unusual paths, and
+# these names are displayed only rather than turned back into filesystem paths.
+worktree_ignored_files() {
+  local out rc
+  out=$(git -C "$1" ls-files --others --ignored --exclude-standard)
+  rc=$?
+  ((rc == 0)) || return 1
+  printf '%s' "$out"
+}
+
+# Git status intentionally trusts index suppression flags. Inspect them
+# losslessly so assume-unchanged edits and materialized skip-worktree entries
+# cannot make local tracked content look clean. Returns 0 for hidden state, 1
+# for none, and 2 when inspection itself fails; the problem is global because
+# callers use this predicate in conditionals where a subshell would lose it.
+worktree_has_hidden_index_state() {
+  local LC_ALL=C path=$1 list_file record flag rel
+  HIDDEN_INDEX_PROBLEM=''
+  list_file=$(mktemp "${TMPDIR:-/tmp}/pwt.XXXXXX") ||
+    return 2
+  PWT_LIST_FILE=$list_file
+
+  if ! git -C "$path" ls-files -v -z >"$list_file"; then
+    rm -f "$list_file" >/dev/null 2>&1 || true
+    PWT_LIST_FILE=''
+    return 2
+  fi
+
+  while IFS= read -r -d '' record; do
+    flag=${record%% *}
+    rel=${record#??}
+    case $flag in
+      [a-z])
+        HIDDEN_INDEX_PROBLEM="assume-unchanged tracked file: $rel"
+        break
+        ;;
+      S)
+        if [[ -e "$path/$rel" || -L "$path/$rel" ]]; then
+          HIDDEN_INDEX_PROBLEM="materialized skip-worktree tracked file: $rel"
+          break
+        fi
+        ;;
+    esac
+  done <"$list_file"
+
+  rm -f "$list_file" || return 2
+  PWT_LIST_FILE=''
+  [[ -n $HIDDEN_INDEX_PROBLEM ]]
+}
+
+refuse_hidden_index_state() {
+  local path=$1 action=${2:-remove} status=0
+  worktree_has_hidden_index_state "$path" || status=$?
+  case $status in
+    0)
+      die "worktree has hidden local state ($HIDDEN_INDEX_PROBLEM), refusing to $action: $path"
+      ;;
+    1) return 0 ;;
+    *) die "cannot inspect tracked-file index flags in $path; refusing to $action" ;;
+  esac
+}
+
+remote_matches_identity() {
+  local remote=$1 wanted_host=$2 wanted_owner=$3 wanted_repo=$4
+  local url rest authority found_host='' found_owner found_repo
+  url=$(git -C "$primary" remote get-url "$remote" 2>/dev/null) || return 1
+  case $url in
+    *://*)
+      authority=${url#*://}
+      authority=${authority%%/*}
+      authority=${authority##*@}
+      found_host=${authority%%:*}
+      ;;
+    *@*:*/*)
+      authority=${url%%:*}
+      found_host=${authority##*@}
+      ;;
+    *:*/*)
+      found_host=${url%%:*}
+      ;;
+  esac
+  url=${url%.git}
+  url=${url%/}
+  found_repo=${url##*/}
+  rest=${url%/*}
+  found_owner=${rest##*/}
+  found_owner=${found_owner##*:}
+  found_host=${found_host:-github.com}
+  valid_host "$found_host" || return 1
+  valid_identity_part "$found_owner" || return 1
+  valid_identity_part "$found_repo" || return 1
+  found_host=$(printf '%s' "$found_host" | tr '[:upper:]' '[:lower:]')
+  [[ $found_host == "$wanted_host" ]] &&
+  [[ $(printf '%s' "$found_owner" | tr '[:upper:]' '[:lower:]') == "$wanted_owner" ]] &&
+    [[ $(printf '%s' "$found_repo" | tr '[:upper:]' '[:lower:]') == "$wanted_repo" ]]
+}
+
+pr_url_identity() {
+  local url=$1 number=$2 base rest authority
+  case $url in
+    https://*/pull/"$number") ;;
+    *) return 1 ;;
+  esac
+  base=${url%/pull/$number}
+  authority=${base#https://}
+  PR_BASE_HOST=${authority%%/*}
+  PR_BASE_REPO=${base##*/}
+  rest=${base%/*}
+  PR_BASE_OWNER=${rest##*/}
+  valid_host "$PR_BASE_HOST" || return 1
+  valid_identity_part "$PR_BASE_OWNER" || return 1
+  valid_identity_part "$PR_BASE_REPO" || return 1
+  PR_BASE_HOST=$(printf '%s' "$PR_BASE_HOST" | tr '[:upper:]' '[:lower:]')
+  PR_BASE_OWNER=$(printf '%s' "$PR_BASE_OWNER" | tr '[:upper:]' '[:lower:]')
+  PR_BASE_REPO=$(printf '%s' "$PR_BASE_REPO" | tr '[:upper:]' '[:lower:]')
+}
+
+branch_tracks_pr_head() {
+  local branch=$1 number=$2 pr_url=$3 head_ref=$4 head_owner=$5 head_repo=$6
+  local remote merge
+  remote=$(git -C "$primary" config --get \
+    "branch.$branch.remote" 2>/dev/null) || return 1
+  merge=$(git -C "$primary" config --get \
+    "branch.$branch.merge" 2>/dev/null) || return 1
+  pr_url_identity "$pr_url" "$number" || return 1
+  if [[ $merge == "refs/heads/$head_ref" ]]; then
+    remote_matches_identity "$remote" "$PR_BASE_HOST" "$head_owner" "$head_repo"
+    return
+  fi
+  if [[ $merge == "refs/pull/$number/head" ]]; then
+    remote_matches_identity "$remote" "$PR_BASE_HOST" \
+      "$PR_BASE_OWNER" "$PR_BASE_REPO"
+    return
+  fi
+  return 1
+}
+
+record_pr_markers() {
+  local branch=$1 pr_url=$2 head_oid=$3 old_url old_head
+  old_url=$(git -C "$primary" config --get \
+    "branch.$branch.worktree-pr-url" 2>/dev/null) || old_url=''
+  old_head=$(git -C "$primary" config --get \
+    "branch.$branch.worktree-pr-head" 2>/dev/null) || old_head=''
+  git -C "$primary" config "branch.$branch.worktree-pr-url" "$pr_url" || return 1
+  if ! git -C "$primary" config "branch.$branch.worktree-pr-head" "$head_oid"; then
+    git -C "$primary" config --unset-all \
+      "branch.$branch.worktree-pr-url" >/dev/null 2>&1 || true
+    if [[ -n $old_url ]]; then
+      git -C "$primary" config \
+        "branch.$branch.worktree-pr-url" "$old_url" >/dev/null 2>&1 || true
+    fi
+    if [[ -n $old_head ]]; then
+      git -C "$primary" config \
+        "branch.$branch.worktree-pr-head" "$old_head" >/dev/null 2>&1 || true
+    else
+      git -C "$primary" config --unset-all \
+        "branch.$branch.worktree-pr-head" >/dev/null 2>&1 || true
+    fi
+    return 1
+  fi
+}
+
+cleanup_pr_fetch_worktree() {
+  local path=${PWT_PR_FETCH_WORKTREE:-} status
+  [[ -n $path ]] || return 0
+  managed_path_is_current "$path" || return 1
+  if registered_at "$path"; then
+    git -C "$primary" worktree remove --force "$path" || return 1
+  else
+    status=$?
+    ((status == 1)) || return 1
+    if [[ -e $path || -L $path ]]; then
+      rmdir "$path" 2>/dev/null || return 1
+    fi
+  fi
+  PWT_PR_FETCH_WORKTREE=''
+}
+
+# Fetch through gh in a detached disposable worktree. The real PR branch and
+# its ignored local files remain untouched until every reuse guard has passed.
+fetch_pr_head() {
+  local number=$1 expected_oid=$2 path actual
+  require_current_managed_path "$managed_root"
+  path=$(mktemp -d "$managed_root/.pwt-pr-fetch.XXXXXX") || return 1
+  PWT_PR_FETCH_WORKTREE=$path
+  require_current_managed_path "$path"
+  if ! git -C "$primary" worktree add --detach --quiet "$path" HEAD; then
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || return 3
+    return 1
+  fi
+  if ! (cd "$path" && gh pr checkout "$number" \
+    --repo "$origin_gh_repo" --detach); then
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || return 3
+    return 1
+  fi
+  managed_path_is_current "$path" || return 3
+  if ! actual=$(git -C "$path" rev-parse HEAD 2>/dev/null); then
+    cleanup_pr_fetch_worktree >/dev/null 2>&1 || return 3
+    return 1
+  fi
+  cleanup_pr_fetch_worktree || return 3
+  [[ $actual == "$expected_oid" ]] || return 2
+}
+
+# Refuse target-tree shapes that reset --hard would satisfy by deleting an
+# ignored local object. Candidate sets are sent to Git in batches; a nested
+# ignored-path x target-tree scan is too slow for dependency-heavy worktrees.
+pr_ignored_paths_are_safe() {
+  local target=$1 head_oid=$2 tree_file exact_file collision_file entry
+  local target_path metadata rest object_type local_path check_rc=0
+  local -a blocking_dirs=()
+  PR_COLLISION_PATH=''
+  tree_file=$(mktemp "${TMPDIR:-/tmp}/pwt-target-tree.XXXXXX") || {
+    return 2
+  }
+  exact_file=$(mktemp "${TMPDIR:-/tmp}/pwt-exact-paths.XXXXXX") || {
+    rm -f "$tree_file"
+    return 2
+  }
+  collision_file=$(mktemp "${TMPDIR:-/tmp}/pwt-collisions.XXXXXX") || {
+    rm -f "$tree_file" "$exact_file"
+    return 2
+  }
+  if ! git -C "$target" ls-tree -r -t -z "$head_oid" >"$tree_file"; then
+    rm -f "$tree_file" "$exact_file" "$collision_file"
+    return 2
+  fi
+  while IFS= read -r -d '' entry; do
+    case $entry in
+      *$'\t'*) ;;
+      *)
+        rm -f "$tree_file" "$exact_file" "$collision_file"
+        return 2
+        ;;
+    esac
+    target_path=${entry#*$'\t'}
+    metadata=${entry%%$'\t'*}
+    rest=${metadata#* }
+    object_type=${rest%% *}
+    local_path="$target/$target_path"
+
+    if [[ -e $local_path || -L $local_path ]]; then
+      if [[ ! -d $local_path || -L $local_path ]]; then
+        printf '%s\0' "$target_path" >>"$exact_file" || {
+          rm -f "$tree_file" "$exact_file" "$collision_file"
+          return 2
+        }
+      elif [[ $object_type != tree ]]; then
+        blocking_dirs+=("$target_path")
+      fi
+    fi
+  done <"$tree_file"
+
+  if [[ -s $exact_file ]]; then
+    (cd "$target" && git check-ignore -z --stdin \
+      <"$exact_file" >"$collision_file") || check_rc=$?
+    case $check_rc in
+      0 | 1) ;;
+      *)
+        rm -f "$tree_file" "$exact_file" "$collision_file"
+        return 2
+        ;;
+    esac
+    if [[ -s $collision_file ]]; then
+      IFS= read -r -d '' PR_COLLISION_PATH <"$collision_file" || {
+        rm -f "$tree_file" "$exact_file" "$collision_file"
+        return 2
+      }
+      rm -f "$tree_file" "$exact_file" "$collision_file"
+      return 1
+    fi
+  fi
+
+  if ((${#blocking_dirs[@]})); then
+    : >"$collision_file"
+    if ! (cd "$target" && GIT_LITERAL_PATHSPECS=1 \
+      git ls-files -z --others --ignored --exclude-standard -- \
+      "${blocking_dirs[@]}") >"$collision_file"; then
+      rm -f "$tree_file" "$exact_file" "$collision_file"
+      return 2
+    fi
+    if [[ -s $collision_file ]]; then
+      IFS= read -r -d '' PR_COLLISION_PATH <"$collision_file" || {
+        rm -f "$tree_file" "$exact_file" "$collision_file"
+        return 2
+      }
+      rm -f "$tree_file" "$exact_file" "$collision_file"
+      return 1
+    fi
+  fi
+
+  rm -f "$tree_file" "$exact_file" "$collision_file"
+  return 0
+}
+
+reuse_pr_or_refuse() {
+  local branch=$1 existing=$2 number=$3 pr_url=$4 head_oid=$5
+  local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9
+  local marker_url marker_head legacy=0 current collision_rc final fetch_rc=0
+
+  require_reusable_worktree "$branch" "$existing"
+
+  marker_url=$(git -C "$primary" config --get \
+    "branch.$branch.worktree-pr-url" 2>/dev/null) || marker_url=''
+  marker_head=$(git -C "$primary" config --get \
+    "branch.$branch.worktree-pr-head" 2>/dev/null) || marker_head=''
+  if [[ -n $marker_url || -n $marker_head ]]; then
+    [[ -n $marker_url && -n $marker_head ]] ||
+      die "cannot verify the pull request identity for reused worktree: $existing"
+    [[ $marker_url == "$pr_url" ]] ||
+      die "$branch is already a worktree for a different pull request: $marker_url"
+    valid_head_oid "$marker_head" ||
+      die "cannot verify the previous pull request head for reused worktree: $existing"
+  else
+    branch_tracks_pr_head "$branch" "$number" "$pr_url" "$head_ref" \
+      "$head_owner" "$head_repo" ||
+      die "cannot verify that reused worktree belongs to pull request #$number: $existing"
+    legacy=1
+  fi
+
+  if worktree_is_dirty "$existing" refresh; then
+    die "worktree has uncommitted or untracked work, refusing to refresh: $existing"
+  fi
+  refuse_hidden_index_state "$existing" refresh
+
+  fetch_pr_head "$number" "$head_oid" || fetch_rc=$?
+  case $fetch_rc in
+    0) ;;
+    2)
+      die "pull request #$number changed while its head was being fetched; run pwt pr $number again"
+      ;;
+    3)
+      die "temporary PR fetch worktree remains blocked after cleanup failure: $PWT_PR_FETCH_WORKTREE"
+      ;;
+    *) die "gh could not fetch pull request #$number for safe reuse" ;;
+  esac
+
+  # The authenticated fetch is external work. Re-check every local-state view
+  # at the mutation boundary so an editor or watcher cannot turn the earlier
+  # clean result stale and have a rewrite discard its new work.
+  if worktree_is_dirty "$existing" refresh; then
+    die "worktree changed while pull request #$number was being fetched, refusing to refresh: $existing"
+  fi
+  refuse_hidden_index_state "$existing" refresh
+  pr_ignored_paths_are_safe "$existing" "$head_oid" || collision_rc=$?
+  case ${collision_rc:-0} in
+    0) ;;
+    1)
+      die "ignored local path would be overwritten by pull request #$number, refusing to refresh: $PR_COLLISION_PATH"
+      ;;
+    *) die "cannot inspect ignored local paths in $existing; refusing to refresh" ;;
+  esac
+
+  require_reusable_worktree "$branch" "$existing"
+  current=$(git -C "$existing" rev-parse HEAD 2>/dev/null) ||
+    die "cannot resolve the current head in reused worktree: $existing"
+  if [[ $current == "$head_oid" ]]; then
+    :
+  elif git -C "$existing" merge-base --is-ancestor "$current" "$head_oid"; then
+    git -C "$existing" merge --ff-only "$head_oid" ||
+      die "could not fast-forward reused worktree to pull request #$number"
+  elif ((legacy == 0)) && [[ $current == "$marker_head" ]]; then
+    git -C "$existing" reset --keep "$head_oid" ||
+      die "could not refresh rewritten pull request #$number"
+  else
+    die "reused worktree has local or unverifiable commits, refusing to refresh: $existing"
+  fi
+
+  final=$(git -C "$existing" rev-parse HEAD 2>/dev/null) ||
+    die "cannot verify refreshed pull request #$number"
+  [[ $final == "$head_oid" ]] ||
+    die "refreshed worktree does not match pull request #$number; refusing to launch"
+  if worktree_is_dirty "$existing" refresh; then
+    die "worktree changed while pull request #$number was being refreshed, refusing to launch: $existing"
+  fi
+  require_reusable_worktree "$branch" "$existing"
+  record_pr_markers "$branch" "$pr_url" "$head_oid" ||
+    die "could not record the verified identity for pull request #$number"
+
+  note "reusing existing worktree for $branch at pull request #$number head"
+  if [[ $cross == true ]]; then
+    warn "pull request #$number comes from a fork — this is code you did not write, and opening it here runs it on your machine"
+  fi
+  launch_pr "$branch" "$existing"
+}
+
+# Removing the directory containing the caller leaves its shell in a path that
+# no longer exists. Refuse both the worktree root and any directory below it.
+refuse_if_caller_inside() {
+  local target=$1 here
+  here=$(pwd -P 2>/dev/null) ||
+    die 'cannot determine the current directory; refusing to remove'
+  if [[ $here == "$target" || $here == "$target"/* ]]; then
+    die "refusing to remove the worktree you are standing in: $target"
+  fi
+}
+
+# Resolve one branch to a pwt-owned physical worktree. Git enumeration failures
+# are distinct from an ordinary branch with no worktree and must fail closed.
+resolve_removable() {
+  local branch=$1 target status
+  validate_branch "$branch"
+  if target=$(branch_worktree "$branch"); then
+    :
+  else
+    status=$?
+    ((status == 1)) && die "no worktree checked out for branch: $branch"
+    die 'cannot list repository worktrees; refusing to remove'
+  fi
+  [[ $target != "$primary" ]] ||
+    die "refusing to remove the primary checkout: $target"
+  require_managed_worktree "$branch" "$target"
+  target=$(cd -P "$target" 2>/dev/null && pwd -P) ||
+    die "cannot resolve worktree directory: $target"
+  refuse_if_caller_inside "$target"
+  resolved_worktree=$target
+}
+
+# Inspect local content, then repeat ownership at the final mutation boundary
+# before asking Git to remove anything.
+remove_worktree() {
+  local branch=$1 delete_branch=$2 expected_target=${3:-} expected_head=${4:-}
+  local target ignored_before ignored_after current_head
+  local f status marker
+  local -a doomed=()
+
+  resolve_removable "$branch"
+  target=$resolved_worktree
+  [[ -z $expected_target || $target == "$expected_target" ]] ||
+    die "worktree changed after prune classification: $branch"
+  if [[ -n $expected_head ]]; then
+    current_head=$(git -C "$target" rev-parse HEAD 2>/dev/null) ||
+      die "cannot verify worktree HEAD before pruning: $branch"
+    [[ $current_head == "$expected_head" ]] ||
+      die "worktree HEAD changed after prune classification: $branch"
+  fi
+
+  ignored_before=$(worktree_ignored_files "$target") ||
+    die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
+  refuse_hidden_index_state "$target"
+  if worktree_is_dirty "$target"; then
+    die "worktree has uncommitted or untracked work, refusing to remove: $target"
+  fi
+  ignored_after=$(worktree_ignored_files "$target") ||
+    die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
+  [[ $ignored_after == "$ignored_before" ]] ||
+    die "ignored files changed while preparing removal; refusing to remove: $target"
+
+  # Status and ignored-file inspection are external boundaries. Re-resolve the
+  # named branch after both, then compare it with the exact inspected target.
+  resolve_removable "$branch"
+  [[ $resolved_worktree == "$target" ]] ||
+    die "worktree registration changed while preparing removal: $branch"
+  if [[ -n $expected_head ]]; then
+    current_head=$(git -C "$target" rev-parse HEAD 2>/dev/null) ||
+      die "cannot reverify worktree HEAD before pruning: $branch"
+    [[ $current_head == "$expected_head" ]] ||
+      die "worktree HEAD changed while preparing removal: $branch"
+  fi
+
+  while IFS= read -r f; do
+    [[ -n $f ]] && doomed+=("$f")
+  done <<< "$ignored_after"
+  if ((${#doomed[@]})); then
+    note "removing will destroy ${#doomed[@]} ignored file(s):"
+    printf '  %s\n' "${doomed[@]}"
+  fi
+
+  git -C "$primary" worktree remove "$target" ||
+    die "Git could not remove worktree: $target"
+  [[ ! -e $target && ! -L $target ]] ||
+    die "worktree path remains after Git reported removal: $target"
+  if registered_at "$target"; then
+    die "worktree remains registered after Git reported removal: $target"
+  else
+    status=$?
+  fi
+  ((status == 1)) ||
+    die "removed $target but cannot verify its worktree registration"
+
+  marker=$(worktree_preparation_marker "$target")
+  if [[ -L $marker ]]; then
+    die "removed $target but its preparation state is not a directory: $marker"
+  elif [[ -d $marker ]]; then
+    rmdir "$marker" ||
+      die "removed $target but could not clear its preparation state: $marker"
+  elif [[ -e $marker ]]; then
+    die "removed $target but its preparation state is not a directory: $marker"
+  fi
+  note "removed $target"
+
+  if ((delete_branch)); then
+    # -d, never -D: local commits must survive a requested branch cleanup.
+    git -C "$primary" branch -d "$branch" ||
+      die "removed worktree but could not safely delete branch: $branch"
+    note "deleted branch $branch"
+  fi
+}
+
+fail_pr_worktree() {
+  local target=$1 message=$2
+  if ! abandon_worktree "$target"; then
+    die "$message; cleanup failed and the worktree remains blocked: $target"
+  fi
+  finish_worktree_preparation "$target" ||
+    die "$message; could not clear failed worktree preparation state: $target"
+  die "$message"
+}
+
+worktree_path_is_managed() {
+  local path=$1 physical
+  [[ ! -L $path ]] || return 1
+  physical=$(cd -P "$path" 2>/dev/null && pwd -P) || return 1
+  case $physical in
+    "$managed_root"/*) return 0 ;;
+  esac
+  return 1
+}
 
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
   launch "$primary"
+}
+
+cmd_new() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'new requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} existing base name target status
+  validate_branch "$branch"
+  [[ $branch == */* ]] ||
+    die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
+
+  if existing=$(branch_worktree "$branch"); then
+    reuse_or_refuse "$branch" "$existing"
+  else
+    status=$?
+    ((status == 1)) || die 'cannot list repository worktrees'
+  fi
+  if local_branch_exists "$branch"; then
+    die "local branch already exists but is not checked out: $branch (use 'pwt branch $branch')"
+  else
+    status=$?
+    ((status == 1)) || die "cannot inspect local branch: $branch"
+  fi
+
+  name=$(worktree_name_for_branch "$branch")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+
+  base=$(default_remote_branch)
+  note "fetching origin/$base"
+  git -C "$primary" fetch --quiet origin \
+    "refs/heads/$base:refs/remotes/origin/$base" ||
+    die "could not fetch origin/$base"
+
+  ensure_managed_root
+  # Fetch is an external command and can run hooks. Re-check immediately before
+  # Git writes so a substituted path is refused instead of followed.
+  ensure_available_path "$target"
+  begin_worktree_preparation "$target"
+  require_current_managed_path "$target"
+  git -C "$primary" worktree add -b "$branch" "$target" "origin/$base" ||
+    fail_worktree_creation "$branch" "$target"
+  require_managed_worktree "$branch" "$target"
+  prepare_worktree "$target" || fail_preparation "$branch" "$target"
+  launch "$target"
+}
+
+cmd_branch() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'branch requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} existing name target status
+  validate_branch "$branch"
+
+  if existing=$(branch_worktree "$branch"); then
+    reuse_or_refuse "$branch" "$existing"
+  else
+    status=$?
+    ((status == 1)) || die 'cannot list repository worktrees'
+  fi
+
+  name=$(worktree_name_for_branch "$branch")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+  ensure_available_path "$target"
+  ensure_managed_root
+
+  if local_branch_exists "$branch"; then
+    ensure_available_path "$target"
+    begin_worktree_preparation "$target"
+    require_current_managed_path "$target"
+    git -C "$primary" worktree add "$target" "$branch" ||
+      fail_worktree_creation "$branch" "$target"
+  else
+    status=$?
+    ((status == 1)) || die "cannot inspect local branch: $branch"
+    note "fetching origin/$branch"
+    git -C "$primary" fetch --quiet origin \
+      "refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null ||
+      die "no such branch locally or on origin: $branch"
+    # Fetch is an external command and can run hooks. Re-check immediately before
+    # Git writes so a substituted path is refused instead of followed.
+    ensure_available_path "$target"
+    begin_worktree_preparation "$target"
+    require_current_managed_path "$target"
+    git -C "$primary" worktree add -b "$branch" "$target" "origin/$branch" ||
+      fail_worktree_creation "$branch" "$target"
+  fi
+
+  require_managed_worktree "$branch" "$target"
+  prepare_worktree "$target" || fail_preparation "$branch" "$target"
+  launch "$target"
+}
+
+cmd_pr() {
+  local -a rest=()
+  local force=0
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --)
+        rest+=("$@")
+        break
+        ;;
+      --force)
+        force=1
+        ;;
+      *)
+        rest+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  if ((${#rest[@]})); then
+    parse_launch_args "${rest[@]}"
+  else
+    parse_launch_args
+  fi
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) ||
+    die 'pr requires exactly one pull request number'
+
+  local number=${LAUNCH_POSITIONAL[0]} meta head_ref cross head_owner head_repo
+  local pr_url head_oid existing status name target checkout_ok=1
+  local branch_existed=0 auto_force=0 hint=''
+  valid_pr_number "$number" ||
+    die "pull request must be a number: $number"
+  validate_pr_launch_args
+  validate_pr_path
+
+  require_gh pr
+  meta=$(gh pr view "$number" --repo "$origin_gh_repo" \
+    --json headRefName,isCrossRepository,headRepositoryOwner,headRepository,url,headRefOid \
+    --jq '.headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name, .url, .headRefOid' \
+    2>/dev/null) || die "cannot resolve pull request #$number"
+  head_ref=$(printf '%s\n' "$meta" | sed -n 1p)
+  cross=$(printf '%s\n' "$meta" | sed -n 2p)
+  head_owner=$(printf '%s\n' "$meta" | sed -n 3p | tr '[:upper:]' '[:lower:]')
+  head_repo=$(printf '%s\n' "$meta" | sed -n 4p | tr '[:upper:]' '[:lower:]')
+  pr_url=$(printf '%s\n' "$meta" | sed -n 5p)
+  head_oid=$(printf '%s\n' "$meta" | sed -n 6p)
+
+  [[ -n $head_ref ]] || die "pull request #$number has no head branch"
+  validate_branch "$head_ref"
+  [[ $cross == true || $cross == false ]] ||
+    die "cannot determine whether pull request #$number comes from a fork"
+  valid_identity_part "$head_owner" && valid_identity_part "$head_repo" ||
+    die "pull request #$number returned an invalid head repository identity"
+  pr_url_identity "$pr_url" "$number" ||
+    die "pull request #$number returned an invalid canonical URL"
+  [[ $PR_BASE_HOST == "$origin_host" &&
+    $PR_BASE_OWNER == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" &&
+    $PR_BASE_REPO == "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]] ||
+    die "pull request #$number belongs to a different repository than origin"
+  valid_head_oid "$head_oid" ||
+    die "pull request #$number returned an invalid head object ID"
+
+  name=$(worktree_name_for_branch "$head_ref")
+  validate_worktree_name "$name"
+  target="$managed_root/$name"
+
+  if existing=$(branch_worktree "$head_ref"); then
+    reuse_pr_or_refuse "$head_ref" "$existing" "$number" "$pr_url" \
+      "$head_oid" "$head_ref" "$head_owner" "$head_repo" "$cross"
+  else
+    status=$?
+    ((status == 1)) || die 'cannot list repository worktrees'
+  fi
+
+  # Capture this before gh fetches or moves any refs. A fork can reuse the name
+  # of an unrelated base-repository branch, so both repository identity gates
+  # are required before origin containment proves a reset safe.
+  if local_branch_exists "$head_ref"; then
+    branch_existed=1
+  else
+    status=$?
+    ((status == 1)) || die "cannot inspect local branch: $head_ref"
+  fi
+  if ((! force)) && [[ $cross == false ]] &&
+    [[ $head_owner == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" ]] &&
+    [[ $head_repo == "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]] &&
+    ((branch_existed)) && branch_contained_in_origin "$head_ref"; then
+    auto_force=1
+  fi
+
+  ensure_available_path "$target"
+  ensure_managed_root
+  begin_worktree_preparation "$target"
+  require_current_managed_path "$target"
+  git -C "$primary" worktree add --detach --quiet "$target" HEAD ||
+    fail_worktree_creation "$head_ref" "$target"
+
+  if ((force || auto_force)); then
+    if ((auto_force)); then
+      note "resetting $head_ref — it has no local-only commits"
+    fi
+    (cd "$target" && gh pr checkout "$number" \
+      --repo "$origin_gh_repo" --force) || checkout_ok=0
+  else
+    (cd "$target" && gh pr checkout "$number" \
+      --repo "$origin_gh_repo") || checkout_ok=0
+  fi
+  if ((! checkout_ok)); then
+    if ((branch_existed && ! force && ! auto_force)); then
+      hint=" — $head_ref may have diverged from the pull request; run 'pwt pr $number --force' to reset it"
+    fi
+    fail_pr_worktree "$target" "gh could not check out pull request #$number$hint"
+  fi
+
+  require_current_managed_path "$target"
+  local checked_out_common checked_out_branch checked_out_head
+  checked_out_common=$(git_common_dir "$target") ||
+    fail_pr_worktree "$target" \
+      "gh replaced pull request #$number with a non-worktree path"
+  [[ $checked_out_common == "$primary_common" ]] ||
+    fail_pr_worktree "$target" \
+      "gh checked pull request #$number out from a different repository"
+  checked_out_branch=$(git -C "$target" symbolic-ref --quiet --short HEAD 2>/dev/null) ||
+    fail_pr_worktree "$target" \
+      "gh did not check pull request #$number out on its head branch"
+  [[ $checked_out_branch == "$head_ref" ]] ||
+    fail_pr_worktree "$target" \
+      "gh checked pull request #$number out as $checked_out_branch instead of $head_ref"
+  checked_out_head=$(git -C "$target" rev-parse HEAD 2>/dev/null) ||
+    fail_pr_worktree "$target" \
+      "cannot verify the checked-out head for pull request #$number"
+  [[ $checked_out_head == "$head_oid" ]] ||
+    fail_pr_worktree "$target" \
+      "pull request #$number changed while it was being checked out; run pwt pr $number again"
+
+  require_managed_worktree "$head_ref" "$target"
+  copy_worktree_includes "$target" ||
+    fail_pr_worktree "$target" \
+      "could not prepare the worktree for pull request #$number"
+  record_pr_markers "$head_ref" "$pr_url" "$head_oid" ||
+    fail_pr_worktree "$target" \
+      "could not record the verified identity for pull request #$number"
+  finish_worktree_preparation "$target" ||
+    fail_pr_worktree "$target" \
+      "could not finish the worktree for pull request #$number"
+
+  if [[ $cross == true ]]; then
+    warn "pull request #$number comes from a fork — this is code you did not write, and opening it here runs it on your machine"
+  fi
+  launch_pr "$head_ref" "$target"
+}
+
+cmd_remove() {
+  local branch='' delete_branch=0
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --delete-branch) delete_branch=1 ;;
+      -h | --help)
+        usage
+        return 0
+        ;;
+      -*) die "unknown option: $1 (run 'pwt help')" ;;
+      *)
+        [[ -z $branch ]] || die 'remove takes exactly one branch name'
+        branch=$1
+        ;;
+    esac
+    shift
+  done
+  [[ -n $branch ]] || die 'remove requires a branch name'
+
+  remove_worktree "$branch" "$delete_branch"
+}
+
+# Parse one seven-line gh record and return its state only when it describes
+# the exact local commit. Identity mismatches are safe skips, while malformed
+# API output remains an error that aborts the whole pruning run.
+verified_pr_state() {
+  local meta=$1 branch=$2 expected_head=$3 allow_fork=$4 expected_url=${5:-}
+  local state head_ref cross head_owner head_repo pr_url head_oid number extra
+  local origin_owner origin_repo
+
+  state=$(printf '%s\n' "$meta" | sed -n 1p)
+  head_ref=$(printf '%s\n' "$meta" | sed -n 2p)
+  cross=$(printf '%s\n' "$meta" | sed -n 3p)
+  head_owner=$(printf '%s\n' "$meta" | sed -n 4p | tr '[:upper:]' '[:lower:]')
+  head_repo=$(printf '%s\n' "$meta" | sed -n 5p | tr '[:upper:]' '[:lower:]')
+  pr_url=$(printf '%s\n' "$meta" | sed -n 6p)
+  head_oid=$(printf '%s\n' "$meta" | sed -n 7p)
+  extra=$(printf '%s\n' "$meta" | sed -n 8p)
+
+  case $state in MERGED | OPEN | CLOSED) ;; *) return 2 ;; esac
+  [[ $head_ref == "$branch" ]] || {
+    printf 'UNVERIFIED\n'
+    return 0
+  }
+  [[ $cross == true || $cross == false ]] || return 2
+  valid_identity_part "$head_owner" && valid_identity_part "$head_repo" || return 2
+  valid_head_oid "$head_oid" || return 2
+  [[ -z $extra ]] || return 2
+
+  number=${pr_url##*/}
+  valid_pr_number "$number" || return 2
+  pr_url_identity "$pr_url" "$number" || return 2
+  origin_owner=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+  origin_repo=$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')
+  [[ $PR_BASE_HOST == "$origin_host" && $PR_BASE_OWNER == "$origin_owner" &&
+    $PR_BASE_REPO == "$origin_repo" ]] || {
+    printf 'UNVERIFIED\n'
+    return 0
+  }
+  [[ -z $expected_url || $pr_url == "$expected_url" ]] || {
+    printf 'UNVERIFIED\n'
+    return 0
+  }
+  [[ $head_oid == "$expected_head" ]] || {
+    printf 'UNVERIFIED\n'
+    return 0
+  }
+  if ((allow_fork == 0)); then
+    [[ $cross == false && $head_owner == "$origin_owner" &&
+      $head_repo == "$origin_repo" ]] || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+  fi
+  printf '%s\n' "$state"
+}
+
+# Prefer the exact PR URL recorded by `pwt pr`, including for fork PRs. A
+# normal branch has no marker, so its branch-name lookup is accepted only when
+# GitHub also reports the origin repository and the exact local HEAD.
+branch_pr_state() {
+  local branch=$1 expected_head=$2 marker_url marker_head meta rc number
+
+  if marker_url=$(git -C "$primary" config --get \
+    "branch.$branch.worktree-pr-url" 2>/dev/null); then
+    :
+  else
+    rc=$?
+    ((rc == 1)) || return 1
+    marker_url=''
+  fi
+  if marker_head=$(git -C "$primary" config --get \
+    "branch.$branch.worktree-pr-head" 2>/dev/null); then
+    :
+  else
+    rc=$?
+    ((rc == 1)) || return 1
+    marker_head=''
+  fi
+
+  if [[ -n $marker_url || -n $marker_head ]]; then
+    [[ -n $marker_url && -n $marker_head ]] || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    valid_head_oid "$marker_head" || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    [[ $marker_head == "$expected_head" ]] || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    number=${marker_url##*/}
+    valid_pr_number "$number" || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    pr_url_identity "$marker_url" "$number" || {
+      printf 'UNVERIFIED\n'
+      return 0
+    }
+    [[ $PR_BASE_HOST == "$origin_host" &&
+      $PR_BASE_OWNER == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" &&
+      $PR_BASE_REPO == "$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')" ]] ||
+      {
+        printf 'UNVERIFIED\n'
+        return 0
+      }
+    meta=$(gh pr view "$marker_url" --repo "$origin_gh_repo" \
+      --json state,headRefName,isCrossRepository,headRepositoryOwner,headRepository,url,headRefOid \
+      --jq '.state, .headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name, .url, .headRefOid' \
+      2>/dev/null) || return 1
+    verified_pr_state "$meta" "$branch" "$expected_head" 1 "$marker_url"
+    return
+  fi
+
+  meta=$(gh pr list --head "$branch" --state all --limit 1 \
+    --repo "$origin_gh_repo" \
+    --json state,headRefName,isCrossRepository,headRepositoryOwner,headRepository,url,headRefOid \
+    --jq '.[] | .state, .headRefName, .isCrossRepository, .headRepositoryOwner.login, .headRepository.name, .url, .headRefOid' \
+    2>/dev/null) || return 1
+  if [[ -z $meta ]]; then
+    printf 'NONE\n'
+    return 0
+  fi
+  verified_pr_state "$meta" "$branch" "$expected_head" 0
+}
+
+cmd_prune() {
+  local apply=0
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --yes) apply=1 ;;
+      -h | --help)
+        usage
+        return 0
+        ;;
+      -*) die "unknown option: $1 (run 'pwt help')" ;;
+      *) die 'prune takes no positional arguments' ;;
+    esac
+    shift
+  done
+
+  require_gh prune
+
+  local records line path='' branch='' locked=0 physical state here i common actual_branch
+  local local_head
+  local hidden_status
+  local -a ripe_branches=() ripe_paths=() ripe_heads=() skipped=()
+  records=$(git -C "$primary" worktree list --porcelain) ||
+    die 'cannot list repository worktrees; refusing to prune'
+  records+=$'\n'
+  here=$(pwd -P 2>/dev/null) ||
+    die 'cannot determine the current directory; refusing to prune'
+
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        branch=''
+        locked=0
+        ;;
+      'branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        ;;
+      locked | 'locked '*)
+        locked=1
+        ;;
+      '')
+        # The explicit primary exclusion is defense in depth on the tool's
+        # only bulk-delete path; managed-root containment also excludes it.
+        if [[ -n $path && -n $branch && $path != "$primary" && ! -L $path ]]; then
+          case $path in
+            "$managed_root"/*)
+              physical=$(cd -P "$path" 2>/dev/null && pwd -P) || physical=''
+              # Git records a lexical path. Resolve it again so an intermediate
+              # symlink cannot make an outside directory look managed.
+              case "$physical/" in
+                "$managed_root"/*) ;;
+                *) physical='' ;;
+              esac
+              if [[ -n $physical ]]; then
+                common=$(git_common_dir "$physical" 2>/dev/null) || common=''
+                actual_branch=$(git -C "$physical" symbolic-ref \
+                  --quiet --short HEAD 2>/dev/null) || actual_branch=''
+                if [[ $common != "$primary_common" || $actual_branch != "$branch" ]]; then
+                  skipped+=("$branch — worktree ownership cannot be verified")
+                elif ((locked)); then
+                  skipped+=("$branch — worktree is locked")
+                elif [[ $here == "$physical" || $here == "$physical"/* ]]; then
+                  skipped+=("$branch — you are standing in it")
+                else
+                  hidden_status=0
+                  worktree_has_hidden_index_state "$physical" || hidden_status=$?
+                  case $hidden_status in
+                    0)
+                      skipped+=("$branch — hidden local state ($HIDDEN_INDEX_PROBLEM)")
+                      ;;
+                    1)
+                      if worktree_is_dirty "$physical" prune; then
+                        skipped+=("$branch — uncommitted or untracked work")
+                      else
+                        local_head=$(git -C "$physical" rev-parse HEAD 2>/dev/null) ||
+                          die "cannot determine worktree HEAD for $branch; refusing to prune"
+                        valid_head_oid "$local_head" ||
+                          die "worktree returned an invalid HEAD for $branch; refusing to prune"
+                        state=$(branch_pr_state "$branch" "$local_head") ||
+                          die "cannot determine pull request state for $branch; refusing to prune"
+                        if [[ $state == MERGED ]]; then
+                          ripe_branches+=("$branch")
+                          ripe_paths+=("$physical")
+                          ripe_heads+=("$local_head")
+                        else
+                          skipped+=("$branch — pull request is $state")
+                        fi
+                      fi
+                      ;;
+                    *)
+                      die "cannot inspect tracked-file index flags in $physical; refusing to prune"
+                      ;;
+                  esac
+                fi
+              fi
+              ;;
+          esac
+        fi
+        path=''
+        ;;
+    esac
+  done <<< "$records"
+
+  if ((${#skipped[@]})); then
+    note "left alone (${#skipped[@]}):"
+    printf '  %s\n' "${skipped[@]}"
+  fi
+
+  if ((${#ripe_branches[@]} == 0)); then
+    note 'nothing to prune'
+    return 0
+  fi
+
+  if ((apply == 0)); then
+    note "would remove ${#ripe_branches[@]} worktree(s) — re-run with --yes to apply:"
+    for i in "${!ripe_branches[@]}"; do
+      printf '  %s  %s\n' "${ripe_branches[i]}" "${ripe_paths[i]}"
+    done
+    return 0
+  fi
+
+  # Worktrees are disposable; branches are history and stay intact.
+  for i in "${!ripe_branches[@]}"; do
+    remove_worktree "${ripe_branches[i]}" 0 "${ripe_paths[i]}" \
+      "${ripe_heads[i]}"
+  done
+}
+
+cmd_open() {
+  parse_launch_args "$@"
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'open requires exactly one branch name'
+
+  local branch=${LAUNCH_POSITIONAL[0]} target status
+  validate_branch "$branch"
+  if target=$(branch_worktree "$branch"); then
+    :
+  else
+    status=$?
+    ((status == 1)) && die "no worktree checked out for branch: $branch"
+    die 'cannot list repository worktrees'
+  fi
+  require_managed_worktree "$branch" "$target"
+  require_prepared_worktree "$target"
+  launch "$target"
+}
+
+cmd_list() {
+  [[ $# -eq 0 ]] || die 'list takes no arguments'
+
+  local line path='' branch='' width=0 records
+  local -a listed_branches=() listed_paths=() listed_marks=()
+
+  records=$(git -C "$primary" worktree list --porcelain) ||
+    die 'cannot list repository worktrees'
+  records+=$'\n'
+
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*)
+        path=${line#worktree }
+        branch='(detached)'
+        ;;
+      'branch refs/heads/'*)
+        branch=${line#branch refs/heads/}
+        ;;
+      '')
+        if [[ -n $path && $path != "$primary" ]]; then
+          listed_branches+=("$branch")
+          listed_paths+=("$path")
+          if worktree_path_is_managed "$path"; then
+            listed_marks+=('')
+          else
+            listed_marks+=('(unmanaged)')
+          fi
+          if ((${#branch} > width)); then width=${#branch}; fi
+        fi
+        path=''
+        ;;
+    esac
+  done <<< "$records"
+
+  if ((${#listed_branches[@]} == 0)); then
+    printf 'No managed worktrees for %s/%s.\n' "$owner" "$repo"
+    return 0
+  fi
+
+  local i
+  for i in "${!listed_branches[@]}"; do
+    if [[ -n ${listed_marks[i]} ]]; then
+      printf '%-*s  %s  %s\n' "$width" "${listed_branches[i]}" \
+        "${listed_paths[i]}" "${listed_marks[i]}"
+    else
+      printf '%-*s  %s\n' "$width" "${listed_branches[i]}" "${listed_paths[i]}"
+    fi
+  done
+}
+
+# Resolves this script's real path, following symlinks without GNU-only
+# `readlink -f`. This matters when `pwt install` is invoked through the symlink it
+# previously installed: the link must continue pointing at the repository copy,
+# not be repointed at itself.
+resolve_self() {
+  local src=$0 dir base
+  case $src in
+    */*) ;;
+    *) src=$(command -v -- "$src" 2>/dev/null) || return 1 ;;
+  esac
+  while [[ -L $src ]]; do
+    dir=${src%/*}
+    [[ -n $dir ]] || dir=/
+    dir=$(cd -P "$dir" 2>/dev/null && pwd -P) || return 1
+    src=$(readlink "$src") || return 1
+    case $src in
+      /*) ;;
+      *) src="$dir/$src" ;;
+    esac
+  done
+  dir=${src%/*}
+  base=${src##*/}
+  [[ -n $dir ]] || dir=/
+  dir=$(cd -P "$dir" 2>/dev/null && pwd -P) || return 1
+  [[ -n $base ]] || return 1
+  printf '%s/%s\n' "$dir" "$base"
+}
+
+path_contains() {
+  case ":${PATH-}:" in
+    *":$1:"*) return 0 ;;
+  esac
+  return 1
+}
+
+# Replaces the symlink that was actually inspected without `ln -f`. Moving the
+# observed entry aside first means a regular file raced into its place is
+# retained at the named staging path, never deleted or restored over new data.
+repoint_symlink() {
+  local source=$1 target=$2 expected=$3
+  local staging="${target}.pwt-install.$$" displaced observed
+  displaced="$staging/previous"
+
+  mkdir "$staging" || {
+    warn "cannot reserve symlink update: $target"
+    return 1
+  }
+  if ! mv "$target" "$displaced"; then
+    rmdir "$staging" >/dev/null 2>&1 || true
+    warn "target changed while updating symlink: $target"
+    return 1
+  fi
+
+  observed=''
+  if [[ -L $displaced ]]; then
+    observed=$(readlink "$displaced") || observed=''
+  fi
+  if [[ ! -L $displaced || $observed != "$expected" ]]; then
+    warn "target changed while updating symlink; preserved it at: $displaced"
+    return 1
+  fi
+
+  if ! ln -s "$source" "$target"; then
+    if [[ ! -e $target && ! -L $target ]] && mv "$displaced" "$target"; then
+      rmdir "$staging" >/dev/null 2>&1 ||
+        warn "restored the previous link but could not clear symlink staging: $staging"
+      warn "cannot update symlink; restored the previous link: $target"
+      return 1
+    fi
+    warn "cannot update symlink; previous link preserved at: $displaced"
+    return 1
+  fi
+
+  rm -f "$displaced" || {
+    warn "updated $target but could not clear the previous symlink: $displaced"
+    return 1
+  }
+  rmdir "$staging" || {
+    warn "updated $target but could not clear symlink staging: $staging"
+    return 1
+  }
+  note "repointed $target -> $source"
+}
+
+# Symlinks keep the installed command and completion current with this checkout.
+# Existing symlinks are ours to repoint; anything else is user-owned and must not
+# be replaced.
+link_into_place() {
+  local source=$1 target=$2 current
+
+  mkdir -p "${target%/*}" || {
+    warn "cannot create ${target%/*}"
+    return 1
+  }
+
+  if [[ -L $target ]]; then
+    current=$(readlink "$target")
+    if [[ $current == "$source" ]]; then
+      note "already installed: $target -> $source"
+      return 0
+    fi
+    repoint_symlink "$source" "$target" "$current"
+    return
+  fi
+
+  if [[ -e $target ]]; then
+    warn "$target exists and is not a symlink; move it aside and retry"
+    return 1
+  fi
+
+  ln -s "$source" "$target" || {
+    warn "cannot create symlink: $target"
+    return 1
+  }
+  note "installed $target -> $source"
+}
+
+preflight_link_target() {
+  local target=$1
+  mkdir -p "${target%/*}" || {
+    warn "cannot create ${target%/*}"
+    return 1
+  }
+  [[ ! -L $target ]] || return 0
+  if [[ -e $target ]]; then
+    warn "$target exists and is not a symlink; move it aside and retry"
+    return 1
+  fi
+}
+
+# Restores one pre-install state only while the target is still the exact link
+# this installer wrote. A concurrent replacement is preserved and reported.
+restore_install_link() {
+  local target=$1 installed_source=$2 previous_kind=$3 previous_value=$4
+  local current='' staging="${target}.pwt-rollback.$$" displaced observed=''
+
+  if [[ $previous_kind == absent && ! -e $target && ! -L $target ]]; then
+    return 0
+  fi
+  if [[ $previous_kind == symlink && -L $target ]]; then
+    current=$(readlink "$target") || current=''
+    [[ $current != "$previous_value" ]] || return 0
+  fi
+
+  current=''
+  if [[ -L $target ]]; then
+    current=$(readlink "$target") || current=''
+  fi
+  if [[ ! -L $target || $current != "$installed_source" ]]; then
+    warn "install target changed before rollback; preserving it: $target"
+    return 1
+  fi
+
+  mkdir "$staging" || {
+    warn "cannot reserve install rollback: $target"
+    return 1
+  }
+  displaced="$staging/installed"
+  if ! mv "$target" "$displaced"; then
+    rmdir "$staging" >/dev/null 2>&1 || true
+    warn "install target changed during rollback: $target"
+    return 1
+  fi
+  if [[ -L $displaced ]]; then
+    observed=$(readlink "$displaced") || observed=''
+  fi
+  if [[ ! -L $displaced || $observed != "$installed_source" ]]; then
+    warn "install target changed during rollback; preserved it at: $displaced"
+    return 1
+  fi
+
+  if [[ $previous_kind == symlink ]]; then
+    if ! ln -s "$previous_value" "$target"; then
+      warn "cannot restore previous symlink; installed link preserved at: $displaced"
+      return 1
+    fi
+  fi
+  rm -f "$displaced" || {
+    warn "restored $target but could not clear rollback staging: $displaced"
+    return 1
+  }
+  rmdir "$staging" || {
+    warn "restored $target but could not clear rollback directory: $staging"
+    return 1
+  }
+}
+
+install_path_warning() {
+  path_contains "$1" && return 0
+  printf '%s: warning: %s is not on your PATH; add it to use `pwt` directly\n' \
+    "$PROGRAM" "$1" >&2
+}
+
+cmd_install() {
+  [[ $# -eq 0 ]] || die 'install takes no arguments'
+  validate_absolute_path_entries 'pwt install'
+  case ${HOME-} in
+    /*) ;;
+    *) die 'pwt install requires an absolute HOME' ;;
+  esac
+
+  local bin_dir="$HOME/.local/bin"
+  local source completion_source completion_dir completion_target
+  local install_target install_lock completion_present=0 rollback_failed=0
+  local bin_previous_kind=absent bin_previous=''
+  local completion_previous_kind=absent completion_previous=''
+  install_target="$bin_dir/pwt"
+
+  mkdir -p "$bin_dir" || die "cannot create $bin_dir"
+  PWT_INSTALL_LOCK="$bin_dir/.pwt-install.lock"
+  if ! mkdir "$PWT_INSTALL_LOCK"; then
+    PWT_INSTALL_LOCK=''
+    die "another pwt install is already running: $bin_dir"
+  fi
+
+  source=$(resolve_self) || die 'cannot resolve the pwt source path'
+  [[ -f $source && -x $source && ! -L $source ]] ||
+    die "resolved pwt source is not an executable regular file: $source"
+  [[ $source != "$install_target" ]] ||
+    die 'resolved pwt source is the install target itself'
+  completion_source="${source%/*}/pwt-completion.bash"
+
+  # bash-completion 2.x autoloads a file named after the command from here, so a
+  # new shell can complete pwt without an rc-file edit.
+  case ${XDG_DATA_HOME-} in
+    /*) completion_dir="$XDG_DATA_HOME/bash-completion/completions" ;;
+    *) completion_dir="$HOME/.local/share/bash-completion/completions" ;;
+  esac
+  completion_target="$completion_dir/pwt"
+  if [[ -e $completion_source || -L $completion_source ]]; then
+    [[ -f $completion_source && ! -L $completion_source ]] ||
+      die "resolved pwt completion is not a regular file: $completion_source"
+    completion_present=1
+  fi
+
+  preflight_link_target "$install_target" || die 'cannot preflight pwt installation'
+  if ((completion_present)); then
+    preflight_link_target "$completion_target" ||
+      die 'cannot preflight pwt completion installation'
+  fi
+  if [[ -L $install_target ]]; then
+    bin_previous=$(readlink "$install_target") ||
+      die "cannot inspect existing symlink: $install_target"
+    [[ -L $install_target ]] ||
+      die "install target changed during preflight: $install_target"
+    bin_previous_kind=symlink
+  fi
+  if ((completion_present)) && [[ -L $completion_target ]]; then
+    completion_previous=$(readlink "$completion_target") ||
+      die "cannot inspect existing symlink: $completion_target"
+    [[ -L $completion_target ]] ||
+      die "install target changed during preflight: $completion_target"
+    completion_previous_kind=symlink
+  fi
+
+  link_into_place "$source" "$install_target" || die 'cannot install pwt command'
+  if ((completion_present)); then
+    if ! link_into_place "$completion_source" "$completion_target"; then
+      restore_install_link "$completion_target" "$completion_source" \
+        "$completion_previous_kind" "$completion_previous" || rollback_failed=1
+      restore_install_link "$install_target" "$source" \
+        "$bin_previous_kind" "$bin_previous" || rollback_failed=1
+      ((rollback_failed == 0)) ||
+        die 'cannot install pwt completion and rollback was incomplete'
+      die 'cannot install pwt completion; restored previous install state'
+    fi
+  else
+    note "no completion script beside pwt, skipping: $completion_source"
+  fi
+
+  install_path_warning "$bin_dir"
+  install_lock=$PWT_INSTALL_LOCK
+  PWT_INSTALL_LOCK=''
+  rmdir "$install_lock" || die "cannot release pwt install lock: $install_lock"
 }
 
 # Undocumented diagnostic seam for the self-contained suite.
@@ -262,8 +2279,22 @@ main() {
       require_repo
       cmd_root "$@"
       ;;
-    list | new | branch | open | pr | remove | prune | install)
-      die "$command is not implemented yet"
+    pr)
+      shift || true
+      # This must precede repository discovery: pwt may be invoked from an
+      # existing PR worktree whose tracked files are reachable through PATH.
+      validate_pr_path
+      require_repo
+      cmd_pr "$@"
+      ;;
+    list | open | new | branch | remove | prune)
+      shift || true
+      require_repo
+      "cmd_$command" "$@"
+      ;;
+    install)
+      shift || true
+      cmd_install "$@" # deliberately no require_repo; install is repo-independent
       ;;
     *)
       die "unknown command: $command (run 'pwt help')"

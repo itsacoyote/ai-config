@@ -20,8 +20,10 @@ $REPO_ROOT/AGENTS.md
 $REPO_ROOT/agents/README.md
 $REPO_ROOT/codex/README.md
 $REPO_ROOT/codex/AGENTS.md
+$REPO_ROOT/pi/README.md
 $REPO_ROOT/docs/decisions/0010-shared-agent-skills-library.md
 $REPO_ROOT/docs/decisions/0011-cwt-worktree-cli.md
+$REPO_ROOT/docs/decisions/0012-pwt-worktree-cli.md
 "
 
 LINK_DOCS="$ACTIVE_DOCS
@@ -71,6 +73,20 @@ if [ ! -e "$REPO_ROOT/agents/skills/cwt" ]; then
   ok 'agents/skills/cwt is absent because the developer-facing CLI is not a shared skill'
 else
   not_ok 'agents/skills/cwt is absent because the developer-facing CLI is not a shared skill'
+fi
+
+if [ -x "$REPO_ROOT/pi/scripts/pwt" ] && \
+  [ -f "$REPO_ROOT/pi/scripts/pwt-completion.bash" ] && \
+  [ -x "$REPO_ROOT/pi/scripts/tests/pwt-test.sh" ]; then
+  ok 'pi/scripts/pwt and its completion and executable suite are Pi-specific artifacts'
+else
+  not_ok 'pi/scripts/pwt and its completion and executable suite are Pi-specific artifacts'
+fi
+
+if [ ! -e "$REPO_ROOT/agents/skills/pwt" ]; then
+  ok 'agents/skills/pwt is absent because the developer-facing CLI is not a shared skill'
+else
+  not_ok 'agents/skills/pwt is absent because the developer-facing CLI is not a shared skill'
 fi
 
 names_match=1
@@ -150,6 +166,60 @@ if grep -Fq 'feat/pi-skills' "$ADR" && grep -Fq 'portable skills move to `agents
   ok 'Pi port landing order and destination split are explicit'
 else
   not_ok 'Pi port landing order and destination split are explicit'
+fi
+
+PI_README="$REPO_ROOT/pi/README.md"
+pwt_commands_documented=1
+for command in list new branch open pr root remove prune install help; do
+  grep -Fq "\`pwt $command" "$PI_README" 2>/dev/null || pwt_commands_documented=0
+done
+if [ "$pwt_commands_documented" -eq 1 ]; then
+  ok 'Pi guide documents all ten pwt commands'
+else
+  not_ok 'Pi guide documents all ten pwt commands'
+fi
+
+if [ -f "$PI_README" ] && \
+  grep -Fq 'pi/scripts/pwt install' "$PI_README" && \
+  grep -Fq '~/.local/bin/pwt' "$PI_README" && \
+  grep -Fq '~/.local/share/bash-completion/completions/pwt' "$PI_README" && \
+  grep -Fq '~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/' "$PI_README"; then
+  ok 'Pi guide documents pwt installation and the shared managed root'
+else
+  not_ok 'Pi guide documents pwt installation and the shared managed root'
+fi
+
+if [ -f "$PI_README" ] && \
+  grep -Fq 'does not provide `--yolo`' "$PI_README" && \
+  grep -Fq -- '--no-extensions' "$PI_README" && \
+  grep -Fq -- '--tools read,grep,find,ls' "$PI_README" && \
+  grep -Fq -- '--no-approve' "$PI_README" && \
+  grep -Fq 'not an OS sandbox' "$PI_README" && \
+  grep -Fq 'trusted pull requests' "$PI_README"; then
+  ok 'Pi guide documents no-yolo behavior and the trusted-PR tool boundary'
+else
+  not_ok 'Pi guide documents no-yolo behavior and the trusted-PR tool boundary'
+fi
+
+if grep -Fq '## `pwt` — Pi worktree CLI' "$REPO_ROOT/README.md" && \
+  grep -Fq '`pi/scripts/pwt` is the developer-facing Pi launcher' "$REPO_ROOT/README.md" && \
+  grep -Fq '`pwt` is a developer-facing Pi launcher' "$REPO_ROOT/AGENTS.md" && \
+  grep -Fq 'bash pi/scripts/tests/pwt-test.sh' "$REPO_ROOT/AGENTS.md"; then
+  ok 'root guidance identifies pwt as a developer-run Pi launcher'
+else
+  not_ok 'root guidance identifies pwt as a developer-run Pi launcher'
+fi
+
+PWT_ADR="$REPO_ROOT/docs/decisions/0012-pwt-worktree-cli.md"
+if [ -f "$PWT_ADR" ] && \
+  grep -Fq 'independent Pi port' "$PWT_ADR" && \
+  grep -Fq 'current `cwt`' "$PWT_ADR" && \
+  grep -Fq 'historical `pwt`' "$PWT_ADR" && \
+  grep -Fq 'no `--yolo`' "$PWT_ADR" && \
+  grep -Fq 'not an OS sandbox' "$PWT_ADR"; then
+  ok 'pwt ADR records the independent port and its deliberate launch differences'
+else
+  not_ok 'pwt ADR records the independent port and its deliberate launch differences'
 fi
 
 links_ok=1
