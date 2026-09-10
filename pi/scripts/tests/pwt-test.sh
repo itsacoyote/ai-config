@@ -395,6 +395,32 @@ case ${PWT_TEST_GIT_FAIL:-} in
         ;;
     esac
     ;;
+  inject-managed-ancestor-symlink)
+    case $args in
+      *' fetch --quiet origin '*)
+        /bin/mv "$PWT_TEST_MANAGED_ANCESTOR" "$PWT_TEST_MANAGED_SAVED" || exit
+        /bin/ln -s "$PWT_TEST_MANAGED_OUTSIDE" \
+          "$PWT_TEST_MANAGED_ANCESTOR" || exit
+        ;;
+    esac
+    ;;
+  pr-ignored-after-final-status)
+    case $args in
+      *" -C $PWT_TEST_PR_LATE_TARGET status --porcelain --untracked-files=all "*)
+        count=0
+        if [ -f "$PWT_TEST_PR_LATE_COUNT" ]; then
+          IFS= read -r count <"$PWT_TEST_PR_LATE_COUNT"
+        fi
+        count=$((count + 1))
+        printf '%s\n' "$count" >"$PWT_TEST_PR_LATE_COUNT"
+        "$PWT_TEST_REAL_GIT" "$@" || exit
+        if [ "$count" -eq 2 ]; then
+          printf 'late ignored local content\n' >"$PWT_TEST_PR_LATE_TARGET/.env"
+        fi
+        exit 0
+        ;;
+    esac
+    ;;
 esac
 exec "$PWT_TEST_REAL_GIT" "$@"
 STUB
@@ -628,6 +654,11 @@ if [ "$1" = pr ] && [ "$2" = checkout ]; then
     dirty_target=$(sed -n 's/^dirtyAfterFetchPath=//p' "$meta")
     if [ -n "$dirty_target" ]; then
       printf 'dirty during disposable fetch\n' >>"$dirty_target/README.md"
+    fi
+    hidden_target=$(sed -n 's/^assumeAfterFetchPath=//p' "$meta")
+    if [ -n "$hidden_target" ]; then
+      git -C "$hidden_target" update-index --assume-unchanged README.md || exit
+      printf 'hidden during disposable fetch\n' >"$hidden_target/README.md"
     fi
     exit "$checkout_status"
   fi
@@ -872,6 +903,25 @@ push_pr_tree_shape() {
   printf '%s\n' "$oid"
 }
 
+# Advances a PR head while changing one tracked file. Hidden-index regressions
+# need a target tree that would actually overwrite the local edit; advancing an
+# otherwise identical tree would let a missing guard pass for the wrong reason.
+push_pr_file_change() {
+  local number=$1 branch=$2 path=$3 contents=$4 clone oid
+  clone="$TMP/file-change-$number"
+  git clone -q "$REMOTE" "$clone" >/dev/null 2>&1 || return 1
+  git -C "$clone" fetch -q origin "refs/heads/$branch" || return 1
+  git -C "$clone" checkout -q --detach FETCH_HEAD || return 1
+  printf '%s\n' "$contents" >"$clone/$path" || return 1
+  git -C "$clone" add -f -- "$path" || return 1
+  git -C "$clone" -c commit.gpgsign=false commit -qm \
+    "change $path for $branch" || return 1
+  oid=$(git -C "$clone" rev-parse HEAD) || return 1
+  git -C "$clone" push -q origin "$oid:refs/heads/$branch" || return 1
+  sync_pr_metadata_oid "$branch" "$oid" || return 1
+  printf '%s\n' "$oid"
+}
+
 # A moderately wide target tree makes the old ignored-path x tree-entry nested
 # scan miss the five-second budget while the batched implementation stays fast.
 push_pr_wide_tree() {
@@ -1012,6 +1062,17 @@ pwt_inject_target_symlink() {
     export PWT_TEST_GIT_FAIL=inject-target-symlink
     export PWT_TEST_INJECT_TARGET="$target"
     export PWT_TEST_INJECT_OUTSIDE="$outside"
+    pwt "$@"
+  )
+}
+pwt_inject_managed_ancestor_symlink() {
+  local ancestor=$1 saved=$2 outside=$3
+  shift 3
+  (
+    export PWT_TEST_GIT_FAIL=inject-managed-ancestor-symlink
+    export PWT_TEST_MANAGED_ANCESTOR="$ancestor"
+    export PWT_TEST_MANAGED_SAVED="$saved"
+    export PWT_TEST_MANAGED_OUTSIDE="$outside"
     pwt "$@"
   )
 }
@@ -1523,6 +1584,33 @@ check 'pre-write revalidation keeps Git from populating the outside directory' \
   test ! -e "$RACE_OUTSIDE/.git"
 check_equals 'target substitution never launches Pi' '' "$(launched pwd)"
 
+# The managed root itself can be replaced after repository discovery. Checking
+# only the final target misses an ancestor symlink and lets Git populate the
+# attacker's directory before the later ownership check notices.
+ROOT_RACE_ANCESTOR=${MANAGED%/project}
+ROOT_RACE_SAVED="$TMP/root-race-saved-owner"
+ROOT_RACE_OUTSIDE="$TMP/root-race-outside"
+ROOT_RACE_TARGET="$ROOT_RACE_OUTSIDE/project/feat-root-ancestor-race"
+mkdir -p "$ROOT_RACE_OUTSIDE"
+launch_reset
+root_race_status=0
+root_race_output=$(pwt_inject_managed_ancestor_symlink \
+  "$ROOT_RACE_ANCESTOR" "$ROOT_RACE_SAVED" "$ROOT_RACE_OUTSIDE" \
+  new feat/root-ancestor-race 2>&1) || root_race_status=$?
+check 'new refuses a managed-root ancestor substituted during fetch' \
+  test "$root_race_status" -ne 0
+check_contains 'managed-root substitution names the changed root' \
+  'managed worktree root changed' "$root_race_output"
+check 'managed-root revalidation creates no directory outside the trusted root' \
+  test ! -e "$ROOT_RACE_OUTSIDE/project"
+check_equals 'managed-root substitution never launches Pi' '' "$(launched pwd)"
+# A missing guard can register the outside path. Remove that failed RED-state
+# fixture before restoring the real managed-root ancestor for later sections.
+"$PWT_TEST_REAL_GIT" -C "$PRIMARY" worktree remove --force \
+  "$ROOT_RACE_TARGET" >/dev/null 2>&1 || true
+rm -f "$ROOT_RACE_ANCESTOR"
+mv "$ROOT_RACE_SAVED" "$ROOT_RACE_ANCESTOR"
+
 # --------------------------------------------------------------------- branch
 
 section 'branch'
@@ -1949,8 +2037,14 @@ check_arg_equals 'reused PR launch appends only read-only tools' 4 'read,grep,fi
 check_arg_equals 'reused PR launch appends no-approve last' 5 '--no-approve'
 
 launch_reset
-check 'PR policy preserves dash-leading values using Pi parser semantics' \
-  pwt pr 121 -- --name -review --system-prompt --approve
+dash_value_status=0
+dash_value_out=$(pwt pr 121 -- --name -review \
+  --system-prompt --approve 2>&1) || dash_value_status=$?
+if [ "$dash_value_status" -eq 0 ]; then
+  ok 'PR policy preserves dash-leading values using Pi parser semantics'
+else
+  not_ok "PR policy preserves dash-leading values using Pi parser semantics ($dash_value_out)"
+fi
 check_equals 'dash-leading values remain before the enforced suffix' \
   '8' "$(launched argc)"
 check_arg_equals 'dash-leading name option remains unchanged' 0 '--name'
@@ -2405,6 +2499,23 @@ check 'pr with no leftover branch remains a plain checkout' pwt pr 211
 check_equals 'plain PR checkout still uses the head-ref worktree name' \
   "$MANAGED/feat-pr-auto-none" "$(launched pwd)"
 
+# show-ref uses status 1 for an absent branch; every other status is a Git
+# failure. Treating all failures as absence lets checkout mutate refs anyway.
+pr_meta 214 feat/pr-show-ref-failure false
+launch_reset
+show_ref_failure_status=0
+show_ref_failure_out=$(pwt_git_fail show-ref pr 214 2>&1) || \
+  show_ref_failure_status=$?
+check 'pr fails closed when local-branch inspection fails' \
+  test "$show_ref_failure_status" -ne 0
+check_contains 'pr reports the failed local-branch inspection' \
+  'cannot inspect local branch' "$show_ref_failure_out"
+check 'failed PR branch inspection creates no managed worktree' \
+  test ! -e "$MANAGED/feat-pr-show-ref-failure"
+check_equals 'failed PR branch inspection never invokes gh checkout' '0' \
+  "$(grep -c '^pr checkout 214' "$PWT_GH_LOG")"
+check_equals 'failed PR branch inspection never launches Pi' '' "$(launched pwd)"
+
 pr_meta 212 feat/pr-force-hint-fail false
 printf 'checkoutFails=true\n' >>"$PWT_GH_PRS/212"
 git -C "$PRIMARY" branch feat/pr-force-hint-fail >/dev/null
@@ -2590,6 +2701,143 @@ check_equals 'legacy rewrite refusal preserves the branch head' "$legacy_rewrite
 check_equals 'legacy rewrite refusal does not invent a head marker' '' \
   "$(pr_marker feat/pr-reuse-legacy-rewrite worktree-pr-head)"
 
+# Legacy markerless reuse must bind the configured tracking remote to the PR's
+# canonical host as well as owner/repository. Same-path repositories on another
+# host are not the same identity.
+pr_meta 323 feat/pr-reuse-wrong-host false
+pwt pr 323 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-wrong-host.worktree-pr-url
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-wrong-host.worktree-pr-head
+git -C "$PRIMARY" remote add wrong-host-323 \
+  https://enterprise.example/owner/project.git
+git -C "$PRIMARY" config branch.feat/pr-reuse-wrong-host.remote wrong-host-323
+wrong_host_before=$(git -C "$MANAGED/feat-pr-reuse-wrong-host" rev-parse HEAD)
+launch_reset
+check_fails 'markerless PR reuse rejects a same-path remote on another host' \
+  pwt pr 323
+check_equals 'wrong-host legacy refusal preserves the branch head' \
+  "$wrong_host_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-wrong-host" rev-parse HEAD)"
+check_equals 'wrong-host legacy refusal never launches Pi' '' "$(launched pwd)"
+
+# A configured branch.remote value is a name, not a URL fallback. If no such
+# remote exists, owner/repository-shaped text must not authenticate reuse.
+pr_meta 324 feat/pr-reuse-missing-remote false
+pwt pr 324 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-missing-remote.worktree-pr-url
+git -C "$PRIMARY" config --unset-all \
+  branch.feat/pr-reuse-missing-remote.worktree-pr-head
+git -C "$PRIMARY" config \
+  branch.feat/pr-reuse-missing-remote.remote owner/project
+missing_remote_before=$(git -C "$MANAGED/feat-pr-reuse-missing-remote" rev-parse HEAD)
+launch_reset
+check_fails 'markerless PR reuse rejects an unresolved tracking remote' pwt pr 324
+check_equals 'unresolved-remote refusal preserves the branch head' \
+  "$missing_remote_before" \
+  "$(git -C "$MANAGED/feat-pr-reuse-missing-remote" rev-parse HEAD)"
+check_equals 'unresolved-remote refusal never launches Pi' '' "$(launched pwd)"
+
+# status deliberately hides assume-unchanged edits. Refuse before the
+# authenticated fetch updates any refs, and preserve the worktree byte-for-byte.
+pr_meta 325 feat/pr-reuse-assume-unchanged false
+pwt pr 325 >/dev/null 2>&1
+assume_pr_head=$(git -C "$MANAGED/feat-pr-reuse-assume-unchanged" rev-parse HEAD)
+assume_tracking_head=$(git -C "$PRIMARY" rev-parse \
+  refs/remotes/origin/feat/pr-reuse-assume-unchanged)
+git -C "$MANAGED/feat-pr-reuse-assume-unchanged" update-index \
+  --assume-unchanged README.md
+printf 'assume-unchanged PR edit\n' \
+  >"$MANAGED/feat-pr-reuse-assume-unchanged/README.md"
+assume_pr_status=$(git -C "$MANAGED/feat-pr-reuse-assume-unchanged" status \
+  --porcelain --untracked-files=all)
+check_equals 'the PR assume-unchanged fixture is hidden from status' '' \
+  "$assume_pr_status"
+push_pr_file_change 325 feat/pr-reuse-assume-unchanged README.md \
+  'remote assume-unchanged replacement' >/dev/null
+launch_reset
+assume_pr_result=0
+assume_pr_out=$(pwt pr 325 2>&1) || assume_pr_result=$?
+check 'PR refresh refuses assume-unchanged local state' \
+  test "$assume_pr_result" -ne 0
+check_contains 'PR refresh names the hidden assume-unchanged state' \
+  'assume-unchanged' "$assume_pr_out"
+check_equals 'assume-unchanged refusal preserves the PR worktree head' \
+  "$assume_pr_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-assume-unchanged" rev-parse HEAD)"
+check 'assume-unchanged refusal preserves the local file' grep -qF \
+  'assume-unchanged PR edit' \
+  "$MANAGED/feat-pr-reuse-assume-unchanged/README.md"
+check_equals 'initial hidden-state refusal happens before the PR fetch' \
+  "$assume_tracking_head" \
+  "$(git -C "$PRIMARY" rev-parse refs/remotes/origin/feat/pr-reuse-assume-unchanged)"
+check_equals 'assume-unchanged refusal never launches Pi' '' "$(launched pwd)"
+
+# A materialized skip-worktree entry is hidden through the same status seam but
+# has a different ls-files flag, so keep a separate behavioral regression.
+pr_meta 326 feat/pr-reuse-skip-worktree false
+pwt pr 326 >/dev/null 2>&1
+skip_pr_head=$(git -C "$MANAGED/feat-pr-reuse-skip-worktree" rev-parse HEAD)
+skip_tracking_head=$(git -C "$PRIMARY" rev-parse \
+  refs/remotes/origin/feat/pr-reuse-skip-worktree)
+git -C "$MANAGED/feat-pr-reuse-skip-worktree" update-index \
+  --skip-worktree README.md
+printf 'skip-worktree PR edit\n' \
+  >"$MANAGED/feat-pr-reuse-skip-worktree/README.md"
+skip_pr_status=$(git -C "$MANAGED/feat-pr-reuse-skip-worktree" status \
+  --porcelain --untracked-files=all)
+check_equals 'the PR skip-worktree fixture is hidden from status' '' "$skip_pr_status"
+push_pr_file_change 326 feat/pr-reuse-skip-worktree README.md \
+  'remote skip-worktree replacement' >/dev/null
+launch_reset
+skip_pr_result=0
+skip_pr_out=$(pwt pr 326 2>&1) || skip_pr_result=$?
+check 'PR refresh refuses materialized skip-worktree local state' \
+  test "$skip_pr_result" -ne 0
+check_contains 'PR refresh names the hidden skip-worktree state' \
+  'materialized skip-worktree' "$skip_pr_out"
+check_equals 'skip-worktree refusal preserves the PR worktree head' \
+  "$skip_pr_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-skip-worktree" rev-parse HEAD)"
+check 'skip-worktree refusal preserves the local file' grep -qF \
+  'skip-worktree PR edit' "$MANAGED/feat-pr-reuse-skip-worktree/README.md"
+check_equals 'skip-worktree refusal happens before the PR fetch' \
+  "$skip_tracking_head" \
+  "$(git -C "$PRIMARY" rev-parse refs/remotes/origin/feat/pr-reuse-skip-worktree)"
+check_equals 'skip-worktree refusal never launches Pi' '' "$(launched pwd)"
+
+# An ignored file can appear after the target-tree scan but before mutation.
+# Inject it after the final clean status result and require the later collision
+# check to preserve both the file and the old head.
+pr_meta 327 feat/pr-reuse-late-ignored false
+pwt pr 327 >/dev/null 2>&1
+late_ignored_head=$(git -C "$MANAGED/feat-pr-reuse-late-ignored" rev-parse HEAD)
+push_pr_tree_shape 327 feat/pr-reuse-late-ignored exact-file >/dev/null
+late_ignored_count="$TMP/pr-late-ignored-status-count"
+: >"$late_ignored_count"
+launch_reset
+late_ignored_result=0
+late_ignored_out=$(
+  PWT_TEST_GIT_FAIL=pr-ignored-after-final-status \
+    PWT_TEST_PR_LATE_TARGET="$MANAGED/feat-pr-reuse-late-ignored" \
+    PWT_TEST_PR_LATE_COUNT="$late_ignored_count" \
+    pwt pr 327 2>&1
+) || late_ignored_result=$?
+check 'PR refresh refuses an ignored collision created at the mutation boundary' \
+  test "$late_ignored_result" -ne 0
+check_contains 'late ignored collision names the protected path' \
+  '.env' "$late_ignored_out"
+check_equals 'late ignored fixture reaches the final status boundary' '2' \
+  "$(sed -n 1p "$late_ignored_count")"
+check_equals 'late ignored collision preserves the PR worktree head' \
+  "$late_ignored_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-late-ignored" rev-parse HEAD)"
+check 'late ignored collision preserves the local file' grep -qF \
+  'late ignored local content' "$MANAGED/feat-pr-reuse-late-ignored/.env"
+check_equals 'late ignored collision never launches Pi' '' "$(launched pwd)"
+
 # Exact objects and both parent/child tree-shape conflicts must be refused
 # before reset --hard can delete ignored local content.
 printf '.env\n' >"$PRIMARY/.worktreeinclude"
@@ -2755,6 +3003,34 @@ check_equals 'mid-fetch edit preserves the last verified head marker' \
   "$dirty_during_head" \
   "$(pr_marker feat/pr-reuse-dirty-during-fetch worktree-pr-head)"
 check_equals 'mid-fetch edit never launches Pi' '' "$(launched pwd)"
+
+# Hidden index state can be introduced after the initial guard. Inject an
+# assume-unchanged edit during authenticated fetch so only the mutation-boundary
+# hidden-state check can prevent the refresh.
+pr_meta 328 feat/pr-reuse-hidden-during-fetch false
+pwt pr 328 >/dev/null 2>&1
+hidden_during_head=$(git -C "$MANAGED/feat-pr-reuse-hidden-during-fetch" rev-parse HEAD)
+push_pr_file_change 328 feat/pr-reuse-hidden-during-fetch README.md \
+  'remote replacement for late hidden edit' >/dev/null
+printf 'assumeAfterFetchPath=%s\n' \
+  "$MANAGED/feat-pr-reuse-hidden-during-fetch" >>"$PWT_GH_PRS/328"
+launch_reset
+hidden_during_status=0
+hidden_during_out=$(pwt pr 328 2>&1) || hidden_during_status=$?
+check 'pr refuses hidden index state introduced during disposable fetch' \
+  test "$hidden_during_status" -ne 0
+check_contains 'mid-fetch hidden-state refusal names assume-unchanged' \
+  'assume-unchanged' "$hidden_during_out"
+check_equals 'mid-fetch hidden state preserves the reused branch head' \
+  "$hidden_during_head" \
+  "$(git -C "$MANAGED/feat-pr-reuse-hidden-during-fetch" rev-parse HEAD)"
+check 'mid-fetch hidden state preserves the local edit' grep -qF \
+  'hidden during disposable fetch' \
+  "$MANAGED/feat-pr-reuse-hidden-during-fetch/README.md"
+check_equals 'mid-fetch hidden state preserves the last verified head marker' \
+  "$hidden_during_head" \
+  "$(pr_marker feat/pr-reuse-hidden-during-fetch worktree-pr-head)"
+check_equals 'mid-fetch hidden state never launches Pi' '' "$(launched pwd)"
 
 pr_meta 322 feat/pr-reuse-partial-fetch-add false
 pwt pr 322 >/dev/null 2>&1
@@ -4443,15 +4719,11 @@ install_race_out=$(cd "$OUTSIDE" && \
 check 'install refuses a target changed during stale-link replacement' \
   test "$install_race_status" -ne 0
 check_contains 'install reports the concurrent target change' \
-  'changed while updating' "$install_race_out"
-install_race_preserved=$(printf '%s\n' "$install_race_out" | \
-  sed -n 's/.*preserved it at: //p' | tail -1)
-check 'install discloses where it preserved the raced-in file' \
-  test -n "$install_race_preserved"
-check 'install preserves a raced-in user file at the disclosed staging path' \
-  grep -qF 'raced-in user file' "$install_race_preserved"
-check 'install does not restore raced-in data over another target change' \
-  test ! -e "$LOCAL_BIN/pwt"
+  'changed during preflight' "$install_race_out"
+check 'install preserves a raced-in user file at the original target' \
+  grep -qF 'raced-in user file' "$LOCAL_BIN/pwt"
+check 'install does not move raced-in data after preflight detects it' \
+  test -z "$(find "$LOCAL_BIN" -name '*.pwt-install.*' -print -quit)"
 
 # A real file is user-owned. The explicit diagnostic pins the no-clobber guard;
 # relying on ln to fail would preserve the file for the wrong reason.
@@ -4468,12 +4740,97 @@ check 'the user-owned pwt file survives a refused install' \
 reset_install
 mkdir -p "$COMP_DIR"
 printf 'user-owned completion\n' >"$COMP_LINK"
-check_fails 'install refuses to clobber a non-symlink completion file' \
-  pwt_in "$OUTSIDE" install
-check_output 'completion collision names the non-symlink refusal' \
-  'exists and is not a symlink' pwt_in "$OUTSIDE" install
+completion_collision_status=0
+completion_collision_out=$(pwt_in "$OUTSIDE" install 2>&1) ||
+  completion_collision_status=$?
+check 'install refuses to clobber a non-symlink completion file' \
+  test "$completion_collision_status" -ne 0
+check_contains 'completion collision names the non-symlink refusal' \
+  'exists and is not a symlink' "$completion_collision_out"
+check_not_contains 'completion collision refuses before installing the binary' \
+  "installed $LOCAL_BIN/pwt" "$completion_collision_out"
 check 'the user-owned completion survives a refused install' \
   grep -qF 'user-owned completion' "$COMP_LINK"
+check 'completion preflight failure creates no partial binary link' \
+  test ! -L "$LOCAL_BIN/pwt"
+
+# Preflight every destination before changing either one. In particular, a
+# completion collision must not repoint a stale but otherwise valid binary link.
+reset_install
+mkdir -p "$LOCAL_BIN" "$COMP_DIR"
+ln -s "$TMP/stale-before-completion-collision" "$LOCAL_BIN/pwt"
+printf 'user-owned completion\n' >"$COMP_LINK"
+stale_collision_status=0
+stale_collision_out=$(pwt_in "$OUTSIDE" install 2>&1) ||
+  stale_collision_status=$?
+check 'completion collision refuses before repointing a stale binary' \
+  test "$stale_collision_status" -ne 0
+check_not_contains 'completion collision reports no transient binary repoint' \
+  "repointed $LOCAL_BIN/pwt" "$stale_collision_out"
+check_equals 'completion collision preserves the stale binary target' \
+  "$TMP/stale-before-completion-collision" \
+  "$(readlink "$LOCAL_BIN/pwt" 2>/dev/null)"
+
+# A destination can still fail after preflight. Force only the completion ln to
+# fail and require rollback of a newly created or repointed binary symlink.
+INSTALL_COMPLETION_FAIL_BIN="$TMP/install-completion-fail-bin"
+mkdir -p "$INSTALL_COMPLETION_FAIL_BIN"
+PWT_TEST_REAL_LN=$(command -v ln)
+export PWT_TEST_REAL_LN PWT_TEST_INSTALL_COMPLETION_TARGET="$COMP_LINK"
+cat >"$INSTALL_COMPLETION_FAIL_BIN/ln" <<'STUB'
+#!/bin/bash
+last=''
+for argument in "$@"; do
+  last=$argument
+done
+if [ "$last" = "$PWT_TEST_INSTALL_COMPLETION_TARGET" ]; then
+  exit 76
+fi
+exec "$PWT_TEST_REAL_LN" "$@"
+STUB
+chmod +x "$INSTALL_COMPLETION_FAIL_BIN/ln"
+
+reset_install
+completion_link_status=0
+completion_link_out=$(cd "$OUTSIDE" && \
+  PATH="$INSTALL_COMPLETION_FAIL_BIN:$PATH" "$PWT" install 2>&1) || \
+  completion_link_status=$?
+check 'late completion-link failure exits non-zero' \
+  test "$completion_link_status" -ne 0
+check_contains 'late completion-link failure reports the failed link' \
+  'cannot create symlink' "$completion_link_out"
+check 'late completion-link failure rolls back a new binary link' \
+  test ! -L "$LOCAL_BIN/pwt"
+
+reset_install
+mkdir -p "$LOCAL_BIN"
+ln -s "$TMP/stale-before-late-failure" "$LOCAL_BIN/pwt"
+completion_repoint_status=0
+completion_repoint_out=$(cd "$OUTSIDE" && \
+  PATH="$INSTALL_COMPLETION_FAIL_BIN:$PATH" "$PWT" install 2>&1) || \
+  completion_repoint_status=$?
+check 'late completion failure after binary repoint exits non-zero' \
+  test "$completion_repoint_status" -ne 0
+check_equals 'late completion failure restores the previous binary target' \
+  "$TMP/stale-before-late-failure" \
+  "$(readlink "$LOCAL_BIN/pwt" 2>/dev/null)"
+
+reset_install
+mkdir -p "$LOCAL_BIN" "$COMP_DIR"
+ln -s "$TMP/stale-binary-before-completion-repoint" "$LOCAL_BIN/pwt"
+ln -s "$TMP/stale-completion-before-repoint" "$COMP_LINK"
+completion_stale_status=0
+completion_stale_out=$(cd "$OUTSIDE" && \
+  PATH="$INSTALL_COMPLETION_FAIL_BIN:$PATH" "$PWT" install 2>&1) || \
+  completion_stale_status=$?
+check 'late stale-completion repoint failure exits non-zero' \
+  test "$completion_stale_status" -ne 0
+check_equals 'failed stale-completion repoint restores the binary target' \
+  "$TMP/stale-binary-before-completion-repoint" \
+  "$(readlink "$LOCAL_BIN/pwt" 2>/dev/null)"
+check_equals 'failed stale-completion repoint restores its previous target' \
+  "$TMP/stale-completion-before-repoint" \
+  "$(readlink "$COMP_LINK" 2>/dev/null)"
 
 # Invoking install through its installed link must resolve back to this checkout,
 # not repoint the link at itself.

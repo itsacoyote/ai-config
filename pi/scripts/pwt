@@ -580,9 +580,39 @@ registered_at() {
   return 1
 }
 
+# Repository discovery records managed_root as a physical path. Re-resolve it
+# before every managed-root write so a later ancestor substitution cannot turn
+# that trusted string into a path outside the original root.
+managed_path_is_current() {
+  local path=$1 resolved_root resolved_path
+  resolved_root=$(resolve_path "$managed_root") || return 1
+  [[ $resolved_root == "$managed_root" ]] || return 1
+  resolved_path=$(resolve_path "$path") || return 1
+  case $resolved_path in
+    "$managed_root" | "$managed_root"/*) return 0 ;;
+  esac
+  return 1
+}
+
+require_current_managed_path() {
+  managed_path_is_current "$1" ||
+    die "managed worktree root changed after repository discovery: $managed_root"
+}
+
+ensure_managed_root() {
+  local physical
+  require_current_managed_path "$managed_root"
+  mkdir -p "$managed_root" || die "cannot create managed worktree root: $managed_root"
+  physical=$(cd -P "$managed_root" 2>/dev/null && pwd -P) ||
+    die "cannot resolve managed worktree root after creation: $managed_root"
+  [[ $physical == "$managed_root" ]] ||
+    die "managed worktree root changed while it was being created: $managed_root"
+}
+
 ensure_available_path() {
   local path=$1 status
   [[ ! -L $path ]] || die "target path must not be a symlink: $path"
+  require_current_managed_path "$path"
   if registered_at "$path"; then
     die "target path is already registered for another branch: $path"
   else
@@ -874,19 +904,36 @@ refuse_hidden_index_state() {
 }
 
 remote_matches_identity() {
-  local remote=$1 wanted_owner=$2 wanted_repo=$3 url rest
-  local found_owner found_repo
-  if ! url=$(git -C "$primary" remote get-url "$remote" 2>/dev/null); then
-    url=$remote
-  fi
+  local remote=$1 wanted_host=$2 wanted_owner=$3 wanted_repo=$4
+  local url rest authority found_host='' found_owner found_repo
+  url=$(git -C "$primary" remote get-url "$remote" 2>/dev/null) || return 1
+  case $url in
+    *://*)
+      authority=${url#*://}
+      authority=${authority%%/*}
+      authority=${authority##*@}
+      found_host=${authority%%:*}
+      ;;
+    *@*:*/*)
+      authority=${url%%:*}
+      found_host=${authority##*@}
+      ;;
+    *:*/*)
+      found_host=${url%%:*}
+      ;;
+  esac
   url=${url%.git}
   url=${url%/}
   found_repo=${url##*/}
   rest=${url%/*}
   found_owner=${rest##*/}
   found_owner=${found_owner##*:}
+  found_host=${found_host:-github.com}
+  valid_host "$found_host" || return 1
   valid_identity_part "$found_owner" || return 1
   valid_identity_part "$found_repo" || return 1
+  found_host=$(printf '%s' "$found_host" | tr '[:upper:]' '[:lower:]')
+  [[ $found_host == "$wanted_host" ]] &&
   [[ $(printf '%s' "$found_owner" | tr '[:upper:]' '[:lower:]') == "$wanted_owner" ]] &&
     [[ $(printf '%s' "$found_repo" | tr '[:upper:]' '[:lower:]') == "$wanted_repo" ]]
 }
@@ -918,13 +965,14 @@ branch_tracks_pr_head() {
     "branch.$branch.remote" 2>/dev/null) || return 1
   merge=$(git -C "$primary" config --get \
     "branch.$branch.merge" 2>/dev/null) || return 1
+  pr_url_identity "$pr_url" "$number" || return 1
   if [[ $merge == "refs/heads/$head_ref" ]]; then
-    remote_matches_identity "$remote" "$head_owner" "$head_repo"
+    remote_matches_identity "$remote" "$PR_BASE_HOST" "$head_owner" "$head_repo"
     return
   fi
   if [[ $merge == "refs/pull/$number/head" ]]; then
-    pr_url_identity "$pr_url" "$number" || return 1
-    remote_matches_identity "$remote" "$PR_BASE_OWNER" "$PR_BASE_REPO"
+    remote_matches_identity "$remote" "$PR_BASE_HOST" \
+      "$PR_BASE_OWNER" "$PR_BASE_REPO"
     return
   fi
   return 1
@@ -974,8 +1022,10 @@ cleanup_pr_fetch_worktree() {
 # its ignored local files remain untouched until every reuse guard has passed.
 fetch_pr_head() {
   local number=$1 expected_oid=$2 path actual
+  require_current_managed_path "$managed_root"
   path=$(mktemp -d "$managed_root/.pwt-pr-fetch.XXXXXX") || return 1
   PWT_PR_FETCH_WORKTREE=$path
+  require_current_managed_path "$path"
   if ! git -C "$primary" worktree add --detach --quiet "$path" HEAD; then
     cleanup_pr_fetch_worktree >/dev/null 2>&1 || return 3
     return 1
@@ -1112,6 +1162,7 @@ reuse_pr_or_refuse() {
   if worktree_is_dirty "$existing" refresh; then
     die "worktree has uncommitted or untracked work, refusing to refresh: $existing"
   fi
+  refuse_hidden_index_state "$existing" refresh
 
   fetch_pr_head "$number" "$head_oid" || fetch_rc=$?
   case $fetch_rc in
@@ -1125,6 +1176,13 @@ reuse_pr_or_refuse() {
     *) die "gh could not fetch pull request #$number for safe reuse" ;;
   esac
 
+  # The authenticated fetch is external work. Re-check every local-state view
+  # at the mutation boundary so an editor or watcher cannot turn the earlier
+  # clean result stale and have a rewrite discard its new work.
+  if worktree_is_dirty "$existing" refresh; then
+    die "worktree changed while pull request #$number was being fetched, refusing to refresh: $existing"
+  fi
+  refuse_hidden_index_state "$existing" refresh
   pr_ignored_paths_are_safe "$existing" "$head_oid" || collision_rc=$?
   case ${collision_rc:-0} in
     0) ;;
@@ -1133,13 +1191,6 @@ reuse_pr_or_refuse() {
       ;;
     *) die "cannot inspect ignored local paths in $existing; refusing to refresh" ;;
   esac
-
-  # The authenticated fetch and tree scan are external work. Re-check at the
-  # mutation boundary so an editor or watcher cannot turn the earlier clean
-  # result stale and have a rewrite discard its new work.
-  if worktree_is_dirty "$existing" refresh; then
-    die "worktree changed while pull request #$number was being fetched, refusing to refresh: $existing"
-  fi
 
   current=$(git -C "$existing" rev-parse HEAD 2>/dev/null) ||
     die "cannot resolve the current head in reused worktree: $existing"
@@ -1344,11 +1395,12 @@ cmd_new() {
     "refs/heads/$base:refs/remotes/origin/$base" ||
     die "could not fetch origin/$base"
 
-  mkdir -p "$managed_root"
+  ensure_managed_root
   # Fetch is an external command and can run hooks. Re-check immediately before
   # Git writes so a substituted path is refused instead of followed.
   ensure_available_path "$target"
   begin_worktree_preparation "$target"
+  require_current_managed_path "$target"
   git -C "$primary" worktree add -b "$branch" "$target" "origin/$base" ||
     fail_worktree_creation "$branch" "$target"
   require_managed_worktree "$branch" "$target"
@@ -1374,11 +1426,12 @@ cmd_branch() {
   validate_worktree_name "$name"
   target="$managed_root/$name"
   ensure_available_path "$target"
-  mkdir -p "$managed_root"
+  ensure_managed_root
 
   if local_branch_exists "$branch"; then
     ensure_available_path "$target"
     begin_worktree_preparation "$target"
+    require_current_managed_path "$target"
     git -C "$primary" worktree add "$target" "$branch" ||
       fail_worktree_creation "$branch" "$target"
   else
@@ -1392,6 +1445,7 @@ cmd_branch() {
     # Git writes so a substituted path is refused instead of followed.
     ensure_available_path "$target"
     begin_worktree_preparation "$target"
+    require_current_managed_path "$target"
     git -C "$primary" worktree add -b "$branch" "$target" "origin/$branch" ||
       fail_worktree_creation "$branch" "$target"
   fi
@@ -1478,8 +1532,11 @@ cmd_pr() {
   # Capture this before gh fetches or moves any refs. A fork can reuse the name
   # of an unrelated base-repository branch, so both repository identity gates
   # are required before origin containment proves a reset safe.
-  if git -C "$primary" show-ref --verify --quiet "refs/heads/$head_ref"; then
+  if local_branch_exists "$head_ref"; then
     branch_existed=1
+  else
+    status=$?
+    ((status == 1)) || die "cannot inspect local branch: $head_ref"
   fi
   if ((! force)) && [[ $cross == false ]] &&
     [[ $head_owner == "$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')" ]] &&
@@ -1489,8 +1546,9 @@ cmd_pr() {
   fi
 
   ensure_available_path "$target"
-  mkdir -p "$managed_root"
+  ensure_managed_root
   begin_worktree_preparation "$target"
+  require_current_managed_path "$target"
   git -C "$primary" worktree add --detach --quiet "$target" HEAD ||
     fail_worktree_creation "$head_ref" "$target"
 
@@ -1932,10 +1990,14 @@ repoint_symlink() {
   local staging="${target}.pwt-install.$$" displaced observed
   displaced="$staging/previous"
 
-  mkdir "$staging" || die "cannot reserve symlink update: $target"
+  mkdir "$staging" || {
+    warn "cannot reserve symlink update: $target"
+    return 1
+  }
   if ! mv "$target" "$displaced"; then
     rmdir "$staging" >/dev/null 2>&1 || true
-    die "target changed while updating symlink: $target"
+    warn "target changed while updating symlink: $target"
+    return 1
   fi
 
   observed=''
@@ -1943,17 +2005,29 @@ repoint_symlink() {
     observed=$(readlink "$displaced") || observed=''
   fi
   if [[ ! -L $displaced || $observed != "$expected" ]]; then
-    die "target changed while updating symlink; preserved it at: $displaced"
+    warn "target changed while updating symlink; preserved it at: $displaced"
+    return 1
   fi
 
   if ! ln -s "$source" "$target"; then
-    die "cannot update symlink; previous link preserved at: $displaced"
+    if [[ ! -e $target && ! -L $target ]] && mv "$displaced" "$target"; then
+      rmdir "$staging" >/dev/null 2>&1 ||
+        warn "restored the previous link but could not clear symlink staging: $staging"
+      warn "cannot update symlink; restored the previous link: $target"
+      return 1
+    fi
+    warn "cannot update symlink; previous link preserved at: $displaced"
+    return 1
   fi
 
-  rm -f "$displaced" ||
-    die "updated $target but could not clear the previous symlink: $displaced"
-  rmdir "$staging" ||
-    die "updated $target but could not clear symlink staging: $staging"
+  rm -f "$displaced" || {
+    warn "updated $target but could not clear the previous symlink: $displaced"
+    return 1
+  }
+  rmdir "$staging" || {
+    warn "updated $target but could not clear symlink staging: $staging"
+    return 1
+  }
   note "repointed $target -> $source"
 }
 
@@ -1963,7 +2037,10 @@ repoint_symlink() {
 link_into_place() {
   local source=$1 target=$2 current
 
-  mkdir -p "${target%/*}" || die "cannot create ${target%/*}"
+  mkdir -p "${target%/*}" || {
+    warn "cannot create ${target%/*}"
+    return 1
+  }
 
   if [[ -L $target ]]; then
     current=$(readlink "$target")
@@ -1972,14 +2049,89 @@ link_into_place() {
       return 0
     fi
     repoint_symlink "$source" "$target" "$current"
-    return 0
+    return
   fi
 
-  [[ ! -e $target ]] ||
-    die "$target exists and is not a symlink; move it aside and retry"
+  if [[ -e $target ]]; then
+    warn "$target exists and is not a symlink; move it aside and retry"
+    return 1
+  fi
 
-  ln -s "$source" "$target" || die "cannot create symlink: $target"
+  ln -s "$source" "$target" || {
+    warn "cannot create symlink: $target"
+    return 1
+  }
   note "installed $target -> $source"
+}
+
+preflight_link_target() {
+  local target=$1
+  mkdir -p "${target%/*}" || {
+    warn "cannot create ${target%/*}"
+    return 1
+  }
+  [[ ! -L $target ]] || return 0
+  if [[ -e $target ]]; then
+    warn "$target exists and is not a symlink; move it aside and retry"
+    return 1
+  fi
+}
+
+# Restores one pre-install state only while the target is still the exact link
+# this installer wrote. A concurrent replacement is preserved and reported.
+restore_install_link() {
+  local target=$1 installed_source=$2 previous_kind=$3 previous_value=$4
+  local current='' staging="${target}.pwt-rollback.$$" displaced observed=''
+
+  if [[ $previous_kind == absent && ! -e $target && ! -L $target ]]; then
+    return 0
+  fi
+  if [[ $previous_kind == symlink && -L $target ]]; then
+    current=$(readlink "$target") || current=''
+    [[ $current != "$previous_value" ]] || return 0
+  fi
+
+  current=''
+  if [[ -L $target ]]; then
+    current=$(readlink "$target") || current=''
+  fi
+  if [[ ! -L $target || $current != "$installed_source" ]]; then
+    warn "install target changed before rollback; preserving it: $target"
+    return 1
+  fi
+
+  mkdir "$staging" || {
+    warn "cannot reserve install rollback: $target"
+    return 1
+  }
+  displaced="$staging/installed"
+  if ! mv "$target" "$displaced"; then
+    rmdir "$staging" >/dev/null 2>&1 || true
+    warn "install target changed during rollback: $target"
+    return 1
+  fi
+  if [[ -L $displaced ]]; then
+    observed=$(readlink "$displaced") || observed=''
+  fi
+  if [[ ! -L $displaced || $observed != "$installed_source" ]]; then
+    warn "install target changed during rollback; preserved it at: $displaced"
+    return 1
+  fi
+
+  if [[ $previous_kind == symlink ]]; then
+    if ! ln -s "$previous_value" "$target"; then
+      warn "cannot restore previous symlink; installed link preserved at: $displaced"
+      return 1
+    fi
+  fi
+  rm -f "$displaced" || {
+    warn "restored $target but could not clear rollback staging: $displaced"
+    return 1
+  }
+  rmdir "$staging" || {
+    warn "restored $target but could not clear rollback directory: $staging"
+    return 1
+  }
 }
 
 install_path_warning() {
@@ -1997,7 +2149,10 @@ cmd_install() {
   esac
 
   local bin_dir="$HOME/.local/bin"
-  local source completion_source completion_dir install_target install_lock
+  local source completion_source completion_dir completion_target
+  local install_target install_lock completion_present=0 rollback_failed=0
+  local bin_previous_kind=absent bin_previous=''
+  local completion_previous_kind=absent completion_previous=''
   install_target="$bin_dir/pwt"
 
   mkdir -p "$bin_dir" || die "cannot create $bin_dir"
@@ -2014,16 +2169,50 @@ cmd_install() {
     die 'resolved pwt source is the install target itself'
   completion_source="${source%/*}/pwt-completion.bash"
 
-  link_into_place "$source" "$install_target"
-
   # bash-completion 2.x autoloads a file named after the command from here, so a
   # new shell can complete pwt without an rc-file edit.
   case ${XDG_DATA_HOME-} in
     /*) completion_dir="$XDG_DATA_HOME/bash-completion/completions" ;;
     *) completion_dir="$HOME/.local/share/bash-completion/completions" ;;
   esac
-  if [[ -f $completion_source ]]; then
-    link_into_place "$completion_source" "$completion_dir/pwt"
+  completion_target="$completion_dir/pwt"
+  if [[ -e $completion_source || -L $completion_source ]]; then
+    [[ -f $completion_source && ! -L $completion_source ]] ||
+      die "resolved pwt completion is not a regular file: $completion_source"
+    completion_present=1
+  fi
+
+  preflight_link_target "$install_target" || die 'cannot preflight pwt installation'
+  if ((completion_present)); then
+    preflight_link_target "$completion_target" ||
+      die 'cannot preflight pwt completion installation'
+  fi
+  if [[ -L $install_target ]]; then
+    bin_previous=$(readlink "$install_target") ||
+      die "cannot inspect existing symlink: $install_target"
+    [[ -L $install_target ]] ||
+      die "install target changed during preflight: $install_target"
+    bin_previous_kind=symlink
+  fi
+  if ((completion_present)) && [[ -L $completion_target ]]; then
+    completion_previous=$(readlink "$completion_target") ||
+      die "cannot inspect existing symlink: $completion_target"
+    [[ -L $completion_target ]] ||
+      die "install target changed during preflight: $completion_target"
+    completion_previous_kind=symlink
+  fi
+
+  link_into_place "$source" "$install_target" || die 'cannot install pwt command'
+  if ((completion_present)); then
+    if ! link_into_place "$completion_source" "$completion_target"; then
+      restore_install_link "$completion_target" "$completion_source" \
+        "$completion_previous_kind" "$completion_previous" || rollback_failed=1
+      restore_install_link "$install_target" "$source" \
+        "$bin_previous_kind" "$bin_previous" || rollback_failed=1
+      ((rollback_failed == 0)) ||
+        die 'cannot install pwt completion and rollback was incomplete'
+      die 'cannot install pwt completion; restored previous install state'
+    fi
   else
     note "no completion script beside pwt, skipping: $completion_source"
   fi
