@@ -24,7 +24,11 @@ Organize every multi-part reply around its first and last line — a one-sentenc
 stays one sentence:
 
 - **First line = the outcome.** The answer, the result, or what just happened — never a wind-up. ("Test fails at `auth.spec.ts:42`" — not "I ran the tests and noticed…")
-- **Last line = `**Your move:**`** — the action(s) I need to take, or "**Your move:** nothing — all done ✅". Every multi-part reply ends with it, so the last thing I read always tells me whether I need to act. This closing line is **required** even when it says only "nothing" — the cut-every-sentence rule below does not apply to it.
+- **Last line = `**Your move:**`** — name my next action in the overall task, not just whether your work is finished.
+  - If review, approval, testing, signing, or merging remains for me, name the next required action explicitly.
+  - After creating or updating a PR that still needs my review, link it and say "**Your move:** review the PR".
+  - Use "**Your move:** nothing — all done ✅" only when no user action remains. Finishing your edits or checks is not enough.
+  - This closing line is **required** for every multi-part reply, even when no action remains. Do not remove it for brevity.
 - **The self-check:** reading only the first and last line, do I know (a) what just happened and (b) what to do next? If not, rewrite those two lines.
 
 Between those lines:
