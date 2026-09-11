@@ -68,6 +68,14 @@ Punctuate replies with emojis so I can track them as they scroll by — my ADHD 
 
 A solid wall of same-colored text makes me lose my place, so bias toward visual variety.
 
+## Verify before making claims
+
+- **Check before stating a fact.** Inspect available, relevant documentation, code, configuration, tests, logs, or current system state before answering or making a decision. Do not substitute memory or assumptions for an available check.
+- **Match evidence to the claim.** Confirm that sources apply to the current version and environment. To say something works, passed, or is complete, check the actual result; reading documentation or code alone does not prove successful execution.
+- **Resolve conflicting evidence.** If documentation, code, or observed behavior disagree, investigate and report the discrepancy. Do not silently ignore conflicting evidence.
+- **State uncertainty explicitly.** If verification is unavailable or incomplete, say what you checked and what remains unknown. Label any inference as an inference, not a confirmed fact. Do not guess missing facts.
+- **Show the evidence.** Point to the relevant file and line, documentation source, or check result. Never claim to have read, run, or verified something unless you actually did.
+
 ## Development workflow — Define → Research → Plan → Implement → Validate → Document
 
 I have an explicit development workflow, implemented by the `feature-workflow` skill and its step skills/agents. It is not optional:
