@@ -365,6 +365,9 @@ launching subcommands). What it does:
   is flagged do-NOT-migrate: a global deny is absolute and can't be re-allowed per
   project.
 
+The installer also leaves `~/.claude/CLAUDE.md` untouched. The repository's user-preferences
+template is maintained separately; see [Personal user preferences](#personal-user-preferences).
+
 To orient Claude to the workflow in a target project, paste the snippet below into that
 project's `CLAUDE.md` and adapt it. Optionally copy `.mcp.json` (see
 [MCP servers](#mcp-servers)); then start with `/define` (or read `feature-workflow`
@@ -428,6 +431,25 @@ for the Claude workflow used by this repo.
 Run `agents/install.sh` yourself. It manages only `~/.agents/skills/`; it never reads,
 copies, merges, or modifies `AGENTS.md`, `~/.codex`, or Pi configuration.
 
+### Personal user preferences
+
+- **[`claude/CLAUDE.md`](claude/CLAUDE.md)** — sanitized personal preferences for Claude
+  Code, intended for manual review and merging into `~/.claude/CLAUDE.md`.
+- **[`agents/AGENTS.md`](agents/AGENTS.md)** — equivalent personal preferences expressed
+  for a generic coding agent, with a self-contained workflow and no required Claude-only
+  tools. See the [shared library guide](agents/README.md#personal-user-preferences).
+
+These are standalone, independently maintained source templates — not generated files or
+synchronized copies. Neither library installer manages them or the live user-instruction
+files. Review and merge changes by hand into the user-instruction location your harness
+supports, omitting each template's opening repository source note. The repository path and
+`~/.agents/AGENTS.md` are not universal global-discovery locations.
+
+Keep reusable personal preferences in these templates, but remove whole private
+external-work sections before writing repository copies. Follow the
+[repository authoring boundary](AGENTS.md#authoring-conventions); do not preserve private
+operational details by merely substituting generic names.
+
 This repo's own guidance lives in `AGENTS.md` (read natively by Codex and Pi);
 `CLAUDE.md` is a **symlink** to it, which is how Claude Code reads the same file. Two
 symlink notes: GitHub's web UI shows `CLAUDE.md` as a pointer to `AGENTS.md` rather than
@@ -454,6 +476,7 @@ Both are optional — skills degrade gracefully when a server isn't present (e.g
 
 ```text
 claude/
+├── CLAUDE.md              # personal user template (manual maintenance; not installed)
 ├── install.sh             # global installer (human-run): additive copy + merge report
 ├── skills/                # the skills above (one folder each, SKILL.md + optional files)
 ├── agents/                # the review/implementer agents above (one .md each)
@@ -463,7 +486,10 @@ claude/
 ├── scripts/               # clwt, worktree-status.sh, and their tests
 ├── settings.json          # settings TEMPLATE the merge report diffs against (not live config)
 └── statusline-command.sh  # statusline script, installed to ~/.claude
-agents/            # shared skills + human-run additive installer for ~/.agents/skills
+agents/
+├── AGENTS.md              # portable personal user template (manual maintenance)
+├── install.sh             # human-run additive installer for ~/.agents/skills only
+└── skills/                # shared portable skills
 codex/             # Codex guidance plus cwt, completion, and tests
 pi/                # Pi personal global context plus pwt, completion, tests, and guide
 archive/           # the previous automated pipeline, kept for reference

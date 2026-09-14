@@ -11,6 +11,9 @@ For the catalog of skills/agents and the feature workflow they implement, see
 
 ## What lives where
 
+- `claude/CLAUDE.md` — a personal user-preferences source template, manually maintained
+  outside the library installer. Its personal instructions are for global use, not for
+  maintaining this repository; this root file governs repository maintenance.
 - `claude/skills/<name>/SKILL.md` — a skill (methodology/reference loaded when relevant).
   Supporting files live alongside it.
 - `claude/agents/<name>.md` — a subagent: a **thin** wrapper that runs a skill in an
@@ -55,6 +58,15 @@ shared skills into `~/.agents/skills/` and is human-run. When a script has that 
 in its skill or README so agents recommend the command instead of trying to run it.
 
 ## Authoring conventions
+
+**Keep private external work out of this repository.** Never commit employer-, client-, or
+external-project-specific names, ticket prefixes, account/repository paths, environment
+instructions, service identifiers, or related helpers. Remove entire related sections
+before importing personal configuration; replacing names alone is not sufficient. This
+applies to all repository content, including examples, archives, commit messages, and PR
+text. Do not repeat excluded names in exclusion rules or test fixtures. This repository's
+own identifiers, ordinary tool names, generic examples, and unrelated personal preferences
+are allowed.
 
 When creating or editing skills, follow the `writing-skills` skill, and:
 
