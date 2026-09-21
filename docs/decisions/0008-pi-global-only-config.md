@@ -8,6 +8,9 @@ by [ADR 0010](0010-shared-agent-skills-library.md))
 Amends: [ADR 0007](0007-claude-tree-global-install.md) (its "codex/ and pi/ are
 per-project copies" statement, for pi/ only)
 
+Amended by: [ADR 0013](0013-link-config-library.md) (the install command below is replaced
+by a `link.sh` symlink)
+
 Tracking: beads epic `ai-config-hmc`
 
 ## Context
@@ -29,7 +32,7 @@ through projects.
 
 - `pi/AGENTS.md` is the maintainer's **personal global Pi context file**, installed with
   `mkdir -p ~/.pi/agent && cp pi/AGENTS.md ~/.pi/agent/AGENTS.md`. The per-project
-  template model is dropped for Pi.
+  template model is dropped for Pi. (Since ADR 0013, `link.sh` symlinks the file instead.)
 - The file carries: who-the-maintainer-is, the unified "how to write to me" rules, the
   visual-anchor conventions, the engineering conventions (formerly the template's whole
   content), an inline description of the Define→…→Document workflow, and a hard change
