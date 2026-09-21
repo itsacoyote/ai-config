@@ -450,12 +450,11 @@ external-work sections before writing repository copies. Follow the
 [repository authoring boundary](AGENTS.md#authoring-conventions); do not preserve private
 operational details by merely substituting generic names.
 
-This repo's own guidance lives in `AGENTS.md` (read natively by Codex and Pi);
-`CLAUDE.md` is a **symlink** to it, which is how Claude Code reads the same file. Two
-symlink notes: GitHub's web UI shows `CLAUDE.md` as a pointer to `AGENTS.md` rather than
-inlining the content — that's the symlink rendering, not broken docs. And a checkout
-with `core.symlinks=false` (some Windows setups) materializes `CLAUDE.md` as a one-line
-text file; if `readlink CLAUDE.md` prints nothing, re-clone with symlinks enabled.
+This repo's own guidance lives in `AGENTS.md`, read natively by Codex, Pi, and Claude Code
+2.1.277 or later (which reads `AGENTS.md` whenever no `CLAUDE.md` exists in the working
+directory or above it). There is no `CLAUDE.md` in this repo. Claude Code confirms the load
+with an `AGENTS.md loaded` line at session start; the file does not appear in `/memory` or
+`/context`.
 
 ---
 
@@ -493,8 +492,7 @@ agents/
 codex/             # Codex guidance plus cwt, completion, and tests
 pi/                # Pi personal global context plus pwt, completion, tests, and guide
 archive/           # the previous automated pipeline, kept for reference
-AGENTS.md          # how to work IN this repo (read by all three harnesses)
-CLAUDE.md          # symlink to AGENTS.md — how Claude Code reads it
+AGENTS.md          # how to work IN this repo (read natively by all three harnesses)
 ```
 
 The `archive/` directory holds the previous fully-automated pipeline (the `/feature` orchestrator, `context.yaml`, step agents) — preserved for reference while the workflow is rebuilt manually.

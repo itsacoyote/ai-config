@@ -2,9 +2,9 @@
 
 Guidance for working **in this repository**, whichever agent you are. This repo ships
 harness-specific configuration under `claude/`, `codex/`, and `pi/`, plus portable Agent
-Skills under `agents/skills/`. Codex and Pi read this file natively; Claude Code reads it
-through the `CLAUDE.md` symlink. This file documents how to maintain the libraries — it does
-**not** travel to other projects.
+Skills under `agents/skills/`. Codex, Pi, and Claude Code (2.1.277 or later) read this file
+natively; there is no `CLAUDE.md` in this repo. This file documents how to maintain the
+libraries — it does **not** travel to other projects.
 
 For the catalog of skills/agents and the feature workflow they implement, see
 [README.md](README.md).
