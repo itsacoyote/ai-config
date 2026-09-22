@@ -322,6 +322,70 @@ plan_entry "$REPO/claude/statusline-command.sh" "$HOME/.claude/statusline-comman
 plan_entry "$REPO/agents/AGENTS.md" "$HOME/.codex/AGENTS.md"
 plan_entry "$REPO/pi/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
 
+# Extra pairs from the private directory: one `source<TAB>target` per line. This
+# is how work-scope rules reach the parent directories of work checkouts while
+# the paths stay private. The whole file is validated before anything is planned
+# from it, and every error is reported with its line number.
+LINKS_FILE="$PRIVATE/links.txt"
+TAB="$(printf '\t')"
+
+is_planned_target() {
+  local i=0
+  while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
+    [ "${PLAN_CLASS[$i]}" != delete ] && [ "${PLAN_DST[$i]}" = "$1" ] && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+
+plan_links_file() {
+  [ -f "$LINKS_FILE" ] || return 0
+  local lineno=0 line src dst errors='' bad
+  # `|| [ -n "$line" ]` keeps a final line without a trailing newline.
+  while IFS= read -r line || [ -n "$line" ]; do
+    lineno=$((lineno + 1))
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    case "$line" in
+      *"$TAB"*) ;;
+      *) errors="$errors  line $lineno: no tab between source and target"$'\n'; continue ;;
+    esac
+    src="${line%%"$TAB"*}"
+    dst="${line#*"$TAB"}"
+    # Values read from a file are not tilde-expanded by the shell.
+    case "$src" in "~/"*) src="$HOME/${src#"~/"}" ;; esac
+    case "$dst" in "~/"*) dst="$HOME/${dst#"~/"}" ;; esac
+    bad=''
+    case "$dst" in *"$TAB"*) bad='more than one tab' ;; esac
+    case "$src" in /*) ;; *) bad="${bad:-source is not an absolute path}" ;; esac
+    case "$dst" in /*) ;; *) bad="${bad:-target is not an absolute path}" ;; esac
+    if [ -z "$bad" ]; then
+      case "$dst" in
+        "$HOME"/?*) ;;
+        *) bad='target is outside HOME' ;;
+      esac
+    fi
+    if [ -z "$bad" ] && [ ! -e "$src" ] && [ ! -L "$src" ]; then
+      bad="source does not exist: $src"
+    fi
+    if [ -z "$bad" ] && is_planned_target "$dst"; then
+      bad="target is already planned: $dst"
+    fi
+    if [ -n "$bad" ]; then
+      errors="$errors  line $lineno: $bad"$'\n'
+      continue
+    fi
+    plan_entry "$src" "$dst"
+  done < "$LINKS_FILE"
+  if [ -n "$errors" ]; then
+    printf 'link.sh: invalid entries in %s:\n%s' "$LINKS_FILE" "$errors" >&2
+    die "links.txt has invalid entries; nothing written"
+  fi
+}
+
+plan_links_file
+
 # ------------------------------------------------------------------- print
 
 print_plan() {

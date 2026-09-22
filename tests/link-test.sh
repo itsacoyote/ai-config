@@ -607,6 +607,125 @@ else
   not_ok "runs with no settings file present and deletes the now-unregistered hook (status=$STATUS): $OUT"
 fi
 
+# -------------------------------------------------------------- links.txt
+
+section 'links.txt'
+
+TAB="$(printf '\t')"
+
+# make_links <home> <lines...> — private dir with a work-rules file and a links.txt
+make_links() {
+  local h="$1"; shift
+  mkdir -p "$h/.ai-private"
+  echo "work-rules" > "$h/.ai-private/work-rules.md"
+  printf '%s\n' "$@" > "$h/.ai-private/links.txt"
+}
+
+H18="$TMP/h18"; mkdir -p "$H18"
+make_links "$H18" \
+  "# work-scope rules" \
+  "" \
+  "$H18/.ai-private/work-rules.md${TAB}$H18/work/CLAUDE.md" \
+  "~/.ai-private/work-rules.md${TAB}~/work2/CLAUDE.md"
+run_link_home "$H18" "$FIX"
+if [ "$STATUS" = 0 ] && [ -L "$H18/work/CLAUDE.md" ] && [ -L "$H18/work2/CLAUDE.md" ] &&
+   [ "$(cat "$H18/work/CLAUDE.md")" = "work-rules" ]; then
+  ok 'links each source-tab-target pair and skips blank and comment lines'
+else
+  not_ok "links each source-tab-target pair and skips blank and comment lines (status=$STATUS): $OUT"
+fi
+if [ "$(readlink "$H18/work2/CLAUDE.md")" = "$H18/.ai-private/work-rules.md" ]; then
+  ok 'expands a leading tilde in source and target'
+else
+  not_ok "expands a leading tilde in source and target (got $(readlink "$H18/work2/CLAUDE.md"))"
+fi
+if [ -d "$H18/work" ]; then
+  ok 'creates a missing target parent directory'
+else
+  not_ok 'creates a missing target parent directory'
+fi
+run_link_home "$H18" "$FIX"
+if [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q '^no changes'; then
+  ok 'links.txt pairs are idempotent'
+else
+  not_ok "links.txt pairs are idempotent (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): a target outside HOME is rejected before anything is
+# planned from the file. Remove the outside-HOME case and this goes red: the
+# link lands under $TMP/outside3.
+H19="$TMP/h19"; mkdir -p "$H19"; OUTSIDE3="$TMP/outside3"; mkdir -p "$OUTSIDE3"
+make_links "$H19" "$H19/.ai-private/work-rules.md${TAB}$OUTSIDE3/CLAUDE.md"
+run_link_home "$H19" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: target is outside HOME' &&
+   [ ! -e "$OUTSIDE3/CLAUDE.md" ] && [ ! -L "$OUTSIDE3/CLAUDE.md" ] && [ ! -e "$H19/.claude" ]; then
+  ok 'rejects a target outside HOME and changes nothing'
+else
+  not_ok "rejects a target outside HOME and changes nothing (status=$STATUS): $OUT"
+fi
+
+H20="$TMP/h20"; mkdir -p "$H20"
+make_links "$H20" "# comment" "$H20/.ai-private/work-rules.md $H20/work/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 2: no tab'; then
+  ok 'rejects a line without a tab, naming the line number'
+else
+  not_ok "rejects a line without a tab, naming the line number (status=$STATUS): $OUT"
+fi
+
+make_links "$H20" "rules/work-rules.md${TAB}~/work/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: source is not an absolute path'; then
+  ok 'rejects a relative path'
+else
+  not_ok "rejects a relative path (status=$STATUS): $OUT"
+fi
+
+make_links "$H20" \
+  "~/.ai-private/work-rules.md${TAB}~/work/CLAUDE.md" \
+  "~/.ai-private/work-rules.md${TAB}~/work/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 2: target is already planned'; then
+  ok 'rejects a duplicate target within links.txt'
+else
+  not_ok "rejects a duplicate target within links.txt (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): a links.txt line may not silently repoint a target
+# the repo already claims. Remove the is_planned_target check and this goes red.
+make_links "$H20" "~/.ai-private/work-rules.md${TAB}~/.claude/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: target is already planned' && [ ! -e "$H20/.claude" ]; then
+  ok 'rejects a links.txt target that a repo-derived link already claims'
+else
+  not_ok "rejects a links.txt target that a repo-derived link already claims (status=$STATUS): $OUT"
+fi
+
+make_links "$H20" "~/.ai-private/nope.md${TAB}~/work/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: source does not exist'; then
+  ok 'rejects a missing source'
+else
+  not_ok "rejects a missing source (status=$STATUS): $OUT"
+fi
+
+# Every bad line is reported, not just the first.
+make_links "$H20" "no tab here" "~/.ai-private/nope.md${TAB}~/work/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1:' && printf '%s' "$OUT" | grep -q 'line 2:'; then
+  ok 'reports every invalid line'
+else
+  not_ok "reports every invalid line (status=$STATUS): $OUT"
+fi
+
+# H6 has a private dir and no links.txt.
+run_link_home "$H6" "$FIX"
+if [ "$STATUS" = 0 ] && ! printf '%s' "$OUT" | grep -q 'links.txt'; then
+  ok 'silently skips when links.txt is absent'
+else
+  not_ok "silently skips when links.txt is absent (status=$STATUS): $OUT"
+fi
+
 # ------------------------------------------------------------- portability
 
 section 'portability'
