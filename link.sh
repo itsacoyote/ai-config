@@ -185,7 +185,46 @@ plan_root() {
   plan_dir_entries "$root/agents/skills" "$HOME/.agents/skills"
 }
 
+# Second source root with the same layout. A name present in both roots is a hard
+# error rather than an override: which one wins would depend on plan order, and
+# a private copy of a library skill is exactly the drift this script removes.
+PRIVATE="$HOME/.ai-private"
+
+names_in() {
+  [ -d "$1" ] || return 0
+  find "$1" -mindepth 1 -maxdepth 1 | LC_ALL=C sort | while IFS= read -r entry; do
+    case "$(basename "$entry")" in
+      .gitkeep|.DS_Store) ;;
+      *) basename "$entry" ;;
+    esac
+  done
+}
+
+check_conflicts() {
+  local d rel conflicts='' name
+  for d in $CLAUDE_DIRS; do
+    rel="claude/$d"
+    while IFS= read -r name; do
+      [ -n "$name" ] && conflicts="$conflicts  $rel/$name"$'\n'
+    done < <(comm -12 <(names_in "$REPO/$rel") <(names_in "$PRIVATE/$rel"))
+  done
+  while IFS= read -r name; do
+    [ -n "$name" ] && conflicts="$conflicts  agents/skills/$name"$'\n'
+  done < <(comm -12 <(names_in "$REPO/agents/skills") <(names_in "$PRIVATE/agents/skills"))
+  if [ -n "$conflicts" ]; then
+    printf 'link.sh: the same name exists in %s and %s:\n%s' "$REPO" "$PRIVATE" "$conflicts" >&2
+    die "conflict between the repo and the private directory; nothing written"
+  fi
+}
+
+if [ -d "$PRIVATE" ]; then
+  check_conflicts
+else
+  note "private directory $PRIVATE not found; linking the repo only"
+fi
+
 plan_root "$REPO"
+[ -d "$PRIVATE" ] && plan_root "$PRIVATE"
 plan_entry "$REPO/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
 plan_entry "$REPO/claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh"
 plan_entry "$REPO/agents/AGENTS.md" "$HOME/.codex/AGENTS.md"

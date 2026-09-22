@@ -309,6 +309,57 @@ else
   not_ok "dry-run prints the plan and writes nothing (status=$STATUS): $OUT"
 fi
 
+# ----------------------------------------------------------- private root
+
+section 'private root'
+
+make_private() {
+  local h="$1"
+  mkdir -p "$h/.ai-private/claude/skills/priv" "$h/.ai-private/agents/skills/pbar"
+  echo "private-skill" > "$h/.ai-private/claude/skills/priv/SKILL.md"
+  echo "private-shared-skill" > "$h/.ai-private/agents/skills/pbar/SKILL.md"
+}
+
+H6="$TMP/h6"; mkdir -p "$H6"; make_private "$H6"
+run_link_home "$H6" "$FIX"
+if [ "$STATUS" = 0 ] && [ -L "$H6/.claude/skills/priv" ] && [ -L "$H6/.agents/skills/pbar" ] &&
+   [ -L "$H6/.claude/skills/foo" ]; then
+  ok 'links entries from the private root alongside the repo'
+else
+  not_ok "links entries from the private root alongside the repo (status=$STATUS): $OUT"
+fi
+
+H7="$TMP/h7"
+run_link_home "$H7" "$FIX" --dry-run
+if [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q 'private directory .* not found'; then
+  ok 'exits 0 with a note when the private dir is absent'
+else
+  not_ok "exits 0 with a note when the private dir is absent (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): a name in both roots must stop the run before any write.
+# Remove the die in check_conflicts and this goes red: the run proceeds and links.
+H8="$TMP/h8"; mkdir -p "$H8/.ai-private/claude/skills/foo"
+echo "shadow" > "$H8/.ai-private/claude/skills/foo/SKILL.md"
+run_link_home "$H8" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'claude/skills/foo' &&
+   printf '%s' "$OUT" | grep -qi 'conflict' && [ ! -e "$H8/.claude" ]; then
+  ok 'fails with the conflicting name and changes nothing when both roots ship the same entry'
+else
+  not_ok "fails with the conflicting name and changes nothing when both roots ship the same entry (status=$STATUS): $OUT"
+fi
+
+H9="$TMP/h9"; mkdir -p "$H9/.ai-private/claude/skills/foo" "$H9/.ai-private/agents/skills/bar"
+echo "shadow" > "$H9/.ai-private/claude/skills/foo/SKILL.md"
+echo "shadow" > "$H9/.ai-private/agents/skills/bar/SKILL.md"
+run_link_home "$H9" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'claude/skills/foo' &&
+   printf '%s' "$OUT" | grep -q 'agents/skills/bar'; then
+  ok 'reports every conflict, not just the first'
+else
+  not_ok "reports every conflict, not just the first (status=$STATUS): $OUT"
+fi
+
 # ------------------------------------------------------------- portability
 
 section 'portability'
