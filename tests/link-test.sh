@@ -118,6 +118,20 @@ else
   not_ok "prints the whole usage block with --help (status=$STATUS)"
 fi
 
+# The cut point must track the header, not a line number: with today's header a
+# fixed `2,19p` prints the same text, so this grows the header by one line first.
+GROWN="$TMP/grown.sh"
+sed '3s/^/# padding line added by the test\
+/' "$FIX/link.sh" > "$GROWN"
+OUT="$(bash "$GROWN" --help 2>&1)"
+# Assert on the LAST usage line's text, not on "--dry-run": the header prose
+# mentions that flag too, so a truncated block would still match it.
+if printf '%s' "$OUT" | grep -qF 'print the full plan, write nothing' && printf '%s' "$OUT" | grep -q 'padding line'; then
+  ok 'help output survives a header that grew by a line'
+else
+  not_ok "help output survives a header that grew by a line: $OUT"
+fi
+
 run_link "$FIX" --bogus
 if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'unknown argument'; then
   ok 'dies on unknown flag'

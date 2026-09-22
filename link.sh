@@ -207,20 +207,17 @@ CLAUDE_DIRS='skills agents rules references scripts hooks'
 # a private copy of a library skill is exactly the drift this script removes.
 PRIVATE="$HOME/.ai-private"
 
-# Every directory plan_managed_dir merges the two roots for. comm runs under the
-# same C collation names_in sorts with; under a locale that ignores punctuation
-# the orders differ and comm can miss a matching pair, which here means missing
-# a conflict.
-MERGED_DIRS="agents/skills codex/rules"
+# Every directory plan_managed_dir merges the two roots for; a new managed dir is
+# added here and in the plan_managed_dir calls below, nowhere else. comm runs
+# under the same C collation names_in sorts with; under a locale that ignores
+# punctuation the orders differ and comm can miss a matching pair, which here
+# means missing a conflict.
+MERGED_DIRS=''
+for d in $CLAUDE_DIRS; do MERGED_DIRS="$MERGED_DIRS claude/$d"; done
+MERGED_DIRS="$MERGED_DIRS agents/skills codex/rules"
 
 check_conflicts() {
-  local d rel conflicts='' name
-  for d in $CLAUDE_DIRS; do
-    rel="claude/$d"
-    while IFS= read -r name; do
-      [ -n "$name" ] && conflicts="$conflicts  $rel/$name"$'\n'
-    done < <(LC_ALL=C comm -12 <(names_in "$REPO/$rel") <(names_in "$PRIVATE/$rel"))
-  done
+  local rel conflicts='' name
   for rel in $MERGED_DIRS; do
     while IFS= read -r name; do
       [ -n "$name" ] && conflicts="$conflicts  $rel/$name"$'\n'
