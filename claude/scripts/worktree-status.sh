@@ -12,6 +12,12 @@ set -u
 BRIEF=0
 [ "${1:-}" = "--brief" ] && BRIEF=1
 
+# Allow-listed to run without a prompt, so the cwd's own .git/config must not be
+# able to execute anything through it (core.fsmonitor fires during status and
+# rev-parse). Same protection as wt-status.sh.
+export GIT_CONFIG_NOSYSTEM=1
+git() { command git -c core.fsmonitor=false -c core.hooksPath=/dev/null --no-optional-locks "$@"; }
+
 # Not a git repo -> say so and leave (exit 0; this is orientation, not an error).
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [ "$BRIEF" = 1 ]; then echo "not a git repo"; else echo "Not inside a git repository."; fi

@@ -106,15 +106,18 @@ PLAN_WHY=()
 PLAN_CANON=()
 fatal_count=0
 
-# canon_path PATH — the physical parent plus the basename, so two spellings of one
-# place (a symlinked directory inside HOME, a doubled slash, a trailing slash)
-# compare equal. The leaf itself is not resolved: it is the symlink being planned.
-# Every duplicate-target check goes through this; a plain string compare would
-# let a second spelling of a repo-claimed target win silently.
-canon_path() {
+# canon_key PATH — comparison key for "is this the same place": the physical
+# parent plus the basename, lower-cased. Two spellings of one place (a symlinked
+# directory inside HOME, a doubled slash, a trailing slash, another letter case
+# on the case-insensitive default macOS volume) get one key. The leaf itself is
+# not resolved: it is the symlink being planned. Every duplicate-target check
+# goes through this; a plain string compare would let a second spelling of a
+# repo-claimed target win silently. Folding case on a case-sensitive volume can
+# only produce a false duplicate, which fails closed.
+canon_key() {
   local parent
   parent="$(cd -P "$(dirname "$1")" 2>/dev/null && pwd -P)" || parent="$(dirname "$1")"
-  printf '%s/%s' "$parent" "$(basename "$1")"
+  printf '%s/%s' "$parent" "$(basename "$1")" | tr '[:upper:]' '[:lower:]'
 }
 
 add_plan() {
@@ -122,7 +125,7 @@ add_plan() {
   PLAN_SRC[${#PLAN_SRC[@]}]="$2"
   PLAN_DST[${#PLAN_DST[@]}]="$3"
   PLAN_WHY[${#PLAN_WHY[@]}]="${4:-}"
-  PLAN_CANON[${#PLAN_CANON[@]}]="$(canon_path "$3")"
+  PLAN_CANON[${#PLAN_CANON[@]}]="$(canon_key "$3")"
   [ "$1" = FATAL ] && fatal_count=$((fatal_count + 1))
   return 0
 }
@@ -244,12 +247,19 @@ MERGED_DIRS=''
 for d in $CLAUDE_DIRS; do MERGED_DIRS="$MERGED_DIRS claude/$d"; done
 MERGED_DIRS="$MERGED_DIRS agents/skills codex/rules"
 
+# Names are compared case-folded: on the case-insensitive default macOS volume two
+# names differing only in case are one entry, and the link would silently take
+# whichever root is planned first.
+folded_names_in() {
+  names_in "$1" | tr '[:upper:]' '[:lower:]' | LC_ALL=C sort
+}
+
 check_conflicts() {
   local rel conflicts='' name
   for rel in $MERGED_DIRS; do
     while IFS= read -r name; do
-      [ -n "$name" ] && conflicts="$conflicts  $rel/$name"$'\n'
-    done < <(LC_ALL=C comm -12 <(names_in "$REPO/$rel") <(names_in "$PRIVATE/$rel"))
+      [ -n "$name" ] && conflicts="$conflicts  $rel/$name (compared case-insensitively)"$'\n'
+    done < <(LC_ALL=C comm -12 <(folded_names_in "$REPO/$rel") <(folded_names_in "$PRIVATE/$rel"))
   done
   if [ -n "$conflicts" ]; then
     printf 'link.sh: the same name exists in %s and %s:\n%s' "$REPO" "$PRIVATE" "$conflicts" >&2
@@ -373,7 +383,7 @@ TAB="$(printf '\t')"
 
 is_planned_target() {
   local i=0 canon
-  canon="$(canon_path "$1")"
+  canon="$(canon_key "$1")"
   while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
     [ "${PLAN_CLASS[$i]}" != delete ] && [ "${PLAN_CANON[$i]}" = "$canon" ] && return 0
     i=$((i + 1))

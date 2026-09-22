@@ -38,7 +38,7 @@
       "Bash(git merge *)",
       "Bash(gh pr *)",
       "Bash(bash /Users/sf/.claude/scripts/worktree-status.sh)",
-      "Bash(bash /Users/sf/.claude/scripts/worktree-status.sh *)",
+      "Bash(bash /Users/sf/.claude/scripts/worktree-status.sh --brief)",
       "Bash(bash /Users/sf/.claude/scripts/wt-status.sh)",
       "Bash(bash /Users/sf/.claude/scripts/wt-status.sh *)",
       "Bash(bd --version)",

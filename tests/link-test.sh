@@ -407,6 +407,16 @@ else
   not_ok "fails with the conflicting name and changes nothing when both roots ship the same entry (status=$STATUS): $OUT"
 fi
 
+# A name differing only in case is the same entry on the default macOS volume.
+H8c="$TMP/h8c"; mkdir -p "$H8c/.ai-private/claude/skills/FOO"
+echo "shadow" > "$H8c/.ai-private/claude/skills/FOO/SKILL.md"
+run_link_home "$H8c" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -qi 'claude/skills/foo' && [ ! -e "$H8c/.claude" ]; then
+  ok 'fails on a name that differs from a repo name only in case'
+else
+  not_ok "fails on a name that differs from a repo name only in case (status=$STATUS): $OUT"
+fi
+
 # codex/rules is merged from both roots too, so it is in the conflict check.
 H8b="$TMP/h8b"; mkdir -p "$H8b/.ai-private/codex/rules"
 echo "shadow" > "$H8b/.ai-private/codex/rules/ai-config.rules"
@@ -791,8 +801,20 @@ else
   not_ok "rejects a doubled-slash alias of a repo-claimed target (status=$STATUS): $OUT"
 fi
 
+# GUARD (mutation-tested): another letter case is one more spelling on the
+# case-insensitive default macOS volume. Drop the tr fold in canon_key and this
+# goes red there (on a case-sensitive volume the fold produces a harmless false
+# duplicate, so the test stays green either way).
+make_links "$H20" "~/.ai-private/work-rules.md${TAB}~/.claude/claude.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: target is already planned' && [ ! -e "$H20/.claude" ]; then
+  ok 'rejects a differently-cased alias of a repo-claimed target'
+else
+  not_ok "rejects a differently-cased alias of a repo-claimed target (status=$STATUS): $OUT"
+fi
+
 # GUARD (mutation-tested): a symlinked directory inside HOME is yet another
-# spelling. Make canon_path return its argument unchanged and this goes red.
+# spelling. Make canon_key return its argument unchanged and this goes red.
 H20c="$TMP/h20c"; mkdir -p "$H20c/.claude"
 ln -s "$H20c/.claude" "$H20c/alias"
 make_links "$H20c" "~/.ai-private/work-rules.md${TAB}~/alias/CLAUDE.md"
