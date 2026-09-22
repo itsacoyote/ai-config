@@ -111,10 +111,11 @@ run_link_home() {
 section 'arguments'
 
 run_link "$FIX" --help
-if [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q 'Usage:'; then
-  ok 'prints usage with --help'
+if [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q 'Usage:' && printf '%s' "$OUT" | grep -q -- '--dry-run' &&
+   ! printf '%s' "$OUT" | grep -q 'set -euo'; then
+  ok 'prints the whole usage block with --help'
 else
-  not_ok "prints usage with --help (status=$STATUS)"
+  not_ok "prints the whole usage block with --help (status=$STATUS)"
 fi
 
 run_link "$FIX" --bogus
@@ -178,6 +179,20 @@ if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'missing source root'; then
   ok 'dies when the claude source root is missing'
 else
   not_ok "dies when the claude source root is missing (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): a single-file source the root guard does not cover must
+# never become a dangling link. Remove the source-existence check in plan_entry and
+# this goes red: ~/.claude/CLAUDE.md is a dangling symlink and the run exits 0.
+NOUSER="$TMP/nouser"
+make_fixture "$NOUSER"
+rm -f "$NOUSER/claude/CLAUDE.md"
+run_link_home "$TMP/h-nouser" "$NOUSER"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'FATAL .*CLAUDE.md: source does not exist' &&
+   [ ! -L "$TMP/h-nouser/.claude/CLAUDE.md" ] && [ ! -e "$TMP/h-nouser/.claude/skills" ]; then
+  ok 'dies when a single-file source is missing instead of linking to nothing'
+else
+  not_ok "dies when a single-file source is missing instead of linking to nothing (status=$STATUS): $OUT"
 fi
 
 # GUARD: a copy of the library inside a harness home would link the home to itself.
@@ -360,6 +375,16 @@ if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'claude/skills/foo' &&
   ok 'fails with the conflicting name and changes nothing when both roots ship the same entry'
 else
   not_ok "fails with the conflicting name and changes nothing when both roots ship the same entry (status=$STATUS): $OUT"
+fi
+
+# codex/rules is merged from both roots too, so it is in the conflict check.
+H8b="$TMP/h8b"; mkdir -p "$H8b/.ai-private/codex/rules"
+echo "shadow" > "$H8b/.ai-private/codex/rules/ai-config.rules"
+run_link_home "$H8b" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'codex/rules/ai-config.rules' && [ ! -e "$H8b/.codex" ]; then
+  ok 'fails on a codex/rules name present in both roots'
+else
+  not_ok "fails on a codex/rules name present in both roots (status=$STATUS): $OUT"
 fi
 
 H9="$TMP/h9"; mkdir -p "$H9/.ai-private/claude/skills/foo" "$H9/.ai-private/agents/skills/bar"

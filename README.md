@@ -374,6 +374,9 @@ refused and a feature branch would put unmerged files into live sessions. What i
 - **Never touches** `~/.claude/settings.json`, `settings.local.json`, `~/.codex/config.toml`,
   `~/.pi/agent/settings.json`, or any auth file. A single file already at a link's place is
   replaced only when byte-identical; otherwise the run stops before writing anything.
+  Inside the managed directories this does not apply: a real file there is an extra and is
+  deleted, then re-linked if a source root provides the name. Every such deletion is in the
+  dry-run plan.
 
 A second run prints `no changes`. Recovery from a moved checkout, a drifted home, or a fresh
 machine is the same command.

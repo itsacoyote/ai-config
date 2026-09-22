@@ -28,7 +28,9 @@ note() { printf '%s\n' "$*"; }
 warn() { printf 'link.sh: warning: %s\n' "$*" >&2; }
 
 usage() {
-  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+  # The header comment up to its first blank line, so adding a line never
+  # truncates the usage text.
+  sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 DRY_RUN=0
@@ -155,6 +157,10 @@ contained_reason() {
 # plan_entry SOURCE TARGET — classify one desired symlink and record it.
 plan_entry() {
   local src="$1" dst="$2" why current
+  if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+    add_plan FATAL "$src" "$dst" 'source does not exist'
+    return 0
+  fi
   why="$(contained_reason "$dst")"
   if [ -n "$why" ]; then
     add_plan FATAL "$src" "$dst" "$why"
@@ -201,17 +207,25 @@ CLAUDE_DIRS='skills agents rules references scripts hooks'
 # a private copy of a library skill is exactly the drift this script removes.
 PRIVATE="$HOME/.ai-private"
 
+# Every directory plan_managed_dir merges the two roots for. comm runs under the
+# same C collation names_in sorts with; under a locale that ignores punctuation
+# the orders differ and comm can miss a matching pair, which here means missing
+# a conflict.
+MERGED_DIRS="agents/skills codex/rules"
+
 check_conflicts() {
   local d rel conflicts='' name
   for d in $CLAUDE_DIRS; do
     rel="claude/$d"
     while IFS= read -r name; do
       [ -n "$name" ] && conflicts="$conflicts  $rel/$name"$'\n'
-    done < <(comm -12 <(names_in "$REPO/$rel") <(names_in "$PRIVATE/$rel"))
+    done < <(LC_ALL=C comm -12 <(names_in "$REPO/$rel") <(names_in "$PRIVATE/$rel"))
   done
-  while IFS= read -r name; do
-    [ -n "$name" ] && conflicts="$conflicts  agents/skills/$name"$'\n'
-  done < <(comm -12 <(names_in "$REPO/agents/skills") <(names_in "$PRIVATE/agents/skills"))
+  for rel in $MERGED_DIRS; do
+    while IFS= read -r name; do
+      [ -n "$name" ] && conflicts="$conflicts  $rel/$name"$'\n'
+    done < <(LC_ALL=C comm -12 <(names_in "$REPO/$rel") <(names_in "$PRIVATE/$rel"))
+  done
   if [ -n "$conflicts" ]; then
     printf 'link.sh: the same name exists in %s and %s:\n%s' "$REPO" "$PRIVATE" "$conflicts" >&2
     die "conflict between the repo and the private directory; nothing written"
