@@ -62,6 +62,7 @@ make_fixture() {
   echo "ref-body" > "$fix/claude/references/ref.md"
   printf '#!/bin/sh\necho s\n' > "$fix/claude/scripts/s.sh" && chmod +x "$fix/claude/scripts/s.sh"
   printf '#!/bin/sh\necho h\n' > "$fix/claude/hooks/h.sh" && chmod +x "$fix/claude/hooks/h.sh"
+  : > "$fix/claude/hooks/.gitkeep"
   echo "claude-user-file" > "$fix/claude/CLAUDE.md"
   echo "statusline-body" > "$fix/claude/statusline-command.sh"
   echo "shared-skill-body" > "$fix/agents/skills/bar/SKILL.md"
@@ -179,6 +180,134 @@ else
   not_ok "dies when link.sh itself lives under a harness home (status=$STATUS): $OUT"
 fi
 rm -rf "$HOME/.claude"
+
+# ---------------------------------------------------------------- linking
+
+section 'linking'
+
+# run_link_home <home> <fixture-dir> [args...] — like run_link with its own HOME,
+# so each scenario starts from an empty fake home.
+run_link_home() {
+  local h="$1" fix="$2"; shift 2
+  mkdir -p "$h"
+  OUT="$(cd "$TMP" && HOME="$h" bash "$fix/link.sh" "$@" 2>&1)"
+  STATUS=$?
+}
+
+H1="$TMP/h1"
+run_link_home "$H1" "$FIX"
+all_linked=1
+for p in skills/foo agents/a.md rules/r.md references/ref.md scripts/s.sh hooks/h.sh; do
+  [ -L "$H1/.claude/$p" ] || all_linked=0
+done
+if [ "$STATUS" = 0 ] && [ "$all_linked" = 1 ]; then
+  ok 'links every top-level entry of the six claude dirs'
+else
+  not_ok "links every top-level entry of the six claude dirs (status=$STATUS): $OUT"
+fi
+
+singles_linked=1
+for p in .claude/CLAUDE.md .claude/statusline-command.sh .codex/AGENTS.md .codex/rules/ai-config.rules .pi/agent/AGENTS.md; do
+  [ -L "$H1/$p" ] || singles_linked=0
+done
+if [ "$singles_linked" = 1 ]; then
+  ok 'links CLAUDE.md, statusline, codex AGENTS.md, codex rules, pi AGENTS.md as single files'
+else
+  not_ok 'links CLAUDE.md, statusline, codex AGENTS.md, codex rules, pi AGENTS.md as single files'
+fi
+
+if [ -L "$H1/.agents/skills/bar" ] && [ -f "$H1/.agents/skills/bar/SKILL.md" ]; then
+  ok 'links agents/skills entries into ~/.agents/skills'
+else
+  not_ok 'links agents/skills entries into ~/.agents/skills'
+fi
+
+case "$(readlink "$H1/.claude/skills/foo")" in
+  /*) ok 'writes absolute symlink targets' ;;
+  *) not_ok "writes absolute symlink targets (got $(readlink "$H1/.claude/skills/foo"))" ;;
+esac
+
+if [ ! -e "$H1/.claude/hooks/.gitkeep" ] && [ ! -L "$H1/.claude/hooks/.gitkeep" ]; then
+  ok 'does not link .gitkeep from a source dir'
+else
+  not_ok 'does not link .gitkeep from a source dir'
+fi
+
+run_link_home "$H1" "$FIX"
+if [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q '^no changes'; then
+  ok 'second run reports no changes'
+else
+  not_ok "second run reports no changes (status=$STATUS): $OUT"
+fi
+
+# The repoint target is a managed-dir entry on purpose: Task 6's clean must keep
+# treating a desired-name symlink as a repoint, never a delete, so this test keeps
+# its meaning after that task lands.
+ELSEWHERE="$TMP/elsewhere"; mkdir -p "$ELSEWHERE"
+ln -sfn "$ELSEWHERE" "$H1/.claude/skills/foo"
+run_link_home "$H1" "$FIX"
+if [ "$STATUS" = 0 ] && [ "$(readlink "$H1/.claude/skills/foo")" = "$FIX_P/claude/skills/foo" ] &&
+   printf '%s' "$OUT" | grep -q '^repoint'; then
+  ok 'repoints a symlink whose target moved'
+else
+  not_ok "repoints a symlink whose target moved (status=$STATUS): $OUT"
+fi
+
+if [ -z "$(find "$H1" -name '.*.link.*' 2>/dev/null)" ] && [ -e "$H1/.claude/skills/foo/SKILL.md" ]; then
+  ok 'never leaves a target unresolvable during repoint'
+else
+  not_ok 'never leaves a target unresolvable during repoint'
+fi
+
+H2="$TMP/h2"; mkdir -p "$H2/.claude"
+cp "$FIX/claude/CLAUDE.md" "$H2/.claude/CLAUDE.md"
+run_link_home "$H2" "$FIX"
+if [ "$STATUS" = 0 ] && [ -L "$H2/.claude/CLAUDE.md" ] && printf '%s' "$OUT" | grep -q '^replace'; then
+  ok 'replaces a byte-identical real file at a single-file target'
+else
+  not_ok "replaces a byte-identical real file at a single-file target (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): a differing real file is someone else's data. Remove the
+# fatal-count exit and both of the next two go red: the real run writes links
+# next to the untouched file, and dry-run exits 0.
+H3="$TMP/h3"; mkdir -p "$H3/.claude"
+echo "hand-edited" > "$H3/.claude/CLAUDE.md"
+run_link_home "$H3" "$FIX" --dry-run
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q '^FATAL .*CLAUDE.md' && [ ! -e "$H3/.claude/skills" ]; then
+  ok 'dry-run exits 2 and lists the FATAL pair when a differing real file exists'
+else
+  not_ok "dry-run exits 2 and lists the FATAL pair when a differing real file exists (status=$STATUS): $OUT"
+fi
+run_link_home "$H3" "$FIX"
+if [ "$STATUS" = 2 ] && [ ! -e "$H3/.claude/skills" ] && [ ! -L "$H3/.claude/CLAUDE.md" ] &&
+   [ "$(cat "$H3/.claude/CLAUDE.md")" = "hand-edited" ]; then
+  ok 'reports a differing real file at a single-file target as FATAL and changes nothing'
+else
+  not_ok "reports a differing real file at a single-file target as FATAL and changes nothing (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): a symlinked parent that resolves outside HOME would
+# redirect every write. Make contained_reason return nothing and this goes red:
+# the marker directory outside HOME fills with links.
+H4="$TMP/h4"; mkdir -p "$H4"
+OUTSIDE="$TMP/outside"; mkdir -p "$OUTSIDE"
+ln -s "$OUTSIDE" "$H4/.claude"
+run_link_home "$H4" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'outside HOME' && [ -z "$(ls -A "$OUTSIDE")" ]; then
+  ok 'dies when a parent component is a symlink resolving outside HOME'
+else
+  not_ok "dies when a parent component is a symlink resolving outside HOME (status=$STATUS): $OUT"
+fi
+
+H5="$TMP/h5"
+run_link_home "$H5" "$FIX" --dry-run
+if [ "$STATUS" = 0 ] && [ ! -e "$H5/.claude" ] && [ ! -e "$H5/.agents" ] && [ ! -e "$H5/.codex" ] && [ ! -e "$H5/.pi" ] &&
+   printf '%s' "$OUT" | grep -q '^link ' && printf '%s' "$OUT" | grep -q 'dry run: nothing written'; then
+  ok 'dry-run prints the plan and writes nothing'
+else
+  not_ok "dry-run prints the plan and writes nothing (status=$STATUS): $OUT"
+fi
 
 # ------------------------------------------------------------- portability
 

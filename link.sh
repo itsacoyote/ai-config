@@ -82,9 +82,181 @@ else
   fi
 fi
 
-# ------------------------------------------------------------------ summary
+# -------------------------------------------------------------------- plan
+#
+# Every action is classified before anything is written, in dry-run and real mode
+# alike, so the printed plan is the whole plan and a fatal entry stops the run
+# with nothing changed. Classes: link, repoint, replace, unchanged, FATAL.
+
+PLAN_CLASS=()
+PLAN_SRC=()
+PLAN_DST=()
+PLAN_WHY=()
+fatal_count=0
+
+add_plan() {
+  PLAN_CLASS[${#PLAN_CLASS[@]}]="$1"
+  PLAN_SRC[${#PLAN_SRC[@]}]="$2"
+  PLAN_DST[${#PLAN_DST[@]}]="$3"
+  PLAN_WHY[${#PLAN_WHY[@]}]="${4:-}"
+  [ "$1" = FATAL ] && fatal_count=$((fatal_count + 1))
+  return 0
+}
+
+# Walk the target path from $HOME down through every existing PARENT component.
+# A symlinked component that resolves outside the physical home would redirect
+# the write somewhere the script has no business touching. readlink -f and
+# realpath are avoided on purpose: this library lands on machines we do not
+# control, and stock macOS shipped without them for years.
+contained_reason() {
+  local target="$1" rel cursor="$HOME" component parent resolved old_ifs
+  case "$target" in
+    "$HOME"/*) rel="${target#"$HOME"/}" ;;
+    *) printf 'target is outside HOME'; return ;;
+  esac
+  parent="$(dirname "$rel")"
+  [ "$parent" = . ] && return
+  old_ifs="$IFS"; IFS='/'
+  for component in $parent; do
+    IFS="$old_ifs"
+    cursor="$cursor/$component"
+    if [ -L "$cursor" ]; then
+      resolved="$(cd -P "$cursor" 2>/dev/null && pwd -P)" || { printf 'parent %s is a dangling symlink' "$cursor"; return; }
+      case "$resolved/" in
+        "$HOME_P"/*) ;;
+        *) printf 'parent %s resolves outside HOME (%s)' "$cursor" "$resolved"; return ;;
+      esac
+    elif [ -e "$cursor" ] && [ ! -d "$cursor" ]; then
+      printf 'parent %s is not a directory' "$cursor"; return
+    fi
+    IFS='/'
+  done
+  IFS="$old_ifs"
+}
+
+# plan_entry SOURCE TARGET — classify one desired symlink and record it.
+plan_entry() {
+  local src="$1" dst="$2" why current
+  why="$(contained_reason "$dst")"
+  if [ -n "$why" ]; then
+    add_plan FATAL "$src" "$dst" "$why"
+  elif [ -L "$dst" ]; then
+    current="$(readlink "$dst")"
+    if [ "$current" = "$src" ]; then
+      add_plan unchanged "$src" "$dst"
+    else
+      add_plan repoint "$src" "$dst"
+    fi
+  elif [ -d "$dst" ]; then
+    add_plan FATAL "$src" "$dst" 'a real directory is in the way'
+  elif [ -e "$dst" ]; then
+    if [ -f "$dst" ] && [ -f "$src" ] && cmp -s "$src" "$dst"; then
+      add_plan replace "$src" "$dst"
+    else
+      add_plan FATAL "$src" "$dst" 'a real file with different contents is in the way'
+    fi
+  else
+    add_plan link "$src" "$dst"
+  fi
+}
+
+# plan_dir_entries SOURCE_DIR TARGET_DIR — one link per top-level entry. find sees
+# dot entries; the repo's placeholder .gitkeep files and Finder's .DS_Store are
+# not library content.
+plan_dir_entries() {
+  local source_dir="$1" target_dir="$2" entry name
+  [ -d "$source_dir" ] || return 0
+  while IFS= read -r entry; do
+    name="$(basename "$entry")"
+    case "$name" in
+      .gitkeep|.DS_Store) continue ;;
+    esac
+    plan_entry "$entry" "$target_dir/$name"
+  done < <(find "$source_dir" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
+}
+
+CLAUDE_DIRS='skills agents rules references scripts hooks'
+
+plan_root() {
+  local root="$1" d
+  for d in $CLAUDE_DIRS; do
+    plan_dir_entries "$root/claude/$d" "$HOME/.claude/$d"
+  done
+  plan_dir_entries "$root/agents/skills" "$HOME/.agents/skills"
+}
+
+plan_root "$REPO"
+plan_entry "$REPO/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+plan_entry "$REPO/claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh"
+plan_entry "$REPO/agents/AGENTS.md" "$HOME/.codex/AGENTS.md"
+plan_entry "$REPO/codex/rules/ai-config.rules" "$HOME/.codex/rules/ai-config.rules"
+plan_entry "$REPO/pi/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
+
+# ------------------------------------------------------------------- print
+
+print_plan() {
+  local i
+  i=0
+  while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
+    case "${PLAN_CLASS[$i]}" in
+      unchanged) ;;
+      FATAL) printf 'FATAL     %s: %s\n' "${PLAN_DST[$i]}" "${PLAN_WHY[$i]}" ;;
+      *) printf '%-9s %s -> %s\n' "${PLAN_CLASS[$i]}" "${PLAN_DST[$i]}" "${PLAN_SRC[$i]}" ;;
+    esac
+    i=$((i + 1))
+  done
+}
+
+print_plan
+
+if [ "$fatal_count" -gt 0 ]; then
+  die "$fatal_count fatal entr$( [ "$fatal_count" = 1 ] && printf 'y' || printf 'ies'); nothing written"
+fi
+
+# ------------------------------------------------------------------- apply
+
+# Create the link under a temporary name beside the target and rename it into
+# place, so a hook path registered in settings never stops resolving. rename(2)
+# replaces a symlink-to-file atomically, but mv onto a symlink-to-DIRECTORY
+# follows the link and moves the temp file INTO that directory; directory links
+# are repointed with ln -sfn instead (a shorter, non-atomic window, and no hook
+# is a directory).
+place_link() {
+  local src="$1" dst="$2" tmp
+  mkdir -p "$(dirname "$dst")"
+  if [ -L "$dst" ] && [ -d "$dst" ]; then
+    ln -sfn "$src" "$dst"
+    return
+  fi
+  tmp="$(dirname "$dst")/.$(basename "$dst").link.$$"
+  ln -s "$src" "$tmp"
+  mv -f "$tmp" "$dst"
+}
+
+n_link=0; n_repoint=0; n_replace=0; n_unchanged=0
+i=0
+while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
+  case "${PLAN_CLASS[$i]}" in
+    link)      n_link=$((n_link + 1)) ;;
+    repoint)   n_repoint=$((n_repoint + 1)) ;;
+    replace)   n_replace=$((n_replace + 1)) ;;
+    unchanged) n_unchanged=$((n_unchanged + 1)) ;;
+  esac
+  if [ "$DRY_RUN" = 0 ]; then
+    case "${PLAN_CLASS[$i]}" in
+      link|repoint|replace) place_link "${PLAN_SRC[$i]}" "${PLAN_DST[$i]}" ;;
+    esac
+  fi
+  i=$((i + 1))
+done
+
+# ----------------------------------------------------------------- summary
 
 if [ "$DRY_RUN" = 1 ]; then
   note "dry run: nothing written"
 fi
-note "no changes"
+if [ $((n_link + n_repoint + n_replace)) -eq 0 ]; then
+  note "no changes ($n_unchanged unchanged)"
+else
+  note "linked $n_link, repointed $n_repoint, replaced $n_replace, unchanged $n_unchanged"
+fi
