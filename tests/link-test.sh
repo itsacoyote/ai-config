@@ -59,6 +59,7 @@ make_fixture() {
   echo "skill-body" > "$fix/claude/skills/foo/SKILL.md"
   echo "agent-body" > "$fix/claude/agents/a.md"
   echo "rule-body" > "$fix/claude/rules/r.md"
+  echo "dot-rule-body" > "$fix/claude/rules/.dotrule.md"
   echo "ref-body" > "$fix/claude/references/ref.md"
   printf '#!/bin/sh\necho s\n' > "$fix/claude/scripts/s.sh" && chmod +x "$fix/claude/scripts/s.sh"
   printf '#!/bin/sh\necho h\n' > "$fix/claude/hooks/h.sh" && chmod +x "$fix/claude/hooks/h.sh"
@@ -358,6 +359,187 @@ if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'claude/skills/foo' &&
   ok 'reports every conflict, not just the first'
 else
   not_ok "reports every conflict, not just the first (status=$STATUS): $OUT"
+fi
+
+# ------------------------------------------------------------------ clean
+
+section 'clean'
+
+# A linked home to dirty up: everything below starts from a correct first run.
+H10="$TMP/h10"
+run_link_home "$H10" "$FIX"
+[ "$STATUS" = 0 ] || not_ok "fixture: first run into h10 failed: $OUT"
+
+KEEP="$TMP/keep"; mkdir -p "$KEEP"; echo marker > "$KEEP/marker"
+ln -s "$KEEP" "$H10/.claude/skills/stale"
+run_link_home "$H10" "$FIX" --dry-run
+if [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q "^delete    $H10/.claude/skills/stale (symlink)" && [ -L "$H10/.claude/skills/stale" ]; then
+  ok 'lists a stale symlink for deletion in dry-run and leaves it in place'
+else
+  not_ok "lists a stale symlink for deletion in dry-run and leaves it in place (status=$STATUS): $OUT"
+fi
+run_link_home "$H10" "$FIX"
+if [ "$STATUS" = 0 ] && [ ! -L "$H10/.claude/skills/stale" ] && [ ! -e "$H10/.claude/skills/stale" ]; then
+  ok 'deletes a stale symlink the plan does not produce'
+else
+  not_ok "deletes a stale symlink the plan does not produce (status=$STATUS): $OUT"
+fi
+
+# GUARD: rm on a symlinked directory must remove the link, not its target.
+if [ -f "$KEEP/marker" ]; then
+  ok 'removing a symlinked directory removes the link, not its target'
+else
+  not_ok 'removing a symlinked directory removes the link, not its target'
+fi
+
+echo stray > "$H10/.claude/rules/stray.md"
+mkdir -p "$H10/.claude/skills/straydir"; echo x > "$H10/.claude/skills/straydir/x"
+mkdir -p "$H10/.claude/skills/.hidden"; echo x > "$H10/.claude/skills/.hidden/x"
+run_link_home "$H10" "$FIX" --dry-run
+if [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q "^delete    $H10/.claude/rules/stray.md (file)" && [ -f "$H10/.claude/rules/stray.md" ]; then
+  ok 'lists a stray real file for deletion in dry-run first'
+else
+  not_ok "lists a stray real file for deletion in dry-run first (status=$STATUS): $OUT"
+fi
+if printf '%s' "$OUT" | grep -q "^delete    $H10/.claude/skills/straydir (dir)" && [ -d "$H10/.claude/skills/straydir" ]; then
+  ok 'lists a stray real directory for deletion in dry-run first'
+else
+  not_ok "lists a stray real directory for deletion in dry-run first: $OUT"
+fi
+# GUARD (mutation-tested): the managed-dir pass must see dot entries. Swap its
+# find for a glob and this goes red while every other clean test stays green.
+if printf '%s' "$OUT" | grep -q "^delete    $H10/.claude/skills/.hidden (dir)"; then
+  ok 'lists a stray dot-directory for deletion in dry-run'
+else
+  not_ok "lists a stray dot-directory for deletion in dry-run: $OUT"
+fi
+run_link_home "$H10" "$FIX"
+if [ "$STATUS" = 0 ] && [ ! -e "$H10/.claude/rules/stray.md" ] && [ ! -e "$H10/.claude/skills/straydir" ] && [ ! -e "$H10/.claude/skills/.hidden" ]; then
+  ok 'deletes stray file, directory, and dot-directory'
+else
+  not_ok "deletes stray file, directory, and dot-directory (status=$STATUS): $OUT"
+fi
+
+if [ -L "$H10/.claude/rules/.dotrule.md" ]; then
+  ok 'links a dot entry from a source root'
+else
+  not_ok 'links a dot entry from a source root'
+fi
+
+# GUARD (mutation-tested): a real file with a desired name inside a managed dir is
+# an extra, deleted then linked. The contents DIFFER from the source on purpose:
+# an identical file would take plan_entry's replace branch and pass this without
+# the clean doing anything. Remove the "non-symlink is an extra" rule and this
+# exits 2 with a FATAL.
+H11="$TMP/h11"; mkdir -p "$H11/.codex/rules"
+echo "old-copy" > "$H11/.codex/rules/ai-config.rules"
+run_link_home "$H11" "$FIX"
+if [ "$STATUS" = 0 ] && [ -L "$H11/.codex/rules/ai-config.rules" ] &&
+   printf '%s' "$OUT" | grep -q "^delete    $H11/.codex/rules/ai-config.rules (file)"; then
+  ok 'replaces a differing real file that shares a desired name and does not exit 2'
+else
+  not_ok "replaces a differing real file that shares a desired name and does not exit 2 (status=$STATUS): $OUT"
+fi
+if printf '%s\n' "$OUT" | grep -A1 "^delete    $H11/.codex/rules/ai-config.rules" | tail -1 | grep -q "^link      $H11/.codex/rules/ai-config.rules"; then
+  ok 'delete and link for one entry are consecutive plan lines'
+else
+  not_ok "delete and link for one entry are consecutive plan lines: $OUT"
+fi
+
+# GUARD (mutation-tested): harness-owned entries survive. Empty the allowlist and
+# this goes red.
+H12="$TMP/h12"; mkdir -p "$H12/.claude/skills/synced/abc" "$H12/.codex/rules" "$H12/.codex/skills/.system" "$H12/.codex/skills/foo"
+echo manifest > "$H12/.claude/skills/synced/abc/manifest.json"
+echo approved > "$H12/.codex/rules/default.rules"
+echo marker > "$H12/.codex/skills/.system/marker"
+echo f > "$H12/.codex/skills/foo/f"
+: > "$H12/.claude/skills/.DS_Store"
+echo notes > "$H12/.claude/notes.txt"
+echo toml > "$H12/.codex/config.toml"
+run_link_home "$H12" "$FIX"
+if [ "$STATUS" = 0 ] && [ -f "$H12/.claude/skills/synced/abc/manifest.json" ] && [ -f "$H12/.codex/rules/default.rules" ] &&
+   ! printf '%s' "$OUT" | grep -q 'synced' && ! printf '%s' "$OUT" | grep -q 'default.rules'; then
+  ok 'keeps allowlisted entries through a full clean'
+else
+  not_ok "keeps allowlisted entries through a full clean (status=$STATUS): $OUT"
+fi
+if [ -f "$H12/.codex/skills/.system/marker" ] && [ -f "$H12/.codex/skills/foo/f" ] && ! printf '%s' "$OUT" | grep -q 'codex/skills'; then
+  ok 'never enumerates ~/.codex/skills'
+else
+  not_ok "never enumerates ~/.codex/skills: $OUT"
+fi
+# GUARD: only entries of a managed dir are ever deleted.
+if [ -f "$H12/.claude/notes.txt" ] && [ -f "$H12/.codex/config.toml" ]; then
+  ok 'never deletes outside a managed dir'
+else
+  not_ok 'never deletes outside a managed dir'
+fi
+run_link_home "$H12" "$FIX"
+if [ "$STATUS" = 0 ] && [ -f "$H12/.claude/skills/.DS_Store" ] && printf '%s' "$OUT" | grep -q '^no changes'; then
+  ok 'ignores .DS_Store and still reports no changes on the second run'
+else
+  not_ok "ignores .DS_Store and still reports no changes on the second run (status=$STATUS): $OUT"
+fi
+
+# Desired-name symlinks are repointed, never deleted: a moved checkout repairs
+# with repoints instead of a wall of deletes at the destructive gate.
+ln -sfn "$ELSEWHERE" "$H12/.claude/skills/foo"
+run_link_home "$H12" "$FIX"
+if [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q "^repoint   $H12/.claude/skills/foo" &&
+   ! printf '%s' "$OUT" | grep -q "^delete    $H12/.claude/skills/foo"; then
+  ok 'repoints a stale symlink whose name is in the desired set instead of deleting it'
+else
+  not_ok "repoints a stale symlink whose name is in the desired set instead of deleting it (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): a managed dir that is itself a symlink is never cleaned
+# through. Remove the -L check in plan_clean and this goes red.
+H13="$TMP/h13"; mkdir -p "$H13/.claude" "$H13/rulesdir"
+echo keep > "$H13/rulesdir/keep.md"
+ln -s "$H13/rulesdir" "$H13/.claude/rules"
+run_link_home "$H13" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'managed directory is a symlink' &&
+   [ -f "$H13/rulesdir/keep.md" ] && [ ! -e "$H13/.claude/skills" ]; then
+  ok 'refuses to clean when the managed dir is itself a symlink'
+else
+  not_ok "refuses to clean when the managed dir is itself a symlink (status=$STATUS): $OUT"
+fi
+
+# Registered-hook guard. Positive control first: a registered hook that a source
+# root provides is deleted then linked like any other real file.
+H14="$TMP/h14"; mkdir -p "$H14/.claude/hooks"
+echo "old-hook" > "$H14/.claude/hooks/h.sh"
+printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"bash ~/.claude/hooks/h.sh"}]}]}}\n' > "$H14/.claude/settings.json"
+run_link_home "$H14" "$FIX"
+if [ "$STATUS" = 0 ] && [ -L "$H14/.claude/hooks/h.sh" ]; then
+  ok 'a registered hook that a source root provides is replaced normally'
+else
+  not_ok "a registered hook that a source root provides is replaced normally (status=$STATUS): $OUT"
+fi
+# GUARD (mutation-tested): a registered hook with no source is never deleted.
+# Remove is_registered_hook from plan_clean and this goes red: orphan.sh is gone.
+echo "orphan" > "$H14/.claude/hooks/orphan.sh"
+printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"bash ~/.claude/hooks/orphan.sh"}]}]}}\n' > "$H14/.claude/settings.json"
+run_link_home "$H14" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'orphan.sh.*registered' && [ -f "$H14/.claude/hooks/orphan.sh" ]; then
+  ok 'refuses to delete a hook that settings.json references and the plan does not re-create'
+else
+  not_ok "refuses to delete a hook that settings.json references and the plan does not re-create (status=$STATUS): $OUT"
+fi
+rm -f "$H14/.claude/settings.json"
+printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"bash ~/.claude/hooks/orphan.sh"}]}]}}\n' > "$H14/.claude/settings.local.json"
+run_link_home "$H14" "$FIX"
+if [ "$STATUS" = 2 ] && [ -f "$H14/.claude/hooks/orphan.sh" ]; then
+  ok 'reads hook registrations from settings.local.json too'
+else
+  not_ok "reads hook registrations from settings.local.json too (status=$STATUS): $OUT"
+fi
+rm -f "$H14/.claude/settings.local.json"
+run_link_home "$H14" "$FIX"
+if [ "$STATUS" = 0 ] && [ ! -e "$H14/.claude/hooks/orphan.sh" ]; then
+  ok 'runs with no settings file present and deletes the now-unregistered hook'
+else
+  not_ok "runs with no settings file present and deletes the now-unregistered hook (status=$STATUS): $OUT"
 fi
 
 # ------------------------------------------------------------- portability

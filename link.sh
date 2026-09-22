@@ -86,7 +86,10 @@ fi
 #
 # Every action is classified before anything is written, in dry-run and real mode
 # alike, so the printed plan is the whole plan and a fatal entry stops the run
-# with nothing changed. Classes: link, repoint, replace, unchanged, FATAL.
+# with nothing changed. Classes: delete, link, repoint, replace, unchanged, FATAL.
+# Within one managed directory the deletes are planned before the links, and the
+# apply loop runs the plan in order, so a hook path is never absent for longer
+# than the gap between two consecutive commands.
 
 PLAN_CLASS=()
 PLAN_SRC=()
@@ -101,6 +104,15 @@ add_plan() {
   PLAN_WHY[${#PLAN_WHY[@]}]="${4:-}"
   [ "$1" = FATAL ] && fatal_count=$((fatal_count + 1))
   return 0
+}
+
+is_planned_delete() {
+  local i=0
+  while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
+    [ "${PLAN_CLASS[$i]}" = delete ] && [ "${PLAN_DST[$i]}" = "$1" ] && return 0
+    i=$((i + 1))
+  done
+  return 1
 }
 
 # Walk the target path from $HOME down through every existing PARENT component.
@@ -140,6 +152,8 @@ plan_entry() {
   why="$(contained_reason "$dst")"
   if [ -n "$why" ]; then
     add_plan FATAL "$src" "$dst" "$why"
+  elif is_planned_delete "$dst"; then
+    add_plan link "$src" "$dst"
   elif [ -L "$dst" ]; then
     current="$(readlink "$dst")"
     if [ "$current" = "$src" ]; then
@@ -160,36 +174,8 @@ plan_entry() {
   fi
 }
 
-# plan_dir_entries SOURCE_DIR TARGET_DIR — one link per top-level entry. find sees
-# dot entries; the repo's placeholder .gitkeep files and Finder's .DS_Store are
-# not library content.
-plan_dir_entries() {
-  local source_dir="$1" target_dir="$2" entry name
-  [ -d "$source_dir" ] || return 0
-  while IFS= read -r entry; do
-    name="$(basename "$entry")"
-    case "$name" in
-      .gitkeep|.DS_Store) continue ;;
-    esac
-    plan_entry "$entry" "$target_dir/$name"
-  done < <(find "$source_dir" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
-}
-
-CLAUDE_DIRS='skills agents rules references scripts hooks'
-
-plan_root() {
-  local root="$1" d
-  for d in $CLAUDE_DIRS; do
-    plan_dir_entries "$root/claude/$d" "$HOME/.claude/$d"
-  done
-  plan_dir_entries "$root/agents/skills" "$HOME/.agents/skills"
-}
-
-# Second source root with the same layout. A name present in both roots is a hard
-# error rather than an override: which one wins would depend on plan order, and
-# a private copy of a library skill is exactly the drift this script removes.
-PRIVATE="$HOME/.ai-private"
-
+# Top-level names of a directory. find sees dot entries; the repo's placeholder
+# .gitkeep files and Finder's .DS_Store are not library content.
 names_in() {
   [ -d "$1" ] || return 0
   find "$1" -mindepth 1 -maxdepth 1 | LC_ALL=C sort | while IFS= read -r entry; do
@@ -199,6 +185,13 @@ names_in() {
     esac
   done
 }
+
+CLAUDE_DIRS='skills agents rules references scripts hooks'
+
+# Second source root with the same layout. A name present in both roots is a hard
+# error rather than an override: which one wins would depend on plan order, and
+# a private copy of a library skill is exactly the drift this script removes.
+PRIVATE="$HOME/.ai-private"
 
 check_conflicts() {
   local d rel conflicts='' name
@@ -223,12 +216,87 @@ else
   note "private directory $PRIVATE not found; linking the repo only"
 fi
 
-plan_root "$REPO"
-[ -d "$PRIVATE" ] && plan_root "$PRIVATE"
+# Harness-owned entries inside managed directories that the clean must keep.
+# Compared by literal path under $HOME. Keep this list short: anything else in a
+# managed directory belongs to the repo or the private directory.
+ALLOWLIST="$HOME/.claude/skills/synced
+$HOME/.codex/rules/default.rules"
+
+is_allowlisted() {
+  printf '%s\n' "$ALLOWLIST" | grep -qxF -- "$1"
+}
+
+# Hook names registered in either settings file. Read-only: the settings files
+# are never edited (ADR 0013). A substring scan is enough here because a false
+# positive can only protect an entry that exists and would otherwise be deleted.
+registered_hooks=''
+for settings_file in "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json"; do
+  [ -f "$settings_file" ] || continue
+  registered_hooks="$registered_hooks$(grep -o 'hooks/[A-Za-z0-9_.-]*\.sh' "$settings_file" | sed 's#^hooks/##')"$'\n'
+done
+
+is_registered_hook() {
+  printf '%s\n' "$registered_hooks" | grep -qxF -- "$1"
+}
+
+# plan_clean MANAGED_DIR DESIRED_NAMES — every entry that is not a desired-name
+# symlink and not allowlisted is an extra and is planned for deletion. A real file
+# or directory with a desired name is an extra too: the copy installers left real
+# files where links belong, and a hand-edited copy is still a copy.
+plan_clean() {
+  local dir="$1" desired="$2" entry name kind
+  [ -e "$dir" ] || [ -L "$dir" ] || return 0
+  if [ -L "$dir" ]; then
+    add_plan FATAL '' "$dir" 'managed directory is a symlink'
+    return 0
+  fi
+  while IFS= read -r entry; do
+    name="$(basename "$entry")"
+    [ "$name" = .DS_Store ] && continue
+    is_allowlisted "$entry" && continue
+    if [ -L "$entry" ]; then
+      kind=symlink
+      printf '%s\n' "$desired" | grep -qxF -- "$name" && continue
+    elif [ -d "$entry" ]; then
+      kind=dir
+    else
+      kind=file
+    fi
+    if [ "$dir" = "$HOME/.claude/hooks" ] && is_registered_hook "$name" &&
+       ! printf '%s\n' "$desired" | grep -qxF -- "$name"; then
+      add_plan FATAL '' "$entry" 'hook is registered in settings and no source root provides it'
+      continue
+    fi
+    add_plan delete '' "$entry" "$kind"
+  done < <(find "$dir" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
+}
+
+# plan_managed_dir REL TARGET_DIR — clean first, then one link per desired name,
+# from whichever root provides it.
+plan_managed_dir() {
+  local rel="$1" dir="$2" desired name
+  desired="$(printf '%s\n%s\n' "$(names_in "$REPO/$rel")" "$(names_in "$PRIVATE/$rel")" | grep -v '^$' | LC_ALL=C sort)"
+  plan_clean "$dir" "$desired"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if [ -e "$REPO/$rel/$name" ] || [ -L "$REPO/$rel/$name" ]; then
+      plan_entry "$REPO/$rel/$name" "$dir/$name"
+    else
+      plan_entry "$PRIVATE/$rel/$name" "$dir/$name"
+    fi
+  done <<EOF
+$desired
+EOF
+}
+
+for d in $CLAUDE_DIRS; do
+  plan_managed_dir "claude/$d" "$HOME/.claude/$d"
+done
+plan_managed_dir "agents/skills" "$HOME/.agents/skills"
+plan_managed_dir "codex/rules" "$HOME/.codex/rules"
 plan_entry "$REPO/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
 plan_entry "$REPO/claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh"
 plan_entry "$REPO/agents/AGENTS.md" "$HOME/.codex/AGENTS.md"
-plan_entry "$REPO/codex/rules/ai-config.rules" "$HOME/.codex/rules/ai-config.rules"
 plan_entry "$REPO/pi/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"
 
 # ------------------------------------------------------------------- print
@@ -240,6 +308,7 @@ print_plan() {
     case "${PLAN_CLASS[$i]}" in
       unchanged) ;;
       FATAL) printf 'FATAL     %s: %s\n' "${PLAN_DST[$i]}" "${PLAN_WHY[$i]}" ;;
+      delete) printf 'delete    %s (%s)\n' "${PLAN_DST[$i]}" "${PLAN_WHY[$i]}" ;;
       *) printf '%-9s %s -> %s\n' "${PLAN_CLASS[$i]}" "${PLAN_DST[$i]}" "${PLAN_SRC[$i]}" ;;
     esac
     i=$((i + 1))
@@ -272,10 +341,21 @@ place_link() {
   mv -f "$tmp" "$dst"
 }
 
-n_link=0; n_repoint=0; n_replace=0; n_unchanged=0
+# Never a trailing slash on the path: rm -rf on "link/" follows the link and
+# empties its target. A symlink is removed as a symlink whatever it points at.
+remove_entry() {
+  local path="$1" kind="$2"
+  case "$kind" in
+    symlink|file) rm -f "$path" ;;
+    dir) [ ! -L "$path" ] && [ -d "$path" ] && rm -rf "$path" ;;
+  esac
+}
+
+n_delete=0; n_link=0; n_repoint=0; n_replace=0; n_unchanged=0
 i=0
 while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
   case "${PLAN_CLASS[$i]}" in
+    delete)    n_delete=$((n_delete + 1)) ;;
     link)      n_link=$((n_link + 1)) ;;
     repoint)   n_repoint=$((n_repoint + 1)) ;;
     replace)   n_replace=$((n_replace + 1)) ;;
@@ -283,6 +363,7 @@ while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
   esac
   if [ "$DRY_RUN" = 0 ]; then
     case "${PLAN_CLASS[$i]}" in
+      delete) remove_entry "${PLAN_DST[$i]}" "${PLAN_WHY[$i]}" ;;
       link|repoint|replace) place_link "${PLAN_SRC[$i]}" "${PLAN_DST[$i]}" ;;
     esac
   fi
@@ -294,8 +375,8 @@ done
 if [ "$DRY_RUN" = 1 ]; then
   note "dry run: nothing written"
 fi
-if [ $((n_link + n_repoint + n_replace)) -eq 0 ]; then
+if [ $((n_delete + n_link + n_repoint + n_replace)) -eq 0 ]; then
   note "no changes ($n_unchanged unchanged)"
 else
-  note "linked $n_link, repointed $n_repoint, replaced $n_replace, unchanged $n_unchanged"
+  note "deleted $n_delete, linked $n_link, repointed $n_repoint, replaced $n_replace, unchanged $n_unchanged"
 fi
