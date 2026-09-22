@@ -154,6 +154,7 @@ Always-on conventions in [`claude/rules/`](claude/rules) — auto-applied, no in
 
 | Rule | |
 |------|--|
+| `commenting` | Comment the why, never the what; one home per fact; no narration or speculative tails |
 | `github-tool-preference` | Prefer the `gh`/`git` CLI over the GitHub MCP |
 | `typescript-tips` | Practical TypeScript patterns (applies to `.ts` files) |
 
@@ -416,6 +417,20 @@ hooks in your own `~/.claude/settings.json`. `notify.sh` and `skill-check.sh` sh
 Hook paths do not change when the files become links, so existing registrations keep working.
 The hooks need `jq` on the PATH that hooks run with; `bash-guard.sh` denies every Bash call
 until it is there rather than silently letting commands through.
+
+| Hook | Event | What it does |
+|---|---|---|
+| `bash-guard.sh` | PreToolUse (Bash) | Denies `gh` subcommands that touch secrets, auth, or keys, and shell reads of credential files; fails closed without `jq` |
+| `beads-gate.sh` | SessionStart | Reminds the session that beads is the system of record |
+| `session-orient.sh` | SessionStart | Prints worktree, branch, and clean/dirty state via `worktree-status.sh` |
+| `notify.sh` | Notification (optional) | macOS banner and sound when Claude waits on you |
+| `skill-check.sh` | PreToolUse (optional) | Reminds the session to invoke `git-commit` before committing and `create-pr` before opening a PR |
+
+Two helper scripts in `claude/scripts/` are allow-listed in the template so agents can run them
+without a prompt: `worktree-status.sh` (orientation for the current directory, `--brief` for one
+line) and `wt-status.sh <dir>` (branch, head, status, and rebase state of another registered
+worktree of the current repository; it refuses any other directory and runs git with
+config-driven command execution disabled). Both have suites under `claude/scripts/tests/`.
 
 ### Before the first run
 
