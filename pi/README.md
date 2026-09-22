@@ -7,15 +7,16 @@ shared with Codex live separately under [`../agents/skills`](../agents/skills/).
 
 | File | What it is |
 |---|---|
-| [`AGENTS.md`](AGENTS.md) | Personal global Pi context, manually maintained at `~/.pi/agent/AGENTS.md` |
+| [`AGENTS.md`](AGENTS.md) | Personal global Pi context, linked as `~/.pi/agent/AGENTS.md` by the repo's `link.sh` |
 | [`scripts/pwt`](scripts/pwt) | Developer-run worktree CLI that launches Pi |
 | [`scripts/pwt-completion.bash`](scripts/pwt-completion.bash) | Bash and zsh completion for `pwt` |
 | [`scripts/tests/pwt-test.sh`](scripts/tests/pwt-test.sh) | Self-contained `pwt` regression suite |
 
-`pi/AGENTS.md` is a personal global file, not a project template and not part of an
-installer. Keep its installed copy manual so personal guidance cannot leak into shared
-repositories. [ADR 0008](../docs/decisions/0008-pi-global-only-config.md) records that
-boundary.
+`pi/AGENTS.md` is a personal global file, not a project template. The human-run `link.sh`
+at the repo root symlinks it into `~/.pi/agent/` (see the
+[root README](../README.md#installing-the-library)); never copy it into a shared repository.
+[ADR 0008](../docs/decisions/0008-pi-global-only-config.md) records that boundary and
+[ADR 0013](../docs/decisions/0013-link-config-library.md) the link.
 
 ## `pwt` — worktree CLI
 

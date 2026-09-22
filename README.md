@@ -4,8 +4,8 @@ A portable library of [Claude Code](https://docs.claude.com/en/docs/claude-code)
 
 It runs **manual by default** — you drive each step — with an optional **supervised orchestrator** (`autorun`) that runs the post-Define steps for you, implementing one task at a time in fresh subagents while keeping permissions on and stopping at a ready-for-review PR. There's deliberately no *unattended* runner yet — the human stays in the loop at two gates (Define and the PR) and approves actions as they happen.
 
-Run `claude/install.sh` once and every project on the machine gets the workflow
-(see [Installing the library](#installing-the-library)).
+Run `link.sh` once and every project on the machine gets the workflow; after that,
+`git pull` is the update (see [Installing the library](#installing-the-library)).
 
 ---
 
@@ -329,44 +329,100 @@ rationale is recorded in [ADR 0012](docs/decisions/0012-pwt-worktree-cli.md).
 ## Codex command approval rules
 
 The Codex-specific command allowlist lives in codex/rules/ai-config.rules using Codex's
-experimental prefix_rule format. Install it personally with:
-
-~~~bash
-codex/install.sh
-codex/install.sh --dry-run
-~~~
-
-The installer writes only ~/.codex/rules/ai-config.rules; it never touches AGENTS.md,
-config.toml, or the user's other rules. See the Codex guide in codex/README.md.
+experimental prefix_rule format. `link.sh` symlinks it into ~/.codex/rules/ next to Codex's
+own default.rules; it never touches config.toml or the user's other rules. See
+[Installing the library](#installing-the-library) and the Codex guide in codex/README.md.
 
 ---
 
 ## Installing the library
 
-The Claude library is consumed **globally** — one install serves every project on the
-machine. There is no per-project copy.
+The library is consumed **globally** — one set of links serves every project on the
+machine, for all three harnesses. There is no per-project copy, and no reinstall step:
+after the first run, `git pull` on `main` is the update
+([ADR 0013](docs/decisions/0013-link-config-library.md)).
 
 ```sh
-claude/install.sh             # install/update into ~/.claude + settings merge report
-claude/install.sh --dry-run   # show what a real run would create/overwrite, write nothing
+bash link.sh --dry-run   # print the full plan, including every deletion; write nothing
+bash link.sh             # link, clean, and install the worktree CLIs
 ```
 
-**Run it yourself, not through an agent** — treat `~/.claude` as human-owned (on this
-maintainer's machines a settings-level deny enforces it; the same convention as `clwt`'s
-launching subcommands). What it does:
+| Flag | Effect |
+|---|---|
+| `-n`, `--dry-run` | Print the plan and exit. A fatal entry exits 2 in both modes. |
+| `-h`, `--help` | Usage. |
 
-- **Additive copy** of the content dirs (`skills/`, `agents/`, `rules/`, `references/`,
-  `scripts/`, `hooks/`) plus `statusline-command.sh` into `~/.claude`. It never deletes:
-  your global-only skills and scripts survive every run, and are listed in the report so
-  stale copies stay visible.
-- **Never touches `~/.claude/settings.json`** (or `settings.local.json`). It prints a
-  merge report instead — template entries (hooks, permissions, statusline) missing from
-  your global settings — for you to apply by hand. The template's `Bash(git -C *)` deny
-  is flagged do-NOT-migrate: a global deny is absolute and can't be re-allowed per
-  project.
+**Run it yourself, not through an agent** — the harness homes are human-owned (on this
+maintainer's machines a settings-level deny enforces it), and **run it from the primary
+checkout on `main`**: the links point into the checkout it runs from, so a linked worktree is
+refused and a feature branch would put unmerged files into live sessions. What it does:
 
-The installer also leaves `~/.claude/CLAUDE.md` untouched. The repository's user-preferences
-template is maintained separately; see [Personal user preferences](#personal-user-preferences).
+- **Links** every top-level entry of `claude/{skills,agents,rules,references,scripts,hooks}`
+  into `~/.claude/<dir>/`, `claude/CLAUDE.md` and `claude/statusline-command.sh` into
+  `~/.claude`, `agents/skills/*` into `~/.agents/skills/`, `agents/AGENTS.md` as
+  `~/.codex/AGENTS.md`, `codex/rules/ai-config.rules` into `~/.codex/rules/`, and
+  `pi/AGENTS.md` as `~/.pi/agent/AGENTS.md`. The same layout under a **private directory**
+  (below) is linked alongside; a name present in both is an error, not an override.
+- **Cleans** the managed directories: inside the six `~/.claude` content dirs,
+  `~/.agents/skills`, and `~/.codex/rules`, everything it did not link is deleted, except
+  `~/.claude/skills/synced`, `~/.codex/rules/default.rules`, and `.DS_Store`. Every deletion
+  is in the dry-run plan. It never enumerates anything else, refuses a managed directory that
+  is itself a symlink, and never deletes a hook that either settings file registers unless a
+  source root re-creates it.
+- **Installs the worktree CLIs** by running `clwt install`, `cwt install`, and `pwt install`,
+  so `~/.local/bin` and the completions point into this checkout.
+- **Never touches** `~/.claude/settings.json`, `settings.local.json`, `~/.codex/config.toml`,
+  `~/.pi/agent/settings.json`, or any auth file. A single file already at a link's place is
+  replaced only when byte-identical; otherwise the run stops before writing anything.
+
+A second run prints `no changes`. Recovery from a moved checkout, a drifted home, or a fresh
+machine is the same command.
+
+### The private directory
+
+Work-only content lives outside the repo in `~/.ai-private`, with the same layout as the
+harness trees plus two files:
+
+```text
+~/.ai-private/
+├── claude/{skills,agents,rules,references,scripts,hooks}/   # linked like the repo's
+├── agents/skills/                                            # linked like the repo's
+├── work-rules.md              # instructions that must load only inside work checkouts
+└── links.txt                  # extra pairs, one `source<TAB>target` per line, `~/` allowed
+```
+
+`links.txt` is how `work-rules.md` reaches the parent directories of work checkouts and of
+their centralized worktrees, where Claude Code's parent-directory `CLAUDE.md` walk picks it
+up (Codex and Pi follow the same file through the work-scope line in their user files):
+
+```text
+~/.ai-private/work-rules.md	~/code/work-org/CLAUDE.md
+~/.ai-private/work-rules.md	~/code/.worktrees/work-org/CLAUDE.md
+```
+
+Keep the parent file named `CLAUDE.md`, not `AGENTS.md`: Claude Code reads a parent
+`AGENTS.md` only when no `CLAUDE.md` exists anywhere from the working directory upward, and
+work repos carry their own. Targets must be under `$HOME`; every line is validated before
+anything is written.
+
+### Hooks and settings, by hand
+
+`claude/settings.json` is the template: register the hook lines it lists (`bash-guard.sh` on
+`PreToolUse`, `beads-gate.sh` and `session-orient.sh` on `SessionStart`) plus any private
+hooks in your own `~/.claude/settings.json`. `notify.sh` and `skill-check.sh` ship unregistered.
+Hook paths do not change when the files become links, so existing registrations keep working.
+
+### Before the first run
+
+Take an archive of the managed directories and the four single files (`~/.claude/CLAUDE.md`,
+`~/.claude/statusline-command.sh`, `~/.codex/AGENTS.md`, `~/.pi/agent/AGENTS.md`) outside
+the private directory; that archive is the rollback. Move the four single files aside if they
+differ from the templates, then `bash link.sh --dry-run` and read every `delete` line.
+
+Two Claude Code notes: this repo has no `CLAUDE.md`; Claude Code 2.1.277 or later reads its
+`AGENTS.md` directly and prints an `AGENTS.md loaded` line at session start (the file does not
+appear in `/memory` or `/context`). And a session in a worktree under `.claude/worktrees/` also
+loads the primary checkout's `AGENTS.md` from the parent path.
 
 To orient Claude to the workflow in a target project, paste the snippet below into that
 project's `CLAUDE.md` and adapt it. Optionally copy `.mcp.json` (see
@@ -408,16 +464,16 @@ the `setup-beads` skill to install and initialize it. See
 
 This repo ships harness-specific configuration plus a portable Agent Skills library:
 
-- **[`claude/`](claude/)** — the full workflow library for Claude Code, installed
-  **globally** via `claude/install.sh` (see [Installing the library](#installing-the-library)).
+- **[`claude/`](claude/)** — the full workflow library for Claude Code, linked
+  **globally** by `link.sh` (see [Installing the library](#installing-the-library)).
 - **[`agents/`](agents/)** — portable Open Agent Skills shared by Codex and Pi, authored in
   `agents/skills/`. Both harnesses auto-discover project `.agents/skills/` and personal
-  `~/.agents/skills/`; use the human-run `agents/install.sh` for an additive personal install.
+  `~/.agents/skills/`; `link.sh` links the personal location.
 - **[`codex/`](codex/)** — Codex-specific `AGENTS.md` guidance, manually merged into a
   project when wanted. Skill installation is documented in [`codex/README.md`](codex/README.md).
 - **[`pi/`](pi/)** — Pi-specific guidance and developer tooling. `pi/AGENTS.md` is a
   **personal global context file** (communication rules, conventions, workflow, change
-  gate, execution guardrails), manually maintained at `~/.pi/agent/AGENTS.md` and active
+  gate, execution guardrails), linked as `~/.pi/agent/AGENTS.md` and active
   in every repo ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). The
   [Pi guide](pi/README.md) documents the developer-run `pwt` CLI and its separate install.
   Pi also auto-discovers the shared Agent Skills locations
@@ -428,27 +484,25 @@ Harness-specific content still diverges freely ([ADR 0006](docs/decisions/0006-p
 [ADR 0010](docs/decisions/0010-shared-agent-skills-library.md)). `claude/` remains canonical
 for the Claude workflow used by this repo.
 
-Run `agents/install.sh` yourself. It manages only `~/.agents/skills/`; it never reads,
-copies, merges, or modifies `AGENTS.md`, `~/.codex`, or Pi configuration.
-
 ### Personal user preferences
 
-- **[`claude/CLAUDE.md`](claude/CLAUDE.md)** — sanitized personal preferences for Claude
-  Code, intended for manual review and merging into `~/.claude/CLAUDE.md`.
+- **[`claude/CLAUDE.md`](claude/CLAUDE.md)** — personal preferences for Claude Code, linked
+  as `~/.claude/CLAUDE.md`.
 - **[`agents/AGENTS.md`](agents/AGENTS.md)** — equivalent personal preferences expressed
   for a generic coding agent, with a self-contained workflow and no required Claude-only
-  tools. See the [shared library guide](agents/README.md#personal-user-preferences).
+  tools, linked as `~/.codex/AGENTS.md`. See the
+  [shared library guide](agents/README.md#personal-user-preferences).
+- **[`pi/AGENTS.md`](pi/AGENTS.md)** — the Pi personal global context, linked as
+  `~/.pi/agent/AGENTS.md`.
 
-These are standalone, independently maintained source templates — not generated files or
-synchronized copies. Neither library installer manages them or the live user-instruction
-files. Review and merge changes by hand into the user-instruction location your harness
-supports, omitting each template's opening repository source note. The repository path and
-`~/.agents/AGENTS.md` are not universal global-discovery locations.
-
-Keep reusable personal preferences in these templates, but remove whole private
-external-work sections before writing repository copies. Follow the
+These are standalone, independently maintained files — not generated or synchronized copies —
+and because they are linked verbatim into the harness homes, they are the live user
+instructions. Keep reusable personal preferences here and put anything work-specific in the
+private directory's `work-rules.md`, never in the repo. Follow the
 [repository authoring boundary](AGENTS.md#authoring-conventions); do not preserve private
-operational details by merely substituting generic names.
+operational details by merely substituting generic names. The personal instructions in these
+files are for global use, not for maintaining this repository; the root `AGENTS.md` governs
+that.
 
 This repo's own guidance lives in `AGENTS.md`, read natively by Codex, Pi, and Claude Code
 2.1.277 or later (which reads `AGENTS.md` whenever no `CLAUDE.md` exists in the working
@@ -474,22 +528,22 @@ Both are optional — skills degrade gracefully when a server isn't present (e.g
 ## Repo layout
 
 ```text
+link.sh            # human-run: symlink the library into the harness homes (ADR 0013)
+tests/             # link-test.sh, the self-contained suite for link.sh
 claude/
-├── CLAUDE.md              # personal user template (manual maintenance; not installed)
-├── install.sh             # global installer (human-run): additive copy + merge report
+├── CLAUDE.md              # personal user file, linked as ~/.claude/CLAUDE.md
 ├── skills/                # the skills above (one folder each, SKILL.md + optional files)
 ├── agents/                # the review/implementer agents above (one .md each)
 ├── rules/                 # always-on conventions
 ├── references/            # shared knowledge skills point to
-├── hooks/                 # SessionStart hooks (beads gate, session orientation)
-├── scripts/               # clwt, worktree-status.sh, and their tests
-├── settings.json          # settings TEMPLATE the merge report diffs against (not live config)
-└── statusline-command.sh  # statusline script, installed to ~/.claude
+├── hooks/                 # PreToolUse and SessionStart hooks
+├── scripts/               # clwt, worktree-status.sh, wt-status.sh, and their tests
+├── settings.json          # settings TEMPLATE: hook lines to register by hand (not live config)
+└── statusline-command.sh  # statusline script, linked into ~/.claude
 agents/
-├── AGENTS.md              # portable personal user template (manual maintenance)
-├── install.sh             # human-run additive installer for ~/.agents/skills only
-└── skills/                # shared portable skills
-codex/             # Codex guidance plus cwt, completion, and tests
+├── AGENTS.md              # portable personal user file, linked as ~/.codex/AGENTS.md
+└── skills/                # shared portable skills, linked into ~/.agents/skills
+codex/             # Codex guidance and rules plus cwt, completion, and tests
 pi/                # Pi personal global context plus pwt, completion, tests, and guide
 archive/           # the previous automated pipeline, kept for reference
 AGENTS.md          # how to work IN this repo (read natively by all three harnesses)
