@@ -470,6 +470,18 @@ while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
   i=$((i + 1))
 done
 
+# ------------------------------------------------------------ CLI installs
+
+# The worktree CLIs install themselves as symlinks into ~/.local/bin (plus their
+# completion) and resolve their source from $0, which is why they are invoked by
+# path from this checkout and only after the primary-checkout guard passed. A
+# failure here leaves the links above in place and is reported by name.
+if [ "$DRY_RUN" = 0 ]; then
+  for cli in claude/scripts/clwt codex/scripts/cwt pi/scripts/pwt; do
+    "$REPO/$cli" install || die "$cli install failed (links above are in place)"
+  done
+fi
+
 # ----------------------------------------------------------------- summary
 
 if [ $((n_delete + n_link + n_repoint + n_replace)) -eq 0 ]; then

@@ -726,6 +726,64 @@ else
   not_ok "silently skips when links.txt is absent (status=$STATUS): $OUT"
 fi
 
+# ----------------------------------------------------------- CLI installs
+
+section 'CLI installs and end to end'
+
+# link.sh calls the CLIs by path inside the checkout, so the fixture's own stubs
+# are what run; no PATH manipulation is needed to intercept them.
+: > "$STUB_LOG"
+H21="$TMP/h21"
+run_link_home "$H21" "$FIX"
+if [ "$STATUS" = 0 ] && [ "$(sort "$STUB_LOG" | tr '\n' ' ')" = "clwt install cwt install pwt install " ]; then
+  ok 'calls clwt install, cwt install and pwt install with no arguments, once each'
+else
+  not_ok "calls clwt install, cwt install and pwt install with no arguments, once each (status=$STATUS): $(cat "$STUB_LOG")"
+fi
+# The fixture: 8 entries across the six claude dirs, 1 shared skill, 1 codex
+# rule, 4 single files.
+if printf '%s' "$OUT" | grep -q '^deleted 0, linked 14, repointed 0, replaced 0, unchanged 0$'; then
+  ok 'summary counts match the fixture'
+else
+  not_ok "summary counts match the fixture: $OUT"
+fi
+
+: > "$STUB_LOG"
+run_link_home "$TMP/h22" "$FIX" --dry-run
+if [ "$STATUS" = 0 ] && [ ! -s "$STUB_LOG" ]; then
+  ok 'dry-run does not call any install subcommand'
+else
+  not_ok "dry-run does not call any install subcommand (status=$STATUS): $(cat "$STUB_LOG")"
+fi
+
+BADCLI="$TMP/badcli"
+make_fixture "$BADCLI"
+printf '#!/bin/sh\nexit 1\n' > "$BADCLI/codex/scripts/cwt"; chmod +x "$BADCLI/codex/scripts/cwt"
+H23="$TMP/h23"
+run_link_home "$H23" "$BADCLI"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'codex/scripts/cwt install failed' && [ -L "$H23/.claude/skills/foo" ]; then
+  ok 'fails when an install subcommand exits non-zero, naming it, with links in place'
+else
+  not_ok "fails when an install subcommand exits non-zero, naming it, with links in place (status=$STATUS): $OUT"
+fi
+
+# End to end: both roots, links.txt, stale entries and a leftover real file, run
+# twice. The second run must be a no-op.
+H24="$TMP/h24"; mkdir -p "$H24/.claude/skills/stale" "$H24/.codex/rules" "$H24/.agents/skills/orphan"
+echo old > "$H24/.codex/rules/ai-config.rules"; echo o > "$H24/.agents/skills/orphan/SKILL.md"
+make_private "$H24"
+make_links "$H24" "~/.ai-private/work-rules.md${TAB}~/work/CLAUDE.md"
+run_link_home "$H24" "$FIX"
+FIRST_STATUS=$STATUS
+run_link_home "$H24" "$FIX"
+if [ "$FIRST_STATUS" = 0 ] && [ "$STATUS" = 0 ] && printf '%s' "$OUT" | grep -q '^no changes' &&
+   [ ! -e "$H24/.claude/skills/stale" ] && [ ! -e "$H24/.agents/skills/orphan" ] &&
+   [ -L "$H24/.codex/rules/ai-config.rules" ] && [ -L "$H24/.claude/skills/priv" ] && [ -L "$H24/work/CLAUDE.md" ]; then
+  ok 'full run twice: second run prints no changes'
+else
+  not_ok "full run twice: second run prints no changes (first=$FIRST_STATUS, second=$STATUS): $OUT"
+fi
+
 # ------------------------------------------------------------- portability
 
 section 'portability'
