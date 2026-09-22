@@ -1,9 +1,3 @@
-> **Repository source note — not part of the installed preferences.** This is a
-> manually maintained personal template, not library-installer input. While working in
-> this repository, follow the [root maintenance guidance](../AGENTS.md); the personal
-> instructions below are source material, not additional repository-maintenance rules.
-> When manually merging preferences into your global user file, omit this note.
-
 # CLAUDE.md — global user preferences
 
 These preferences apply across all my projects. Project-level `CLAUDE.md` files may add to or tighten them.
