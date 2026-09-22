@@ -533,6 +533,9 @@ echo f > "$H12/.codex/skills/foo/f"
 : > "$H12/.claude/skills/.DS_Store"
 echo notes > "$H12/.claude/notes.txt"
 echo toml > "$H12/.codex/config.toml"
+# The ~/.agents root holds the old layout's leftovers, which the spec removes by
+# hand, never by link.sh.
+mkdir -p "$H12/.agents/references"; echo catalog > "$H12/.agents/catalog.md"
 run_link_home "$H12" "$FIX"
 if [ "$STATUS" = 0 ] && [ -f "$H12/.claude/skills/synced/abc/manifest.json" ] && [ -f "$H12/.codex/rules/default.rules" ] &&
    ! printf '%s' "$OUT" | grep -q 'synced' && ! printf '%s' "$OUT" | grep -q 'default.rules'; then
@@ -545,7 +548,8 @@ if [ -f "$H12/.codex/skills/.system/marker" ] && [ -f "$H12/.codex/skills/foo/f"
 else
   not_ok "never enumerates ~/.codex/skills: $OUT"
 fi
-if [ -f "$H12/.claude/notes.txt" ] && [ -f "$H12/.codex/config.toml" ]; then
+if [ -f "$H12/.claude/notes.txt" ] && [ -f "$H12/.codex/config.toml" ] &&
+   [ -f "$H12/.agents/catalog.md" ] && [ -d "$H12/.agents/references" ]; then
   ok "never enumerates a managed dir's parent"
 else
   not_ok "never enumerates a managed dir's parent"
@@ -791,7 +795,7 @@ else
 fi
 
 # GUARD (mutation-tested): a doubled slash is another spelling of a repo-claimed
-# target. Make canon_path return its argument unchanged and this goes red: the
+# target. Make canon_key return its argument unchanged and this goes red: the
 # alias is planned as a second link and the later one silently wins.
 make_links "$H20" "~/.ai-private/work-rules.md${TAB}~/.claude//CLAUDE.md"
 run_link_home "$H20" "$FIX"
@@ -956,6 +960,16 @@ if grep -q 'python' "$LINK_SRC"; then
 else
   ok 'no python dependency'
 fi
+
+# The user files are linked verbatim into every session, so the repository-only
+# blockquote that used to head them must not come back.
+for tmpl in claude/CLAUDE.md agents/AGENTS.md; do
+  if grep -q 'Repository source note' "$REPO_ROOT/$tmpl"; then
+    not_ok "$tmpl carries no repository source note"
+  else
+    ok "$tmpl carries no repository source note"
+  fi
+done
 
 # git -C is denied by the maintainer's settings; a script that used it would be
 # unrunnable by an agent asked to check it and confusing in the allowlist.
