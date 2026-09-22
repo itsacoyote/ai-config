@@ -97,6 +97,15 @@ run_link() {
   STATUS=$?
 }
 
+# run_link_home <home> <fixture-dir> [args...] — like run_link with its own HOME,
+# so each scenario starts from an empty fake home.
+run_link_home() {
+  local h="$1" fix="$2"; shift 2
+  mkdir -p "$h"
+  OUT="$(cd "$TMP" && HOME="$h" bash "$fix/link.sh" "$@" 2>&1)"
+  STATUS=$?
+}
+
 # ---------------------------------------------------------------- arguments
 
 section 'arguments'
@@ -182,18 +191,21 @@ else
 fi
 rm -rf "$HOME/.claude"
 
+# Same guard through a symlinked home: ~/.claude -> realclaude, checkout under
+# realclaude. An unresolved home path never matches the resolved $REPO.
+H17="$TMP/h17"; mkdir -p "$H17" "$TMP/realclaude"
+ln -s "$TMP/realclaude" "$H17/.claude"
+make_fixture "$TMP/realclaude/fixture"
+run_link_home "$H17" "$TMP/realclaude/fixture" --dry-run
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'refusing to run from inside'; then
+  ok 'dies when link.sh lives under a harness home reached through a symlink'
+else
+  not_ok "dies when link.sh lives under a harness home reached through a symlink (status=$STATUS): $OUT"
+fi
+
 # ---------------------------------------------------------------- linking
 
 section 'linking'
-
-# run_link_home <home> <fixture-dir> [args...] — like run_link with its own HOME,
-# so each scenario starts from an empty fake home.
-run_link_home() {
-  local h="$1" fix="$2"; shift 2
-  mkdir -p "$h"
-  OUT="$(cd "$TMP" && HOME="$h" bash "$fix/link.sh" "$@" 2>&1)"
-  STATUS=$?
-}
 
 H1="$TMP/h1"
 run_link_home "$H1" "$FIX"
@@ -468,11 +480,10 @@ if [ -f "$H12/.codex/skills/.system/marker" ] && [ -f "$H12/.codex/skills/foo/f"
 else
   not_ok "never enumerates ~/.codex/skills: $OUT"
 fi
-# GUARD: only entries of a managed dir are ever deleted.
 if [ -f "$H12/.claude/notes.txt" ] && [ -f "$H12/.codex/config.toml" ]; then
-  ok 'never deletes outside a managed dir'
+  ok "never enumerates a managed dir's parent"
 else
-  not_ok 'never deletes outside a managed dir'
+  not_ok "never enumerates a managed dir's parent"
 fi
 run_link_home "$H12" "$FIX"
 if [ "$STATUS" = 0 ] && [ -f "$H12/.claude/skills/.DS_Store" ] && printf '%s' "$OUT" | grep -q '^no changes'; then
@@ -503,6 +514,60 @@ if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'managed directory is a sym
   ok 'refuses to clean when the managed dir is itself a symlink'
 else
   not_ok "refuses to clean when the managed dir is itself a symlink (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): containment is a property of the clean itself. With
+# ~/.claude a symlink to a directory outside HOME that already holds entries, no
+# delete may be planned through it. Remove the contained_reason call at the top
+# of plan_clean and this goes red: the plan lists deletes under the outside dir
+# (the run still exits 2 via plan_entry, which is why the assertion is on the
+# plan lines, not on the files).
+H15="$TMP/h15"; mkdir -p "$H15"
+OUTSIDE2="$TMP/outside2"; mkdir -p "$OUTSIDE2/skills/victim" "$OUTSIDE2/rules"
+echo x > "$OUTSIDE2/skills/victim/x"; echo precious > "$OUTSIDE2/rules/precious.md"
+ln -s "$OUTSIDE2" "$H15/.claude"
+run_link_home "$H15" "$FIX"
+if [ "$STATUS" = 2 ] && ! printf '%s\n' "$OUT" | grep -q '^delete ' &&
+   [ -f "$OUTSIDE2/skills/victim/x" ] && [ -f "$OUTSIDE2/rules/precious.md" ]; then
+  ok 'never plans a delete through a managed dir whose parent resolves outside HOME'
+else
+  not_ok "never plans a delete through a managed dir whose parent resolves outside HOME (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): an entry name containing a newline must stay one
+# entry. Switch the managed-dir reader back to newline-delimited find|read and
+# this goes red: the second fragment "victim" is planned as a relative delete
+# and removed from the cwd link.sh runs in ($TMP).
+VICTIM="$TMP/victim"; mkdir -p "$VICTIM"; echo marker > "$VICTIM/marker"
+EVIL="$H10/.claude/skills/$(printf 'evil\nvictim')"
+mkdir -p "$EVIL"
+run_link_home "$H10" "$FIX"
+if [ "$STATUS" = 0 ] && [ ! -e "$EVIL" ] && [ -f "$VICTIM/marker" ] &&
+   ! printf '%s\n' "$OUT" | grep -q '^delete    victim'; then
+  ok 'treats an entry name containing a newline as one entry'
+else
+  not_ok "treats an entry name containing a newline as one entry (status=$STATUS): $OUT"
+fi
+
+# Under pipefail a grep that matches nothing is exit 1; both of these once ended
+# the run with no message.
+H16="$TMP/h16"; mkdir -p "$H16/.claude"
+printf '{"permissions":{"allow":[]}}\n' > "$H16/.claude/settings.json"
+run_link_home "$H16" "$FIX"
+if [ "$STATUS" = 0 ] && [ -L "$H16/.claude/skills/foo" ]; then
+  ok 'runs with a settings file that registers no hook'
+else
+  not_ok "runs with a settings file that registers no hook (status=$STATUS): $OUT"
+fi
+
+NOGK="$TMP/nogk"
+make_fixture "$NOGK"
+rm -f "$NOGK/claude/references/ref.md"; : > "$NOGK/claude/references/.gitkeep"
+run_link_home "$TMP/h16b" "$NOGK" --dry-run
+if [ "$STATUS" = 0 ] && ! printf '%s\n' "$OUT" | grep -q 'references/'; then
+  ok 'runs when a source dir holds only .gitkeep'
+else
+  not_ok "runs when a source dir holds only .gitkeep (status=$STATUS): $OUT"
 fi
 
 # Registered-hook guard. Positive control first: a registered hook that a source

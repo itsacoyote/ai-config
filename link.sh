@@ -19,6 +19,9 @@
 #   bash link.sh --dry-run   print the full plan, write nothing
 
 set -euo pipefail
+# Nothing here globs; entry names come from find. Off, so an unquoted word-split
+# loop can never expand a name into a pattern.
+set -f
 
 die()  { printf 'link.sh: %s\n' "$*" >&2; exit 2; }
 note() { printf '%s\n' "$*"; }
@@ -50,10 +53,13 @@ for root in claude agents/skills pi/AGENTS.md codex/rules/ai-config.rules; do
 done
 
 # A copy of this script living inside a harness home would link the homes to
-# themselves.
+# themselves. Compare physical to physical: $REPO is resolved, so an unresolved
+# home (itself a symlink) would never match and the guard would pass exactly
+# where it matters.
 for home in .claude .agents .codex .pi; do
+  home_p="$(cd "$HOME/$home" 2>/dev/null && pwd -P)" || home_p="$HOME_P/$home"
   case "$REPO/" in
-    "$HOME_P/$home"/*) die "refusing to run from inside $HOME_P/$home — run from the repository checkout" ;;
+    "$home_p"/*) die "refusing to run from inside $HOME/$home — run from the repository checkout" ;;
   esac
 done
 
@@ -175,10 +181,12 @@ plan_entry() {
 }
 
 # Top-level names of a directory. find sees dot entries; the repo's placeholder
-# .gitkeep files and Finder's .DS_Store are not library content.
+# .gitkeep files and Finder's .DS_Store are not library content. Entries are
+# NUL-delimited: a name containing a newline would otherwise be read as two
+# names, the second a bare relative path.
 names_in() {
   [ -d "$1" ] || return 0
-  find "$1" -mindepth 1 -maxdepth 1 | LC_ALL=C sort | while IFS= read -r entry; do
+  find "$1" -mindepth 1 -maxdepth 1 -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' entry; do
     case "$(basename "$entry")" in
       .gitkeep|.DS_Store) ;;
       *) basename "$entry" ;;
@@ -232,7 +240,9 @@ is_allowlisted() {
 registered_hooks=''
 for settings_file in "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json"; do
   [ -f "$settings_file" ] || continue
-  registered_hooks="$registered_hooks$(grep -o 'hooks/[A-Za-z0-9_.-]*\.sh' "$settings_file" | sed 's#^hooks/##')"$'\n'
+  # `|| :` because under pipefail a settings file with no hook is a grep exit 1,
+  # which would end the run here with no message.
+  registered_hooks="$registered_hooks$(grep -o 'hooks/[A-Za-z0-9_.-]*\.sh' "$settings_file" | sed 's#^hooks/##' || :)"$'\n'
 done
 
 is_registered_hook() {
@@ -244,13 +254,24 @@ is_registered_hook() {
 # or directory with a desired name is an extra too: the copy installers left real
 # files where links belong, and a hand-edited copy is still a copy.
 plan_clean() {
-  local dir="$1" desired="$2" entry name kind
+  local dir="$1" desired="$2" entry name kind why
   [ -e "$dir" ] || [ -L "$dir" ] || return 0
   if [ -L "$dir" ]; then
     add_plan FATAL '' "$dir" 'managed directory is a symlink'
     return 0
   fi
-  while IFS= read -r entry; do
+  # Containment is a property of the clean itself, not of whatever happens to be
+  # linked into the directory afterwards.
+  why="$(contained_reason "$dir/.")"
+  if [ -n "$why" ]; then
+    add_plan FATAL '' "$dir" "$why"
+    return 0
+  fi
+  while IFS= read -r -d '' entry; do
+    case "$entry" in
+      "$dir"/*) ;;
+      *) add_plan FATAL '' "$entry" 'entry is not inside the managed directory'; continue ;;
+    esac
     name="$(basename "$entry")"
     [ "$name" = .DS_Store ] && continue
     is_allowlisted "$entry" && continue
@@ -268,14 +289,16 @@ plan_clean() {
       continue
     fi
     add_plan delete '' "$entry" "$kind"
-  done < <(find "$dir" -mindepth 1 -maxdepth 1 | LC_ALL=C sort)
+  done < <(find "$dir" -mindepth 1 -maxdepth 1 -print0 | LC_ALL=C sort -z)
 }
 
 # plan_managed_dir REL TARGET_DIR — clean first, then one link per desired name,
 # from whichever root provides it.
 plan_managed_dir() {
   local rel="$1" dir="$2" desired name
-  desired="$(printf '%s\n%s\n' "$(names_in "$REPO/$rel")" "$(names_in "$PRIVATE/$rel")" | grep -v '^$' | LC_ALL=C sort)"
+  # `|| :`: an empty desired set is a grep exit 1, which pipefail would turn into
+  # a silent abort.
+  desired="$(printf '%s\n%s\n' "$(names_in "$REPO/$rel")" "$(names_in "$PRIVATE/$rel")" | { grep -v '^$' || :; } | LC_ALL=C sort)"
   plan_clean "$dir" "$desired"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
@@ -331,23 +354,36 @@ fi
 # is a directory).
 place_link() {
   local src="$1" dst="$2" tmp
-  mkdir -p "$(dirname "$dst")"
+  mkdir -p "$(dirname "$dst")" || die "cannot create $(dirname "$dst")"
+  # -n and an unguessable suffix: a pre-planted symlink-to-directory at the temp
+  # name would otherwise receive the link inside it instead of being replaced.
+  tmp="$(dirname "$dst")/.$(basename "$dst").link.$$.$RANDOM"
+  ln -sfn "$src" "$tmp" || die "cannot link $tmp -> $src"
+  # Re-tested right before the rename to shrink the window; GNU mv -T would close
+  # it, but BSD mv has no equivalent.
   if [ -L "$dst" ] && [ -d "$dst" ]; then
-    ln -sfn "$src" "$dst"
+    rm -f "$tmp"
+    ln -sfn "$src" "$dst" || die "cannot link $dst -> $src"
     return
   fi
-  tmp="$(dirname "$dst")/.$(basename "$dst").link.$$"
-  ln -s "$src" "$tmp"
-  mv -f "$tmp" "$dst"
+  mv -f "$tmp" "$dst" || die "cannot move $tmp onto $dst"
 }
 
 # Never a trailing slash on the path: rm -rf on "link/" follows the link and
 # empties its target. A symlink is removed as a symlink whatever it points at.
+# A planned directory that is no longer a real directory is skipped with a
+# warning, not deleted and not fatal: the plan was computed moments ago.
 remove_entry() {
   local path="$1" kind="$2"
   case "$kind" in
-    symlink|file) rm -f "$path" ;;
-    dir) [ ! -L "$path" ] && [ -d "$path" ] && rm -rf "$path" ;;
+    symlink|file) rm -f "$path" || die "cannot remove $path" ;;
+    dir)
+      if [ ! -L "$path" ] && [ -d "$path" ]; then
+        rm -rf "$path" || die "cannot remove $path"
+      else
+        warn "skipping $path: no longer a real directory"
+      fi
+      ;;
   esac
 }
 
@@ -372,11 +408,10 @@ done
 
 # ----------------------------------------------------------------- summary
 
-if [ "$DRY_RUN" = 1 ]; then
-  note "dry run: nothing written"
-fi
 if [ $((n_delete + n_link + n_repoint + n_replace)) -eq 0 ]; then
   note "no changes ($n_unchanged unchanged)"
+elif [ "$DRY_RUN" = 1 ]; then
+  note "dry run: nothing written; would delete $n_delete, link $n_link, repoint $n_repoint, replace $n_replace ($n_unchanged unchanged)"
 else
   note "deleted $n_delete, linked $n_link, repointed $n_repoint, replaced $n_replace, unchanged $n_unchanged"
 fi
