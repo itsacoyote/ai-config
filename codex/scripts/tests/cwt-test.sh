@@ -2785,7 +2785,6 @@ CODEX_README="$REPO_ROOT/codex/README.md"
 ROOT_README="$REPO_ROOT/README.md"
 AGENTS_GUIDE="$REPO_ROOT/AGENTS.md"
 ADR="$REPO_ROOT/docs/decisions/0011-cwt-worktree-cli.md"
-CONTRACT_TEST="$REPO_ROOT/agents/scripts/tests/repository-contract-test.sh"
 
 check 'the Codex README has a cwt section' grep -qiE '^#+ .*cwt' "$CODEX_README"
 check 'the root README has a cwt section' grep -qiE '^#+ .*cwt' "$ROOT_README"
@@ -2864,8 +2863,6 @@ check 'ADR 0011 records the cd plus exec choice over native -C' \
 check 'the maintainer guide names cwt as a developer-facing CLI' grep -qF 'cwt' "$AGENTS_GUIDE"
 check 'the maintainer guide documents the cwt test command' grep -qF 'cwt-test.sh' "$AGENTS_GUIDE"
 check 'no shared cwt skill exists' test ! -e "$REPO_ROOT/agents/skills/cwt"
-check 'the repository contract pins cwt as Codex-specific' grep -qF 'codex/scripts/cwt' "$CONTRACT_TEST"
-check 'the repository contract rejects a shared cwt skill' grep -qF 'agents/skills/cwt' "$CONTRACT_TEST"
 
 # -------------------------------------------------------------------- summary
 

@@ -11,9 +11,9 @@ For the catalog of skills/agents and the feature workflow they implement, see
 
 ## What lives where
 
-- `claude/CLAUDE.md` — a personal user-preferences source template, manually maintained
-  outside the library installer. Its personal instructions are for global use, not for
-  maintaining this repository; this root file governs repository maintenance.
+- `claude/CLAUDE.md` — the personal user-preferences file, linked as `~/.claude/CLAUDE.md`.
+  Its personal instructions are for global use, not for maintaining this repository; this
+  root file governs repository maintenance.
 - `claude/skills/<name>/SKILL.md` — a skill (methodology/reference loaded when relevant).
   Supporting files live alongside it.
 - `claude/agents/<name>.md` — a subagent: a **thin** wrapper that runs a skill in an
@@ -29,15 +29,15 @@ For the catalog of skills/agents and the feature workflow they implement, see
   Tests go in `claude/scripts/tests/`.
 - `claude/hooks/<name>.sh` — SessionStart hooks, registered in the user's global
   settings (Claude-specific).
-- `claude/settings.json` — the settings **template** the installer's merge report diffs
-  against. It is not live config; this repo carries no project-level Claude config
-  directory.
+- `claude/settings.json` — the settings **template**: the documented reference for which
+  hooks, permissions, and statusline to register by hand. It is not live config and is never
+  linked or written; this repo carries no project-level Claude config directory.
 - `codex/scripts/<name>` — Codex-specific executable tooling. `cwt` is a developer-facing
   CLI with its completion beside it and tests under `codex/scripts/tests/`.
 - `pi/scripts/<name>` — Pi-specific executable tooling. `pwt` is a developer-facing Pi launcher
   with its completion beside it and tests under `pi/scripts/tests/`.
-- `codex/rules/ai-config.rules` — Codex command approval rules; install with the human-run
-  `codex/install.sh`, which writes only its dedicated file under `~/.codex/rules/`.
+- `codex/rules/ai-config.rules` — Codex command approval rules; `link.sh` symlinks it into
+  `~/.codex/rules/`.
 - `agents/skills/<name>/SKILL.md` — portable Open Agent Skills shared by Codex and Pi.
   New cross-harness skills belong here; harness-specific behavior stays in its own tree.
 - `codex/`, `pi/` — harness-specific configuration and guidance. See `codex/README.md`,
@@ -52,10 +52,10 @@ A script that a human runs directly is worth calling out, because an agent canno
 invoke one. `clwt`, `cwt`, and `pwt` launch their harnesses by replacing the current process —
 only a process outside the active agent can do that. `pwt pr` also enforces Pi's
 `--no-extensions --tools read,grep,find,ls --no-approve` boundary; document it as a model-tool
-restriction for trusted pull requests, not an OS sandbox. `claude/install.sh` is the same:
-it writes into `~/.claude`, which agents are denied. `agents/install.sh` likewise writes only
-shared skills into `~/.agents/skills/` and is human-run. When a script has that shape, say so
-in its skill or README so agents recommend the command instead of trying to run it.
+restriction for trusted pull requests, not an OS sandbox. `link.sh` is the same: it writes
+into `~/.claude`, `~/.agents`, `~/.codex`, and `~/.pi`, which agents are denied, and it deletes
+inside the managed directories. When a script has that shape, say so in its skill or README so
+agents recommend the command instead of trying to run it.
 
 ## Authoring conventions
 
@@ -94,17 +94,15 @@ to touch another tree.
 
 There is no CI, no package manager, and no test runner here. A script under
 `claude/scripts/` or `claude/hooks/` that is non-trivial gets a sibling suite in
-`claude/scripts/tests/`, run manually and self-contained:
+`claude/scripts/tests/`; the root-level `link.sh` has its suite in `tests/`. All run manually
+and self-contained:
 
 ```bash
-bash claude/scripts/tests/clwt-test.sh        # exits non-zero on any failure
+bash tests/link-test.sh                       # exits non-zero on any failure
+bash claude/scripts/tests/clwt-test.sh
 bash codex/scripts/tests/cwt-test.sh
 bash pi/scripts/tests/pwt-test.sh
-bash codex/scripts/tests/install-test.sh
 bash claude/scripts/tests/beads-gate-test.sh
-bash claude/scripts/tests/install-test.sh
-bash agents/scripts/tests/install-test.sh
-bash agents/scripts/tests/repository-contract-test.sh
 ```
 
 Build the world the script needs under `mktemp -d` with a fake `$HOME` — a bare remote,
@@ -145,25 +143,28 @@ what it would *fail* to catch.
 
 ## Distribution model
 
-The three trees install differently — this is the crux of what each tree *is*:
+One human-run script, `link.sh` at the repo root, symlinks every top-level entry of the
+harness trees, and of a private directory with the same layout (`~/.ai-private`), into the
+harness homes; inside the managed directories it deletes everything it did not link, except a
+short allowlist of harness-owned entries ([ADR 0013](docs/decisions/0013-link-config-library.md)).
+Agents never run it: the harness homes are human-owned, and on this maintainer's machines a
+settings-level deny enforces it. It never touches settings files, `config.toml`, or auth files.
+`git pull` on `main` is the update. What each tree *is*:
 
-- **`claude/` is consumed globally.** `claude/install.sh` (run by the **human**, never an
-  agent — treat `~/.claude` as human-owned; on this maintainer's machines a settings-level
-  deny enforces it) additively copies the content dirs
-  into `~/.claude`, where every Claude session on the machine loads them. There is no
-  per-project copy of this library; this repo itself runs off the same global install.
-  The installer never touches the global settings files — it prints a merge report.
+- **`claude/` is consumed globally.** Its six content dirs, `CLAUDE.md`, and
+  `statusline-command.sh` are linked into `~/.claude`, where every Claude session on the
+  machine loads them. There is no per-project copy of this library; this repo itself runs off
+  the same global links.
 - **`agents/skills/` is shared by Codex and Pi.** Both harnesses discover project
-  `.agents/skills/` and personal `~/.agents/skills/` automatically. The human-run
-  `agents/install.sh` additively installs only this skill tree into the personal location;
-  it never reads or manages `AGENTS.md`, `~/.codex`, or Pi configuration.
+  `.agents/skills/` and personal `~/.agents/skills/` automatically; the personal location is
+  linked. `agents/AGENTS.md` is linked as `~/.codex/AGENTS.md`.
 - **`codex/` contains Codex-specific guidance.** Its `AGENTS.md` remains a manually merged
-  project template; portable skills no longer live in this tree.
+  project template; `codex/rules/ai-config.rules` is linked into `~/.codex/rules/`.
 - **`pi/` contains Pi-specific guidance and developer tooling.** `pi/AGENTS.md` is a
-  personal global file, manually installed once as `~/.pi/agent/AGENTS.md`; copying it
-  into a shared repo is the failure mode
-  ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)). `pi/scripts/pwt` remains a
-  developer-run CLI and installs itself plus completion as symlinks; see `pi/README.md`.
+  personal global file, linked as `~/.pi/agent/AGENTS.md`; copying it into a shared repo is
+  the failure mode ([ADR 0008](docs/decisions/0008-pi-global-only-config.md)).
+  `pi/scripts/pwt` remains a developer-run CLI; `link.sh` runs its `install`, and those of
+  `clwt` and `cwt`, so `~/.local/bin` points into the primary checkout.
 
 ## Workflow state: beads is required
 
