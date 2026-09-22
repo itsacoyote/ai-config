@@ -414,6 +414,8 @@ anything is written.
 `PreToolUse`, `beads-gate.sh` and `session-orient.sh` on `SessionStart`) plus any private
 hooks in your own `~/.claude/settings.json`. `notify.sh` and `skill-check.sh` ship unregistered.
 Hook paths do not change when the files become links, so existing registrations keep working.
+The hooks need `jq` on the PATH that hooks run with; `bash-guard.sh` denies every Bash call
+until it is there rather than silently letting commands through.
 
 ### Before the first run
 

@@ -45,6 +45,17 @@ done
 # Physical path of the checkout this script lives in, never $PWD: the maintainer
 # runs tooling from wherever the shell happens to be.
 REPO="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# squeeze PATH — collapse repeated slashes and drop a trailing one, so two
+# spellings of one place compare equal as strings. Everything below relies on
+# that equality (duplicate targets, allowlist, desired-name checks).
+squeeze() {
+  local p
+  p="$(printf '%s' "$1" | sed 's#//*#/#g; s#\(.\)/$#\1#')"
+  printf '%s' "$p"
+}
+
+HOME="$(squeeze "$HOME")"
 HOME_P="$(cd "$HOME" && pwd -P)"
 
 # ------------------------------------------------------------------ guards
@@ -128,12 +139,30 @@ is_planned_delete() {
 # the write somewhere the script has no business touching. readlink -f and
 # realpath are avoided on purpose: this library lands on machines we do not
 # control, and stock macOS shipped without them for years.
+# has_dot_component PATH — true when any component is `.` or `..`. Such paths are
+# rejected rather than resolved so that string equality between planned targets
+# is sound and every printed path names exactly one place.
+has_dot_component() {
+  local path="$1" component old_ifs
+  old_ifs="$IFS"; IFS='/'
+  for component in ${path#/}; do
+    case "$component" in
+      .|..) IFS="$old_ifs"; return 0 ;;
+    esac
+  done
+  IFS="$old_ifs"
+  return 1
+}
+
 contained_reason() {
   local target="$1" rel cursor="$HOME" component parent resolved old_ifs
   case "$target" in
     "$HOME"/*) rel="${target#"$HOME"/}" ;;
     *) printf 'target is outside HOME'; return ;;
   esac
+  if has_dot_component "$rel"; then
+    printf 'target contains a . or .. component'; return
+  fi
   parent="$(dirname "$rel")"
   [ "$parent" = . ] && return
   old_ifs="$IFS"; IFS='/'
@@ -245,9 +274,11 @@ is_allowlisted() {
   printf '%s\n' "$ALLOWLIST" | grep -qxF -- "$1"
 }
 
-# Hook names registered in either settings file. Read-only: the settings files
-# are never edited (ADR 0013). A substring scan is enough here because a false
-# positive can only protect an entry that exists and would otherwise be deleted.
+# Hook names registered in either global settings file. Read-only: the settings
+# files are never edited (ADR 0013). A substring scan is enough here because a
+# false positive can only protect an entry that exists and would otherwise be
+# deleted. A hook registered only in some project's .claude/settings.json is not
+# seen and is cleaned like any other extra.
 registered_hooks=''
 for settings_file in "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json"; do
   [ -f "$settings_file" ] || continue
@@ -272,8 +303,9 @@ plan_clean() {
     return 0
   fi
   # Containment is a property of the clean itself, not of whatever happens to be
-  # linked into the directory afterwards.
-  why="$(contained_reason "$dir/.")"
+  # linked into the directory afterwards. contained_reason checks the parents of
+  # the path it is given, so a placeholder leaf makes it check $dir itself.
+  why="$(contained_reason "$dir/entry")"
   if [ -n "$why" ]; then
     add_plan FATAL '' "$dir" "$why"
     return 0
@@ -362,15 +394,24 @@ plan_links_file() {
       *"$TAB"*) ;;
       *) errors="$errors  line $lineno: no tab between source and target"$'\n'; continue ;;
     esac
+    line="${line%$'\r'}"
     src="${line%%"$TAB"*}"
     dst="${line#*"$TAB"}"
+    bad=''
+    case "$src$dst" in
+      ' '*|*' '|*' '"$TAB"*|*"$TAB"' '*) bad='leading or trailing whitespace in a field' ;;
+    esac
     # Values read from a file are not tilde-expanded by the shell.
     case "$src" in "~/"*) src="$HOME/${src#"~/"}" ;; esac
     case "$dst" in "~/"*) dst="$HOME/${dst#"~/"}" ;; esac
-    bad=''
-    case "$dst" in *"$TAB"*) bad='more than one tab' ;; esac
+    src="$(squeeze "$src")"
+    dst="$(squeeze "$dst")"
+    case "$dst" in *"$TAB"*) bad="${bad:-more than one tab}" ;; esac
     case "$src" in /*) ;; *) bad="${bad:-source is not an absolute path}" ;; esac
     case "$dst" in /*) ;; *) bad="${bad:-target is not an absolute path}" ;; esac
+    if [ -z "$bad" ] && { has_dot_component "$src" || has_dot_component "$dst"; }; then
+      bad='a path contains a . or .. component'
+    fi
     if [ -z "$bad" ]; then
       case "$dst" in
         "$HOME"/?*) ;;
@@ -487,11 +528,13 @@ done
 # completion) and resolve their source from $0, which is why they are invoked by
 # path from this checkout and only after the primary-checkout guard passed. A
 # failure here leaves the links above in place and is reported by name.
-if [ "$DRY_RUN" = 0 ]; then
-  for cli in claude/scripts/clwt codex/scripts/cwt pi/scripts/pwt; do
+for cli in claude/scripts/clwt codex/scripts/cwt pi/scripts/pwt; do
+  if [ "$DRY_RUN" = 1 ]; then
+    note "install   $cli install"
+  else
     "$REPO/$cli" install || die "$cli install failed (links above are in place)"
-  done
-fi
+  fi
+done
 
 # ----------------------------------------------------------------- summary
 

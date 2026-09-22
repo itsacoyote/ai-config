@@ -19,22 +19,23 @@
 # `X=secret; gh $X list` defeats string scanning. The bulletproof layers for
 # that are reduced gh token scopes and the OS sandbox.
 
-input="$(cat)"
-cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null)"
-
-# Empty / unparseable command: nothing to check.
-[ -z "$cmd" ] && exit 0
-
 emit_deny() {
-  jq -nc --arg r "$1" '{
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: $r
-    }
-  }'
+  # Static JSON on purpose: this path must work even when jq is missing.
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$1"
   exit 0
 }
+
+# Fail closed. A missing jq or an unparseable payload must deny, not fall
+# through to the normal permission flow as if the command were empty.
+command -v jq >/dev/null 2>&1 || emit_deny "bash-guard: jq is not on PATH, so the command cannot be inspected. Denied by security policy. Install jq (brew install jq) or fix PATH for hooks."
+
+input="$(cat)"
+if ! cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null)"; then
+  emit_deny "bash-guard: the hook payload could not be parsed. Denied by security policy."
+fi
+
+# Genuinely empty command: nothing to check.
+[ -z "$cmd" ] && exit 0
 
 # --- gh: secrets / auth / keys / destructive --------------------------------
 # Anchored so the subcommand directly follows `gh` — avoids false positives like

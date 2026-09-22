@@ -24,7 +24,12 @@ section() { printf '\n== %s ==\n' "$1"; }
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LINK_SRC="${LINK_UNDER_TEST:-$REPO_ROOT/link.sh}"
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/link-test.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
+# TMPDIR often ends in a slash on macOS; without stripping it every fixture path
+# would carry `//`, and link.sh prints paths in squeezed form, so assertions that
+# compare printed paths against fixture paths would fail on the spelling alone.
+# (A HOME that does contain `//` is covered by its own test below.)
+TMPBASE="${TMPDIR:-/tmp}"; TMPBASE="${TMPBASE%/}"
+TMP=$(mktemp -d "$TMPBASE/link-test.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
 [ -n "$TMP" ] && [ -d "$TMP" ] || { echo "mktemp produced no directory" >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
 
@@ -340,6 +345,18 @@ if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'outside HOME' && [ -z "$(l
   ok 'dies when a parent component is a symlink resolving outside HOME'
 else
   not_ok "dies when a parent component is a symlink resolving outside HOME (status=$STATUS): $OUT"
+fi
+
+# A HOME spelled with a doubled slash (a TMPDIR ending in `/` does this) must work
+# and be idempotent: link.sh squeezes paths so string comparisons are sound.
+H5b="$TMP//h5b"
+run_link_home "$H5b" "$FIX"
+FIRST=$STATUS
+run_link_home "$H5b" "$FIX"
+if [ "$FIRST" = 0 ] && [ "$STATUS" = 0 ] && [ -L "$TMP/h5b/.claude/skills/foo" ] && printf '%s' "$OUT" | grep -q '^no changes'; then
+  ok 'works and is idempotent when HOME contains a doubled slash'
+else
+  not_ok "works and is idempotent when HOME contains a doubled slash (first=$FIRST, second=$STATUS): $OUT"
 fi
 
 H5="$TMP/h5"
@@ -740,6 +757,47 @@ else
   not_ok "rejects a links.txt target that a repo-derived link already claims (status=$STATUS): $OUT"
 fi
 
+# GUARD (mutation-tested): a `..` component walks out of HOME through the
+# outside-HOME check, which only looks at the string prefix. Remove the
+# has_dot_component call in plan_links_file and this goes red: the link lands
+# under $TMP/escaped (contained_reason has the same check, so the mutation must
+# remove both to reach the file system; the test asserts the links.txt message).
+mkdir -p "$TMP/escaped"
+make_links "$H20" "~/.ai-private/work-rules.md${TAB}~/../escaped/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: a path contains a . or .. component' &&
+   [ ! -e "$TMP/escaped/CLAUDE.md" ] && [ ! -L "$TMP/escaped/CLAUDE.md" ]; then
+  ok 'rejects a target with a .. component and writes nothing outside HOME'
+else
+  not_ok "rejects a target with a .. component and writes nothing outside HOME (status=$STATUS): $OUT"
+fi
+
+# A `..` spelling of a repo-claimed target must not slip past the duplicate check.
+make_links "$H20" "~/.ai-private/work-rules.md${TAB}~/.claude/../.claude/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && [ ! -e "$H20/.claude/CLAUDE.md" ]; then
+  ok 'rejects a dot-spelled alias of a repo-claimed target'
+else
+  not_ok "rejects a dot-spelled alias of a repo-claimed target (status=$STATUS): $OUT"
+fi
+
+make_links "$H20" "~/.ai-private/work-rules.md${TAB}~/work/CLAUDE.md "
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: leading or trailing whitespace'; then
+  ok 'rejects trailing whitespace in a field'
+else
+  not_ok "rejects trailing whitespace in a field (status=$STATUS): $OUT"
+fi
+
+H20b="$TMP/h20b"; mkdir -p "$H20b/.ai-private"; echo "work-rules" > "$H20b/.ai-private/work-rules.md"
+printf '~/.ai-private/work-rules.md\t~/work/CLAUDE.md\r\n' > "$H20b/.ai-private/links.txt"
+run_link_home "$H20b" "$FIX"
+if [ "$STATUS" = 0 ] && [ -L "$H20b/work/CLAUDE.md" ]; then
+  ok 'accepts a CRLF-terminated line'
+else
+  not_ok "accepts a CRLF-terminated line (status=$STATUS): $OUT"
+fi
+
 make_links "$H20" "~/.ai-private/nope.md${TAB}~/work/CLAUDE.md"
 run_link_home "$H20" "$FIX"
 if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: source does not exist'; then
@@ -789,10 +847,10 @@ fi
 
 : > "$STUB_LOG"
 run_link_home "$TMP/h22" "$FIX" --dry-run
-if [ "$STATUS" = 0 ] && [ ! -s "$STUB_LOG" ]; then
-  ok 'dry-run does not call any install subcommand'
+if [ "$STATUS" = 0 ] && [ ! -s "$STUB_LOG" ] && printf '%s' "$OUT" | grep -q '^install   pi/scripts/pwt install'; then
+  ok 'dry-run lists the install subcommands without calling them'
 else
-  not_ok "dry-run does not call any install subcommand (status=$STATUS): $(cat "$STUB_LOG")"
+  not_ok "dry-run lists the install subcommands without calling them (status=$STATUS): $(cat "$STUB_LOG") $OUT"
 fi
 
 BADCLI="$TMP/badcli"
