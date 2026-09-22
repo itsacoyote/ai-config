@@ -94,8 +94,9 @@ section 'fail closed'
 
 # GUARD (mutation-tested): with jq absent the command cannot be inspected, so the
 # hook must deny, not fall through. Remove the `command -v jq` check and this goes
-# red: the hook exits 0 with no output. A PATH with only the shells on it; the
-# deny path itself must not need jq.
+# red on the message: the parse branch still denies (jq is "not found", exit 127),
+# so this assertion pins the reason, and the parse-branch test below pins the deny
+# itself. A PATH with only the shells on it; the deny path itself must not need jq.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 ln -s /bin/bash "$BIN/bash"; ln -s /bin/sh "$BIN/sh"; ln -s /bin/cat "$BIN/cat"
 run_hook "$TMP/api.json" "$BIN"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # wt-status-test.sh — self-contained test suite for claude/scripts/wt-status.sh
+# (and the git-config hardening shared with worktree-status.sh)
 #
 # The script is allow-listed with a directory argument, so it runs with no
 # permission prompt. The unrecoverable failure is code execution from a
@@ -134,6 +135,19 @@ if grep -q 'GIT_CONFIG_NOSYSTEM=1' "$SCRIPT" && grep -q 'core.hooksPath=/dev/nul
   ok 'ignores system git config and hooks'
 else
   not_ok 'ignores system git config and hooks'
+fi
+
+# GUARD (mutation-tested): worktree-status.sh is allow-listed with no argument, so
+# the cwd's own config is its whole attack surface. Drop `-c core.fsmonitor=false`
+# from its git() wrapper and this goes red. It does not catch a dropped
+# GIT_CONFIG_NOSYSTEM (no system config exists under test).
+WTS="${WORKTREE_STATUS_UNDER_TEST:-$REPO_ROOT/claude/scripts/worktree-status.sh}"
+clear_markers
+OUT="$(cd "$HOSTILE" && bash "$WTS" --brief 2>&1)"; STATUS=$?
+if [ "$STATUS" = 0 ] && [ ! -e "$TMP/PWNED_FSMON" ]; then
+  ok 'worktree-status.sh does not run core.fsmonitor from the current repository config'
+else
+  not_ok "worktree-status.sh does not run core.fsmonitor from the current repository config (status=$STATUS): $OUT"
 fi
 
 section 'portability'
