@@ -45,17 +45,6 @@ done
 # Physical path of the checkout this script lives in, never $PWD: the maintainer
 # runs tooling from wherever the shell happens to be.
 REPO="$(CDPATH='' cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-
-# squeeze PATH — collapse repeated slashes and drop a trailing one, so two
-# spellings of one place compare equal as strings. Everything below relies on
-# that equality (duplicate targets, allowlist, desired-name checks).
-squeeze() {
-  local p
-  p="$(printf '%s' "$1" | sed 's#//*#/#g; s#\(.\)/$#\1#')"
-  printf '%s' "$p"
-}
-
-HOME="$(squeeze "$HOME")"
 HOME_P="$(cd "$HOME" && pwd -P)"
 
 # ------------------------------------------------------------------ guards
@@ -114,13 +103,26 @@ PLAN_CLASS=()
 PLAN_SRC=()
 PLAN_DST=()
 PLAN_WHY=()
+PLAN_CANON=()
 fatal_count=0
+
+# canon_path PATH — the physical parent plus the basename, so two spellings of one
+# place (a symlinked directory inside HOME, a doubled slash, a trailing slash)
+# compare equal. The leaf itself is not resolved: it is the symlink being planned.
+# Every duplicate-target check goes through this; a plain string compare would
+# let a second spelling of a repo-claimed target win silently.
+canon_path() {
+  local parent
+  parent="$(cd -P "$(dirname "$1")" 2>/dev/null && pwd -P)" || parent="$(dirname "$1")"
+  printf '%s/%s' "$parent" "$(basename "$1")"
+}
 
 add_plan() {
   PLAN_CLASS[${#PLAN_CLASS[@]}]="$1"
   PLAN_SRC[${#PLAN_SRC[@]}]="$2"
   PLAN_DST[${#PLAN_DST[@]}]="$3"
   PLAN_WHY[${#PLAN_WHY[@]}]="${4:-}"
+  PLAN_CANON[${#PLAN_CANON[@]}]="$(canon_path "$3")"
   [ "$1" = FATAL ] && fatal_count=$((fatal_count + 1))
   return 0
 }
@@ -160,9 +162,6 @@ contained_reason() {
     "$HOME"/*) rel="${target#"$HOME"/}" ;;
     *) printf 'target is outside HOME'; return ;;
   esac
-  if has_dot_component "$rel"; then
-    printf 'target contains a . or .. component'; return
-  fi
   parent="$(dirname "$rel")"
   [ "$parent" = . ] && return
   old_ifs="$IFS"; IFS='/'
@@ -373,9 +372,10 @@ LINKS_FILE="$PRIVATE/links.txt"
 TAB="$(printf '\t')"
 
 is_planned_target() {
-  local i=0
+  local i=0 canon
+  canon="$(canon_path "$1")"
   while [ "$i" -lt "${#PLAN_CLASS[@]}" ]; do
-    [ "${PLAN_CLASS[$i]}" != delete ] && [ "${PLAN_DST[$i]}" = "$1" ] && return 0
+    [ "${PLAN_CLASS[$i]}" != delete ] && [ "${PLAN_CANON[$i]}" = "$canon" ] && return 0
     i=$((i + 1))
   done
   return 1
@@ -387,6 +387,7 @@ plan_links_file() {
   # `|| [ -n "$line" ]` keeps a final line without a trailing newline.
   while IFS= read -r line || [ -n "$line" ]; do
     lineno=$((lineno + 1))
+    line="${line%$'\r'}"
     case "$line" in
       ''|'#'*) continue ;;
     esac
@@ -394,18 +395,14 @@ plan_links_file() {
       *"$TAB"*) ;;
       *) errors="$errors  line $lineno: no tab between source and target"$'\n'; continue ;;
     esac
-    line="${line%$'\r'}"
     src="${line%%"$TAB"*}"
     dst="${line#*"$TAB"}"
     bad=''
-    case "$src$dst" in
-      ' '*|*' '|*' '"$TAB"*|*"$TAB"' '*) bad='leading or trailing whitespace in a field' ;;
-    esac
+    case "$src" in ' '*|*' ') bad='leading or trailing whitespace in a field' ;; esac
+    case "$dst" in ' '*|*' ') bad='leading or trailing whitespace in a field' ;; esac
     # Values read from a file are not tilde-expanded by the shell.
     case "$src" in "~/"*) src="$HOME/${src#"~/"}" ;; esac
     case "$dst" in "~/"*) dst="$HOME/${dst#"~/"}" ;; esac
-    src="$(squeeze "$src")"
-    dst="$(squeeze "$dst")"
     case "$dst" in *"$TAB"*) bad="${bad:-more than one tab}" ;; esac
     case "$src" in /*) ;; *) bad="${bad:-source is not an absolute path}" ;; esac
     case "$dst" in /*) ;; *) bad="${bad:-target is not an absolute path}" ;; esac

@@ -11,23 +11,44 @@
 # as native `git` on the command line.
 #
 # Usage:  bash ~/.claude/scripts/wt-status.sh [dir]
-#   dir   optional worktree/repo directory to inspect (defaults to the current dir)
+#   dir   optional directory to inspect: the current one, or a registered
+#         worktree of the repository the current directory belongs to
 #
-# Allow-list this in ~/.claude/settings.json permissions.allow:
-#   "Bash(bash /Users/sf/.claude/scripts/wt-status.sh*)"
+# Allow-list this in ~/.claude/settings.json permissions.allow (both forms):
+#   "Bash(bash /Users/sf/.claude/scripts/wt-status.sh)"
+#   "Bash(bash /Users/sf/.claude/scripts/wt-status.sh *)"
 
 set -uo pipefail
 
-# This script is allow-listed with an arbitrary directory argument, so it must
-# never execute anything the target repository's own .git/config asks for.
-# core.fsmonitor runs a command during status and rev-parse; hooksPath covers the
-# rest. Without these, a hand-written .git/config in any directory is code
-# execution with no permission prompt.
+# This script is allow-listed with a directory argument, so a hand-written
+# .git/config in that directory must never become code execution with no
+# permission prompt. Two layers: git runs with the command-executing config keys
+# it honours during status and rev-parse disabled, and, because a named filter
+# driver (filter.<x>.clean) cannot be disabled by flag, the argument is accepted
+# only when it is the current directory or a registered worktree of the
+# repository the session already runs in.
 export GIT_CONFIG_NOSYSTEM=1
 g() { git -c core.fsmonitor=false -c core.hooksPath=/dev/null --no-optional-locks "$@"; }
 
 dir="${1:-$PWD}"
-cd "$dir" 2>/dev/null || { echo "wt-status: cannot cd to $dir"; exit 1; }
+dir_p="$(cd -P "$dir" 2>/dev/null && pwd -P)" || { echo "wt-status: cannot cd to $dir"; exit 1; }
+here_p="$(pwd -P)"
+if [ "$dir_p" != "$here_p" ]; then
+  allowed=0
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*)
+        wt_p="$(cd -P "${line#worktree }" 2>/dev/null && pwd -P)" || continue
+        [ "$wt_p" = "$dir_p" ] && allowed=1
+        ;;
+    esac
+  done < <(g worktree list --porcelain 2>/dev/null)
+  if [ "$allowed" != 1 ]; then
+    echo "wt-status: $dir is not a worktree of the repository in $here_p; refusing"
+    exit 1
+  fi
+fi
+cd "$dir_p" || exit 1
 
 if ! g rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "dir:    $dir"

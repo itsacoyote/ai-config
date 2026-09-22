@@ -25,9 +25,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LINK_SRC="${LINK_UNDER_TEST:-$REPO_ROOT/link.sh}"
 
 # TMPDIR often ends in a slash on macOS; without stripping it every fixture path
-# would carry `//`, and link.sh prints paths in squeezed form, so assertions that
-# compare printed paths against fixture paths would fail on the spelling alone.
-# (A HOME that does contain `//` is covered by its own test below.)
+# would carry `//` and every assertion would be about that spelling. (A HOME that
+# does contain `//` is covered by its own test below.)
 TMPBASE="${TMPDIR:-/tmp}"; TMPBASE="${TMPBASE%/}"
 TMP=$(mktemp -d "$TMPBASE/link-test.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
 [ -n "$TMP" ] && [ -d "$TMP" ] || { echo "mktemp produced no directory" >&2; exit 1; }
@@ -348,7 +347,7 @@ else
 fi
 
 # A HOME spelled with a doubled slash (a TMPDIR ending in `/` does this) must work
-# and be idempotent: link.sh squeezes paths so string comparisons are sound.
+# and be idempotent.
 H5b="$TMP//h5b"
 run_link_home "$H5b" "$FIX"
 FIRST=$STATUS
@@ -781,21 +780,51 @@ else
   not_ok "rejects a dot-spelled alias of a repo-claimed target (status=$STATUS): $OUT"
 fi
 
+# GUARD (mutation-tested): a doubled slash is another spelling of a repo-claimed
+# target. Make canon_path return its argument unchanged and this goes red: the
+# alias is planned as a second link and the later one silently wins.
+make_links "$H20" "~/.ai-private/work-rules.md${TAB}~/.claude//CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: target is already planned' && [ ! -e "$H20/.claude" ]; then
+  ok 'rejects a doubled-slash alias of a repo-claimed target'
+else
+  not_ok "rejects a doubled-slash alias of a repo-claimed target (status=$STATUS): $OUT"
+fi
+
+# GUARD (mutation-tested): a symlinked directory inside HOME is yet another
+# spelling. Make canon_path return its argument unchanged and this goes red.
+H20c="$TMP/h20c"; mkdir -p "$H20c/.claude"
+ln -s "$H20c/.claude" "$H20c/alias"
+make_links "$H20c" "~/.ai-private/work-rules.md${TAB}~/alias/CLAUDE.md"
+run_link_home "$H20c" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: target is already planned' && [ ! -e "$H20c/.claude/CLAUDE.md" ]; then
+  ok 'rejects a symlinked-directory alias of a repo-claimed target'
+else
+  not_ok "rejects a symlinked-directory alias of a repo-claimed target (status=$STATUS): $OUT"
+fi
+
 make_links "$H20" "~/.ai-private/work-rules.md${TAB}~/work/CLAUDE.md "
 run_link_home "$H20" "$FIX"
 if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: leading or trailing whitespace'; then
-  ok 'rejects trailing whitespace in a field'
+  ok 'rejects trailing whitespace in the target field'
 else
-  not_ok "rejects trailing whitespace in a field (status=$STATUS): $OUT"
+  not_ok "rejects trailing whitespace in the target field (status=$STATUS): $OUT"
+fi
+make_links "$H20" "~/.ai-private/work-rules.md ${TAB}~/work/CLAUDE.md"
+run_link_home "$H20" "$FIX"
+if [ "$STATUS" = 2 ] && printf '%s' "$OUT" | grep -q 'line 1: leading or trailing whitespace'; then
+  ok 'rejects trailing whitespace in the source field'
+else
+  not_ok "rejects trailing whitespace in the source field (status=$STATUS): $OUT"
 fi
 
 H20b="$TMP/h20b"; mkdir -p "$H20b/.ai-private"; echo "work-rules" > "$H20b/.ai-private/work-rules.md"
-printf '~/.ai-private/work-rules.md\t~/work/CLAUDE.md\r\n' > "$H20b/.ai-private/links.txt"
+printf '# comment\r\n\r\n~/.ai-private/work-rules.md\t~/work/CLAUDE.md\r\n' > "$H20b/.ai-private/links.txt"
 run_link_home "$H20b" "$FIX"
 if [ "$STATUS" = 0 ] && [ -L "$H20b/work/CLAUDE.md" ]; then
-  ok 'accepts a CRLF-terminated line'
+  ok 'accepts a CRLF file including a blank CRLF line'
 else
-  not_ok "accepts a CRLF-terminated line (status=$STATUS): $OUT"
+  not_ok "accepts a CRLF file including a blank CRLF line (status=$STATUS): $OUT"
 fi
 
 make_links "$H20" "~/.ai-private/nope.md${TAB}~/work/CLAUDE.md"
