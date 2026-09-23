@@ -305,14 +305,9 @@ require_managed_worktree() {
   esac
 }
 
-# Runs one git subprocess with ssh set to fail fast rather than hang silently:
-# batch mode (a passphrase or host-key prompt becomes an immediate failure),
-# a bounded connect timeout, and a bounded stall after connect. GIT_SSH_COMMAND
-# is a prefix assignment scoped to this one process — never `export`, which
-# would survive `exec claude` and put these options on every git push in the
-# launched session. The base command follows git's own precedence
-# (GIT_SSH_COMMAND, core.sshCommand, GIT_SSH, else ssh) with the options
-# appended, so a custom ssh command must itself accept OpenSSH -o options.
+# Prefix assignment, never `export`: export would survive `exec claude` and
+# land these options on every later push in that session. Base follows git's
+# own ssh precedence; options are appended, so a custom command must accept OpenSSH -o.
 remote_git() {
   local base
   if [[ -n ${GIT_SSH_COMMAND:-} ]]; then

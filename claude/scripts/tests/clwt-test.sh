@@ -1008,10 +1008,8 @@ exit 255
 STUB
 chmod +x "$SSH_FAIL_DIR/ssh"
 
-# Runs its last argument locally instead of actually connecting anywhere,
-# serving the real upload-pack protocol from $REMOTE over what git believes is
-# an ssh session. ${!#} is the last positional parameter (indirect expansion on
-# $#, bash-specific — fine, this suite already requires bash).
+# Runs its last argument locally instead of connecting anywhere; ${!#} is that
+# last positional parameter.
 SSH_PROXY_DIR="$TMP/ssh-proxy"
 mkdir -p "$SSH_PROXY_DIR"
 cat >"$SSH_PROXY_DIR/ssh" <<'STUB'
@@ -1046,8 +1044,6 @@ fi
 check_contains 'new shows the ssh error when the default-branch lookup fails' \
   'Operation timed out' "$new_unreachable_out"
 
-# The note and the die line are both present; ordering is the point of the next
-# check, this one just pins that the die line reads out loud, not $?.
 check_contains 'new explains why the default-branch lookup failed' \
   'cannot determine the current origin default branch' "$new_unreachable_out"
 
@@ -1070,6 +1066,9 @@ else
   not_ok 'new neither creates a worktree nor launches claude when origin is unreachable'
 fi
 
+# $unreachable_ssh_log only ever holds the ls-remote call — this "new" run dies
+# in default_remote_branch before reaching the fetch; the fetch's own flags are
+# covered separately by the proxy-mode cases below.
 check_contains 'network git calls run ssh in batch mode' \
   '-o BatchMode=yes' "$unreachable_ssh_log"
 check_contains 'network git calls bound the ssh connect time' \
@@ -1151,6 +1150,9 @@ check_contains 'branch blames the fetch, not a missing branch, when origin is un
 # A branch that exists only on $REMOTE and has never been fetched — every other
 # 'branch' fixture for this shape has already been fetched by this point in the
 # suite, which would reuse the tracking ref instead of exercising the fetch.
+# The only case in this file that catches cmd_branch's fetch reverting to plain
+# `git` — the fail-mode branch cases above assert on the die message, not on
+# what ssh was actually invoked with.
 (
   cd "$TMP/seed"
   git checkout -q -b feat/ssh-proxy-branch
@@ -1180,7 +1182,9 @@ fi
 # through PATH, so a real "ssh" is never invoked. $SSH_FAIL_DIR stays prepended
 # to PATH in every case below as a decoy: if the matching fallback were dropped,
 # remote_git would fall through to plain "ssh" and the decoy's `fail:` marker
-# would show up instead of the expected one.
+# would show up instead of the expected one. The three cases above each
+# configure one source at a time; the two below configure two at once and pin
+# which one wins, so the chain's ORDER is covered too, not just presence.
 
 SSH_CORE_STUB="$TMP/ssh-core-stub.sh"
 cat >"$SSH_CORE_STUB" <<'STUB'
@@ -1245,6 +1249,34 @@ if grep -q '^gitssh: .*BatchMode=yes' "$CLWT_TEST_SSH_LOG" && ! grep -q '^fail: 
   ok "network git calls keep a caller's GIT_SSH program"
 else
   not_ok "network git calls keep a caller's GIT_SSH program"
+fi
+
+with_ssh_origin
+(cd "$PRIMARY" && git config core.sshCommand "$SSH_CORE_STUB")
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+GIT_SSH_COMMAND="$SSH_ENV_STUB" PATH="$SSH_FAIL_DIR:$PATH" clwt_in "$PRIMARY" new fix/precedence-env-over-core >/dev/null 2>&1
+(cd "$PRIMARY" && git config --unset core.sshCommand)
+restore_origin
+
+if grep -q '^env: ' "$CLWT_TEST_SSH_LOG" && ! grep -q '^core: ' "$CLWT_TEST_SSH_LOG"; then
+  ok "network git calls prefer a caller's GIT_SSH_COMMAND over core.sshCommand"
+else
+  not_ok "network git calls prefer a caller's GIT_SSH_COMMAND over core.sshCommand"
+fi
+
+with_ssh_origin
+(cd "$PRIMARY" && git config core.sshCommand "$SSH_CORE_STUB")
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+GIT_SSH="$SSH_GITSSH_DIR/ssh" PATH="$SSH_FAIL_DIR:$PATH" clwt_in "$PRIMARY" new fix/precedence-core-over-gitssh >/dev/null 2>&1
+(cd "$PRIMARY" && git config --unset core.sshCommand)
+restore_origin
+
+if grep -q '^core: ' "$CLWT_TEST_SSH_LOG" && ! grep -q '^gitssh: ' "$CLWT_TEST_SSH_LOG"; then
+  ok 'network git calls prefer core.sshCommand over GIT_SSH'
+else
+  not_ok 'network git calls prefer core.sshCommand over GIT_SSH'
 fi
 
 section 'already checked out elsewhere'
