@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "bash ~/.claude/hooks/bash-guard.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
@@ -26,6 +37,10 @@
       "Bash(git push *)",
       "Bash(git merge *)",
       "Bash(gh pr *)",
+      "Bash(bash /Users/sf/.claude/scripts/worktree-status.sh)",
+      "Bash(bash /Users/sf/.claude/scripts/worktree-status.sh --brief)",
+      "Bash(bash /Users/sf/.claude/scripts/wt-status.sh)",
+      "Bash(bash /Users/sf/.claude/scripts/wt-status.sh *)",
       "Bash(bd --version)",
       "Bash(bd version *)",
       "Bash(bd init *)",

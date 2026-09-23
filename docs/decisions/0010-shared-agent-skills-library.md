@@ -7,6 +7,9 @@ Status: Accepted
 Partially supersedes: [ADR 0006](0006-per-harness-config-trees.md) and
 [ADR 0008](0008-pi-global-only-config.md)
 
+Partially superseded by: [ADR 0013](0013-link-config-library.md) (its `agents/install.sh`
+copy installer; the shared skill tree stands)
+
 Tracking: beads epic `ai-config-vrs`
 
 ## Context

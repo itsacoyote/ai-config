@@ -4,6 +4,9 @@ Date: 2026-08-03
 
 Status: Accepted
 
+Partially superseded by: [ADR 0013](0013-link-config-library.md) (its `claude/install.sh`
+copy installer; the global-install-is-canonical position stands)
+
 Tracking: beads epic `ai-config-5d3`
 
 ## Context

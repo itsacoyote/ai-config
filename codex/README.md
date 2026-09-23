@@ -32,37 +32,20 @@ Rules:
 - If the target already has `.agents/skills/<name>/` directories, merge or rename per
   skill rather than overwriting.
 
-## Or install the skills once, personally
+## Or link the skills once, personally
 
-Codex also discovers skills in `~/.agents/skills` across every project:
-
-```sh
-agents/install.sh
-agents/install.sh --dry-run
-```
-
-Run the installer yourself from the repository checkout. It additively creates or updates
-the shared skill files and reports personal paths it leaves untouched.
-
-The shared-skills installer never handles `AGENTS.md`, `~/.codex`, or Pi configuration.
-Project and personal instructions remain manually managed; `codex/install.sh` is the
-separate human-run installer for the command rules documented below.
+Codex also discovers skills in `~/.agents/skills` across every project. The repo's human-run
+`link.sh` (see the [root README](../README.md#installing-the-library)) symlinks every shared
+skill there, links `agents/AGENTS.md` as `~/.codex/AGENTS.md`, and links the command rules
+below into `~/.codex/rules/`. It never touches `~/.codex/config.toml` or auth files.
 
 ## Command approval rules
 
 Codex uses .rules files for command-specific approval decisions. This repository carries
-an additive rules file containing the approved workflow commands translated from the Claude
-allowlist:
-
-~~~bash
-codex/install.sh
-codex/install.sh --dry-run
-~~~
-
-The installer writes only ~/.codex/rules/ai-config.rules. It does not overwrite
-~/.codex/config.toml, ~/.codex/AGENTS.md, or ~/.codex/rules/default.rules, and it
-refuses symlinked destinations. Restart Codex after installing rules. The rules feature is
-experimental in Codex; inspect a rule with:
+an additive rules file, `codex/rules/ai-config.rules`, containing the approved workflow
+commands translated from the Claude allowlist. `link.sh` symlinks it into
+`~/.codex/rules/`, next to Codex's own `default.rules`, which is left alone. Restart Codex
+after linking. The rules feature is experimental in Codex; inspect a rule with:
 
 ~~~bash
 codex execpolicy check --pretty \

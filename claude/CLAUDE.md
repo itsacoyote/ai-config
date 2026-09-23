@@ -1,9 +1,3 @@
-> **Repository source note — not part of the installed preferences.** This is a
-> manually maintained personal template, not library-installer input. While working in
-> this repository, follow the [root maintenance guidance](../AGENTS.md); the personal
-> instructions below are source material, not additional repository-maintenance rules.
-> When manually merging preferences into your global user file, omit this note.
-
 # CLAUDE.md — global user preferences
 
 These preferences apply across all my projects. Project-level `CLAUDE.md` files may add to or tighten them.
@@ -100,7 +94,7 @@ My OS sandbox auto-approves *simple* commands but prompts on anything it can't s
 
 - **Prefer simple, single-purpose commands over long chains.** Don't stitch `cd … && … ; …` together. A command containing **command substitution (`$(…)`, backticks)** is harder for the sandbox to verify and may require approval. Run the pieces as separate commands instead.
 - **Don't reach across directories with git at all** — no `git -C <path>`, no `cd <path> && git …`. Plain `git` against the session's own cwd is the rule; the session starts inside the right worktree (`clwt` exists for exactly this), so cross-directory git means something has gone wrong upstream. For cross-worktree *status*, use the `/reground` skill or the installed `worktree-status.sh` helper described below — read-only scripts, not ad-hoc `git -C` calls.
-- **For orientation/status, use a script, not a hand-rolled one-liner.** Run `/reground`, or `bash /Users/sf/.claude/scripts/worktree-status.sh` from the session's worktree. The helper reports current worktree, branch, clean/dirty state, and other worktrees. It accepts only the optional `--brief` flag, not a path argument. Use the absolute installed path, not `~`, for approval-rule matching; do not assume approval rules are already installed.
+- **For orientation/status, use a script, not a hand-rolled one-liner.** Run `/reground`, or `bash /Users/sf/.claude/scripts/worktree-status.sh` from the session's worktree. The helper reports current worktree, branch, clean/dirty state, and other worktrees. It accepts only the optional `--brief` flag, not a path argument. For a snapshot of a *different* worktree (branch, head, status, rebase in progress), use `bash /Users/sf/.claude/scripts/wt-status.sh <path>`. Use the absolute installed path, not `~`, for approval-rule matching; do not assume approval rules are already installed.
 
 ## Git commit messages (all repos)
 
