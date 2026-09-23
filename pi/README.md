@@ -25,13 +25,13 @@ your shell, not from inside an active Pi session: launching commands change dire
 and replace the current process with a new Pi session.
 
 **Prerequisites:** stock macOS Bash 3.2 or newer and Git. Authenticated `gh` is required
-only for `pwt pr` and `pwt prune`. The repository must have an `origin` remote. Network
-steps over an SSH remote run ssh in batch mode with a connect timeout, so an unreachable
-remote fails with git's own error instead of hanging; batch mode also means ssh cannot
-ask for a key passphrase or accept a new host key, so load your key with `ssh-add` and
-connect once with plain `ssh` first. A custom ssh command (`GIT_SSH_COMMAND` /
-`core.sshCommand` / `GIT_SSH`) must accept OpenSSH `-o` options, since pwt appends its
-own after it.
+only for `pwt pr` and `pwt prune`. The repository must have an `origin` remote. The network
+steps of `pwt new` and `pwt branch` over an SSH remote run ssh in batch mode with a connect
+timeout, so an unreachable remote fails with git's own error instead of hanging; batch mode
+also means ssh cannot ask for a key passphrase or accept a new host key, so load your key
+with `ssh-add` and connect once with plain `ssh` first. A custom ssh command
+(`GIT_SSH_COMMAND` / `core.sshCommand` / `GIT_SSH`) must accept OpenSSH `-o` options, since
+pwt appends its own after it.
 
 Install the command and Bash completion from this repository's root:
 
