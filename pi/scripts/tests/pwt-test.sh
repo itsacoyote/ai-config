@@ -2061,6 +2061,27 @@ else
   not_ok 'network git calls keep a configured core.sshCommand'
 fi
 
+# cwd equals $PRIMARY in every case above, so a bare `git config` (no `-C`)
+# would happen to read the right repository anyway. Run from a non-git
+# directory with PWT_REPO_ROOT pointing at $PRIMARY instead — the only case
+# that catches the core.sshCommand lookup losing `-C "$primary"`.
+CORE_FROM_OUTSIDE="$TMP/core-from-outside"
+mkdir -p "$CORE_FROM_OUTSIDE"
+
+with_ssh_origin
+git -C "$PRIMARY" config core.sshCommand "$SSH_CORE_STUB"
+launch_reset
+: >"$PWT_TEST_SSH_LOG"
+(cd "$CORE_FROM_OUTSIDE" && PATH="$SSH_FAIL_DIR:$PATH" PWT_REPO_ROOT="$PRIMARY" "$PWT" new fix/core-from-outside) >/dev/null 2>&1
+git -C "$PRIMARY" config --unset core.sshCommand
+restore_origin
+
+if grep -q '^core: .*BatchMode=yes' "$PWT_TEST_SSH_LOG" && ! grep -q '^fail: ' "$PWT_TEST_SSH_LOG"; then
+  ok 'network git calls read core.sshCommand from the primary checkout when run outside git'
+else
+  not_ok 'network git calls read core.sshCommand from the primary checkout when run outside git'
+fi
+
 SSH_ENV_STUB="$TMP/ssh-env-stub.sh"
 cat >"$SSH_ENV_STUB" <<'STUB'
 #!/usr/bin/env bash
