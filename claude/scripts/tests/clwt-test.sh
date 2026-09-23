@@ -86,6 +86,10 @@ export GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n' \
   >"$GIT_CONFIG_GLOBAL"
 
+# A caller's own ssh configuration must never leak into what the ssh-transport
+# cases below observe — each one sets what it needs on the one call under test.
+unset GIT_SSH_COMMAND GIT_SSH GIT_SSH_VARIANT
+
 # HOME is deliberately left UNRESOLVED here. Pre-resolving it hid a real bug:
 # managed_root was built from a raw $HOME while every path compared against it was
 # pwd -P'd, so on a symlinked home clwt disowned the worktrees it had just made.
@@ -120,6 +124,7 @@ cat >"$BIN/claude" <<'STUB'
 {
   printf 'pwd=%s\n' "$PWD"
   printf 'CLWT_REPO_ROOT=%s\n' "${CLWT_REPO_ROOT-<unset>}"
+  printf 'GIT_SSH_COMMAND=%s\n' "${GIT_SSH_COMMAND-<unset>}"
   printf 'args=%s\n' "$*"
 } >>"$CLWT_TEST_LOG"
 STUB
@@ -981,6 +986,266 @@ check_output 'branch names the branch it could not find' \
   'feat/nonexistent' clwt branch feat/nonexistent
 check_fails 'branch requires a branch argument' clwt branch
 check_fails 'branch rejects an invalid branch name' clwt branch 'feat/a b'
+
+section 'network git calls over ssh'
+
+# Every fixture so far uses a file-path remote, which never invokes ssh. These
+# cases point origin at an ssh:// URL for one probe and restore it afterwards —
+# $REMOTE stays the origin for every other section in this suite.
+CLWT_TEST_SSH_LOG="$TMP/ssh.log"
+: >"$CLWT_TEST_SSH_LOG"
+export CLWT_TEST_SSH_LOG
+
+# Fails at once with ssh's own timeout wording, the same shape a real unreachable
+# host produces under BatchMode — deterministic and fast, no real network wait.
+SSH_FAIL_DIR="$TMP/ssh-fail"
+mkdir -p "$SSH_FAIL_DIR"
+cat >"$SSH_FAIL_DIR/ssh" <<'STUB'
+#!/usr/bin/env bash
+printf 'fail: %s\n' "$*" >>"$CLWT_TEST_SSH_LOG"
+echo 'ssh: connect to host stub.invalid port 22: Operation timed out' >&2
+exit 255
+STUB
+chmod +x "$SSH_FAIL_DIR/ssh"
+
+# Runs its last argument locally instead of actually connecting anywhere,
+# serving the real upload-pack protocol from $REMOTE over what git believes is
+# an ssh session. ${!#} is the last positional parameter (indirect expansion on
+# $#, bash-specific — fine, this suite already requires bash).
+SSH_PROXY_DIR="$TMP/ssh-proxy"
+mkdir -p "$SSH_PROXY_DIR"
+cat >"$SSH_PROXY_DIR/ssh" <<'STUB'
+#!/usr/bin/env bash
+printf 'proxy: %s\n' "$*" >>"$CLWT_TEST_SSH_LOG"
+exec sh -c "${!#}"
+STUB
+chmod +x "$SSH_PROXY_DIR/ssh"
+
+# Absolute fixture path, so owner/repo parsing behaves exactly as it does for
+# every other case in this suite.
+SSH_ORIGIN="ssh://git@stub.invalid$REMOTE"
+with_ssh_origin() { (cd "$PRIMARY" && git remote set-url origin "$SSH_ORIGIN"); }
+restore_origin() { (cd "$PRIMARY" && git remote set-url origin "$REMOTE"); }
+
+# --- new: origin unreachable over ssh (spec AC1) ---------------------------
+
+with_ssh_origin
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+new_unreachable_out=$(PATH="$SSH_FAIL_DIR:$PATH" clwt_in "$PRIMARY" new fix/ssh-unreachable-new 2>&1)
+new_unreachable_rc=$?
+unreachable_ssh_log=$(cat "$CLWT_TEST_SSH_LOG")
+restore_origin
+
+if [ "$new_unreachable_rc" -ne 0 ]; then
+  ok 'new fails when origin is unreachable over ssh'
+else
+  not_ok 'new fails when origin is unreachable over ssh'
+fi
+
+check_contains 'new shows the ssh error when the default-branch lookup fails' \
+  'Operation timed out' "$new_unreachable_out"
+
+# The note and the die line are both present; ordering is the point of the next
+# check, this one just pins that the die line reads out loud, not $?.
+check_contains 'new explains why the default-branch lookup failed' \
+  'cannot determine the current origin default branch' "$new_unreachable_out"
+
+# Catches the note being dropped, or moved inside default_remote_branch where
+# `note`'s stdout would be captured into $base instead of printed. Position, not
+# just presence, is the assertion: printed line numbers within the SAME captured
+# stream preserve real chronological order here (stdout and stderr share one fd
+# after 2>&1).
+note_line=$(printf '%s\n' "$new_unreachable_out" | grep -n "resolving origin's default branch" | head -1 | cut -d: -f1)
+error_line=$(printf '%s\n' "$new_unreachable_out" | grep -n 'Operation timed out' | head -1 | cut -d: -f1)
+if [ -n "$note_line" ] && [ -n "$error_line" ] && [ "$note_line" -lt "$error_line" ]; then
+  ok 'new names the default-branch lookup before it runs'
+else
+  not_ok 'new names the default-branch lookup before it runs'
+fi
+
+if [ ! -e "$MANAGED/fix-ssh-unreachable-new" ] && [ -z "$(launched pwd)" ]; then
+  ok 'new neither creates a worktree nor launches claude when origin is unreachable'
+else
+  not_ok 'new neither creates a worktree nor launches claude when origin is unreachable'
+fi
+
+check_contains 'network git calls run ssh in batch mode' \
+  '-o BatchMode=yes' "$unreachable_ssh_log"
+check_contains 'network git calls bound the ssh connect time' \
+  '-o ConnectTimeout=10' "$unreachable_ssh_log"
+if printf '%s' "$unreachable_ssh_log" | grep -qF -- '-o ServerAliveInterval=15' &&
+  printf '%s' "$unreachable_ssh_log" | grep -qF -- '-o ServerAliveCountMax=2'; then
+  ok 'network git calls bound a stalled ssh session'
+else
+  not_ok 'network git calls bound a stalled ssh session'
+fi
+
+# --- new: ls-remote fails despite printing a valid ref ----------------------
+#
+# The empty-ref check alone cannot catch this: ref is non-empty. Only the
+# explicit `if ! ref=$(...)` exit check does. Plain origin (no ssh) — this pins
+# the exit-status handling, not the ssh plumbing.
+FAILGIT_LSREMOTE="$TMP/failgit-lsremote"
+mkdir -p "$FAILGIT_LSREMOTE"
+cat >"$FAILGIT_LSREMOTE/git" <<STUB
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = "ls-remote" ]; then
+    printf 'ref: refs/heads/main\tHEAD\n'
+    exit 128
+  fi
+done
+exec $(command -v git) "\$@"
+STUB
+chmod +x "$FAILGIT_LSREMOTE/git"
+
+launch_reset
+lsremote_out=$(PATH="$FAILGIT_LSREMOTE:$PATH" clwt_in "$PRIMARY" new fix/lsremote-fails 2>&1)
+lsremote_rc=$?
+if [ "$lsremote_rc" -ne 0 ] && printf '%s' "$lsremote_out" | grep -qF 'cannot determine the current origin default branch'; then
+  ok 'new refuses a default branch from a failed ls-remote'
+else
+  not_ok 'new refuses a default branch from a failed ls-remote'
+fi
+check 'no worktree is created when ls-remote exits non-zero despite valid output' \
+  test ! -e "$MANAGED/fix-lsremote-fails"
+
+# --- new: happy path over ssh ------------------------------------------------
+
+with_ssh_origin
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+PATH="$SSH_PROXY_DIR:$PATH" clwt_in "$PRIMARY" new fix/ssh-over-ssh-new >/dev/null 2>&1
+restore_origin
+
+check_equals 'new over ssh creates the worktree and launches claude' \
+  "$MANAGED/fix-ssh-over-ssh-new" "$(launched pwd)"
+check_equals 'batch-mode ssh settings do not reach the launched claude session' \
+  '<unset>' "$(launched GIT_SSH_COMMAND)"
+
+proxy_lines=$(grep -c '^proxy: ' "$CLWT_TEST_SSH_LOG")
+proxy_batch_lines=$(grep -c '^proxy: .*BatchMode=yes' "$CLWT_TEST_SSH_LOG")
+if [ "$proxy_lines" -eq 2 ] && [ "$proxy_batch_lines" -eq 2 ]; then
+  ok 'new over ssh runs both the lookup and the fetch through batch-mode ssh'
+else
+  not_ok "new over ssh runs both the lookup and the fetch through batch-mode ssh (calls: $proxy_lines, batch: $proxy_batch_lines)"
+fi
+
+# --- branch: origin unreachable over ssh ------------------------------------
+
+with_ssh_origin
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+branch_fail_out=$(PATH="$SSH_FAIL_DIR:$PATH" clwt_in "$PRIMARY" branch feat/ssh-unreachable-branch 2>&1)
+restore_origin
+
+check_contains 'branch shows the ssh error when fetching origin fails' \
+  'Operation timed out' "$branch_fail_out"
+check_contains 'branch blames the fetch, not a missing branch, when origin is unreachable' \
+  'could not fetch origin/feat/ssh-unreachable-branch: not on origin, or origin unreachable' \
+  "$branch_fail_out"
+
+# --- branch: happy path over ssh --------------------------------------------
+#
+# A branch that exists only on $REMOTE and has never been fetched — every other
+# 'branch' fixture for this shape has already been fetched by this point in the
+# suite, which would reuse the tracking ref instead of exercising the fetch.
+(
+  cd "$TMP/seed"
+  git checkout -q -b feat/ssh-proxy-branch
+  printf 'ssh proxy\n' >ssh-proxy.txt
+  git add ssh-proxy.txt
+  git commit -qm 'ssh proxy branch fixture'
+  git push -q origin feat/ssh-proxy-branch
+)
+
+with_ssh_origin
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+PATH="$SSH_PROXY_DIR:$PATH" clwt_in "$PRIMARY" branch feat/ssh-proxy-branch >/dev/null 2>&1
+restore_origin
+
+check 'branch over ssh creates the worktree' \
+  test -f "$MANAGED/feat-ssh-proxy-branch/ssh-proxy.txt"
+if grep -q '^proxy: .*BatchMode=yes' "$CLWT_TEST_SSH_LOG"; then
+  ok 'branch over ssh fetches through batch-mode ssh'
+else
+  not_ok 'branch over ssh fetches through batch-mode ssh'
+fi
+
+# --- base command precedence: GIT_SSH_COMMAND, core.sshCommand, GIT_SSH ----
+#
+# Each stub fails at once and is referenced directly (by full path), never
+# through PATH, so a real "ssh" is never invoked. $SSH_FAIL_DIR stays prepended
+# to PATH in every case below as a decoy: if the matching fallback were dropped,
+# remote_git would fall through to plain "ssh" and the decoy's `fail:` marker
+# would show up instead of the expected one.
+
+SSH_CORE_STUB="$TMP/ssh-core-stub.sh"
+cat >"$SSH_CORE_STUB" <<'STUB'
+#!/usr/bin/env bash
+printf 'core: %s\n' "$*" >>"$CLWT_TEST_SSH_LOG"
+exit 255
+STUB
+chmod +x "$SSH_CORE_STUB"
+
+with_ssh_origin
+(cd "$PRIMARY" && git config core.sshCommand "$SSH_CORE_STUB")
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+PATH="$SSH_FAIL_DIR:$PATH" clwt_in "$PRIMARY" new fix/core-sshcommand >/dev/null 2>&1
+(cd "$PRIMARY" && git config --unset core.sshCommand)
+restore_origin
+
+if grep -q '^core: .*BatchMode=yes' "$CLWT_TEST_SSH_LOG" && ! grep -q '^fail: ' "$CLWT_TEST_SSH_LOG"; then
+  ok 'network git calls keep a configured core.sshCommand'
+else
+  not_ok 'network git calls keep a configured core.sshCommand'
+fi
+
+SSH_ENV_STUB="$TMP/ssh-env-stub.sh"
+cat >"$SSH_ENV_STUB" <<'STUB'
+#!/usr/bin/env bash
+printf 'env: %s\n' "$*" >>"$CLWT_TEST_SSH_LOG"
+exit 255
+STUB
+chmod +x "$SSH_ENV_STUB"
+
+with_ssh_origin
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+GIT_SSH_COMMAND="$SSH_ENV_STUB" PATH="$SSH_FAIL_DIR:$PATH" clwt_in "$PRIMARY" new fix/env-sshcommand >/dev/null 2>&1
+restore_origin
+
+if grep -q '^env: .*BatchMode=yes' "$CLWT_TEST_SSH_LOG" && ! grep -q '^fail: ' "$CLWT_TEST_SSH_LOG"; then
+  ok "network git calls keep a caller's GIT_SSH_COMMAND"
+else
+  not_ok "network git calls keep a caller's GIT_SSH_COMMAND"
+fi
+
+# Directory name deliberately contains a space: this is what pins printf %q —
+# without it, GIT_SSH_COMMAND's shell parsing would split the path in two.
+SSH_GITSSH_DIR="$TMP/gitssh with space"
+mkdir -p "$SSH_GITSSH_DIR"
+cat >"$SSH_GITSSH_DIR/ssh" <<'STUB'
+#!/usr/bin/env bash
+printf 'gitssh: %s\n' "$*" >>"$CLWT_TEST_SSH_LOG"
+exit 255
+STUB
+chmod +x "$SSH_GITSSH_DIR/ssh"
+
+with_ssh_origin
+launch_reset
+: >"$CLWT_TEST_SSH_LOG"
+GIT_SSH="$SSH_GITSSH_DIR/ssh" PATH="$SSH_FAIL_DIR:$PATH" clwt_in "$PRIMARY" new fix/gitssh-var >/dev/null 2>&1
+restore_origin
+
+if grep -q '^gitssh: .*BatchMode=yes' "$CLWT_TEST_SSH_LOG" && ! grep -q '^fail: ' "$CLWT_TEST_SSH_LOG"; then
+  ok "network git calls keep a caller's GIT_SSH program"
+else
+  not_ok "network git calls keep a caller's GIT_SSH program"
+fi
 
 section 'already checked out elsewhere'
 
