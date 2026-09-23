@@ -1057,7 +1057,7 @@ SSH_ORIGIN="ssh://git@stub.invalid$REMOTE"
 with_ssh_origin() { (cd "$PRIMARY" && git remote set-url origin "$SSH_ORIGIN"); }
 restore_origin() { (cd "$PRIMARY" && git remote set-url origin "$REMOTE"); }
 
-# --- new: origin unreachable over ssh (spec AC1) ---------------------------
+# --- new: origin unreachable over ssh ------------------------------------
 
 with_ssh_origin
 launch_reset
