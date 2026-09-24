@@ -809,7 +809,6 @@ case $root_env in
   *.git) not_ok 'the exported CLWT_REPO_ROOT does not end in .git' ;;
   *) ok 'the exported CLWT_REPO_ROOT does not end in .git' ;;
 esac
-check_equals 'root passes only its session name by default' '--name main' "$(launched args)"
 check_equals "root names the session after the primary checkout's branch" \
   '--name main' "$(launched args)"
 check_equals 'root passes the name as two separate arguments' '2' "$(launched argc)"
@@ -844,8 +843,6 @@ clwt root -- --model opus >/dev/null 2>&1
 check_equals 'arguments after -- are passed through to claude' \
   '--name main --model opus' "$(launched args)"
 
-# claude takes the LAST --name it sees, so a developer's own --name after --
-# wins over the script's by position — clwt does not need to detect it.
 launch_reset
 clwt root --yolo -- --name custom >/dev/null 2>&1
 check_equals "a developer --name after -- comes after the script's --name" \
@@ -856,9 +853,8 @@ clwt root -- --continue >/dev/null 2>&1
 check_equals 'root still passes --name when resuming with --continue' \
   '--name main --continue' "$(launched args)"
 
-# A detached HEAD (or a mid-rebase primary) has no branch to name the session
-# after; root must still launch, just without --name. Restored to `main`
-# immediately afterward — every later section assumes the primary sits on main.
+# Restored to `main` immediately afterward — every later section assumes the
+# primary sits on main.
 launch_reset
 git -c advice.detachedHead=false -C "$PRIMARY" checkout -q --detach HEAD
 clwt root >/dev/null 2>&1
