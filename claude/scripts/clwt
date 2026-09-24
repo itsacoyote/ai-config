@@ -75,6 +75,11 @@ branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
 
+Every launching subcommand passes --name to claude, naming the session: `pr <n>` becomes
+`PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the
+primary checkout's current branch, or no name on a detached HEAD. A developer's own
+`--name`/`-n` after `--` overrides it, since claude takes the last value it sees.
+
 Arguments after `--` are passed through to `claude`.
 EOF
 }

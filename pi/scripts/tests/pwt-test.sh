@@ -1196,6 +1196,9 @@ help_text=$(pwt help 2>/dev/null)
 check_equals 'pwt --help prints the same usage as pwt help' "$help_text" "$(pwt --help 2>/dev/null)"
 check_equals 'pwt -h prints the same usage as pwt help' "$help_text" "$(pwt -h 2>/dev/null)"
 check_not_contains 'pwt help omits yolo mode' 'yolo' "$help_text"
+# A phrase from the naming paragraph, not the bare --name flag: the synopsis
+# lines alone would keep this green with the whole paragraph deleted.
+check_output 'help documents session naming' 'naming the session' pwt help
 check_output 'an unknown subcommand is reported as unknown' \
   'unknown command' pwt definitely-not-a-command
 check_fails 'an unknown subcommand exits non-zero' pwt definitely-not-a-command

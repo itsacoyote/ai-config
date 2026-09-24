@@ -2065,6 +2065,10 @@ check_fails 'root rejects --force as an unknown option' clwt root --force
 check_output 'help documents --force' 'resetting a leftover' clwt help
 check_output 'help documents the no-flag auto-reset' 'provably contained' clwt help
 
+# A phrase from the naming paragraph, not the bare --name flag: the synopsis
+# lines alone would keep this green with the whole paragraph deleted.
+check_output 'help documents session naming' 'naming the session' clwt help
+
 section 'pr reused worktree refresh safety'
 
 pr_marker() {
@@ -3110,6 +3114,8 @@ check 'the README documents the managed root layout' \
   grep -qF '.worktrees' "$README"
 check 'the README documents CLWT_REPO_ROOT' grep -qF 'CLWT_REPO_ROOT' "$README"
 check 'the README documents the --yolo shorthand' grep -qF -- '--yolo' "$README"
+check 'the README documents clwt session naming' \
+  grep -qF 'naming the session' "$README"
 check 'the README says what --yolo bypasses' \
   grep -qF -- '--dangerously-skip-permissions' "$README"
 check 'the README documents the pr --force flag' grep -qF -- '--force' "$README"
