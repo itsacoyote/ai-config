@@ -75,6 +75,12 @@ branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
 
+Every launching subcommand passes --name to claude, naming the session: `pr <n>` becomes
+`PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the
+primary checkout's current branch, also with slashes as dashes, or no name on a
+detached HEAD. A developer's own `--name`/`-n` after `--` overrides it, since claude
+takes the last value it sees.
+
 Arguments after `--` are passed through to `claude`.
 EOF
 }
@@ -184,6 +190,7 @@ parse_launch_args() {
   LAUNCH_YOLO=0
   LAUNCH_ARGS=()
   LAUNCH_POSITIONAL=()
+  LAUNCH_NAME=''
   while [[ $# -gt 0 ]]; do
     case $1 in
       --)
@@ -223,6 +230,11 @@ launch() {
 
   command -v claude >/dev/null 2>&1 || die 'claude not found on PATH'
 
+  # Placed first so a developer's own `-- --name X` wins by position: claude
+  # takes the last `--name` it sees, and LAUNCH_ARGS is appended after this.
+  if [[ -n ${LAUNCH_NAME-} ]]; then
+    argv+=(--name "$LAUNCH_NAME")
+  fi
   if ((LAUNCH_YOLO)); then
     argv+=(--dangerously-skip-permissions)
   fi
@@ -946,6 +958,13 @@ remove_worktree() {
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
+  # A detached HEAD or a mid-rebase primary has no branch to name the session
+  # after — leave LAUNCH_NAME empty rather than dying, since launching in the
+  # primary checkout must still work in that state.
+  local branch
+  if branch=$(git -C "$primary" symbolic-ref --quiet --short HEAD 2>/dev/null); then
+    LAUNCH_NAME=$(worktree_name_for_branch "$branch")
+  fi
   launch "$primary"
 }
 
@@ -1105,6 +1124,10 @@ cmd_pr() {
   case $number in
     '' | *[!0-9]*) die "pull request must be a number: $number" ;;
   esac
+  # Named from the validated PR NUMBER, never from head_ref or the worktree
+  # directory name below — both describe the fork's own head branch, so a
+  # hostile PR could otherwise choose its own session name.
+  LAUNCH_NAME="PR-$number"
 
   require_gh pr
 
@@ -1288,12 +1311,15 @@ cmd_branch() {
 
   local branch=${LAUNCH_POSITIONAL[0]} existing name target
   validate_branch "$branch"
+  name=$(worktree_name_for_branch "$branch")
+  # Set before the reuse early-return so the reused-worktree path and the
+  # fresh-worktree path below both launch under the same name.
+  LAUNCH_NAME=$name
 
   if existing=$(branch_worktree "$branch"); then
     reuse_or_refuse "$branch" "$existing"
   fi
 
-  name=$(worktree_name_for_branch "$branch")
   validate_worktree_name "$name"
   target="$managed_root/$name"
   ensure_available_path "$target"
@@ -1323,6 +1349,8 @@ cmd_new() {
   validate_branch "$branch"
   [[ $branch == */* ]] ||
     die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
+  name=$(worktree_name_for_branch "$branch")
+  LAUNCH_NAME=$name
 
   if existing=$(branch_worktree "$branch"); then
     reuse_or_refuse "$branch" "$existing"
@@ -1332,7 +1360,6 @@ cmd_new() {
     die "local branch already exists but is not checked out: $branch (use 'clwt branch $branch')"
   fi
 
-  name=$(worktree_name_for_branch "$branch")
   validate_worktree_name "$name"
   target="$managed_root/$name"
   ensure_available_path "$target"
@@ -1357,6 +1384,7 @@ cmd_open() {
 
   local branch=${LAUNCH_POSITIONAL[0]} target
   validate_branch "$branch"
+  LAUNCH_NAME=$(worktree_name_for_branch "$branch")
   target=$(branch_worktree "$branch") ||
     die "no worktree checked out for branch: $branch"
   require_managed_worktree "$target"

@@ -73,6 +73,15 @@ branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
 
+Every launching subcommand passes --name to pi, naming the session: `pr <n>` becomes
+`PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the
+primary checkout's current branch, also with slashes as dashes, or no name on a
+detached HEAD. A developer's own override must use the two-token form, `--name X`
+or `-n X` — pi silently ignores `--name=X`. No name is added when the first argument
+after `--` is a pi command word (auth, install, remove, uninstall, update, list,
+config), so that command still runs; `pwt pr`'s enforced tool/trust suffix still
+comes last.
+
 Arguments after `--` are passed through to `pi` unchanged.
 EOF
 }
@@ -232,6 +241,7 @@ require_repo() {
 parse_launch_args() {
   LAUNCH_ARGS=()
   LAUNCH_POSITIONAL=()
+  LAUNCH_NAME=''
   while [[ $# -gt 0 ]]; do
     case $1 in
       --)
@@ -254,6 +264,16 @@ parse_launch_args() {
   done
 }
 
+# Pi recognises these words as its own commands only when in args[0]; anywhere
+# else they are an ordinary prompt. Shared so the launch-time --name skip and
+# the pr command block agree on one list.
+is_pi_command() {
+  case ${1-} in
+    auth | install | remove | uninstall | update | list | config) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # PR sessions keep context-file discovery, but must not let forwarded Pi
 # options replace the tool/trust policy, load executable extensions, or resume
 # a session whose stored cwd escapes the selected worktree. Validate first so
@@ -263,11 +283,9 @@ validate_pr_launch_args() {
 
   # Pi handles these commands before it creates the restricted agent session.
   # Some can print credentials, modify package configuration, or self-update.
-  case ${LAUNCH_ARGS[0]-} in
-    auth | install | remove | uninstall | update | list | config)
-      die "pwt pr does not allow Pi command: ${LAUNCH_ARGS[0]}"
-      ;;
-  esac
+  if is_pi_command "${LAUNCH_ARGS[0]-}"; then
+    die "pwt pr does not allow Pi command: ${LAUNCH_ARGS[0]}"
+  fi
 
   while ((index < count)); do
     arg=${LAUNCH_ARGS[$index]}
@@ -348,6 +366,17 @@ launch() {
 
   cd -P "$target" || die "cannot enter directory: $target"
   export PWT_REPO_ROOT="$primary"
+
+  # Prepended so a developer's own `-- --name X` / `-n X` wins by position
+  # (Pi takes the last --name) and launch_pr's enforced suffix stays last.
+  # Skipped for a Pi command, which Pi only recognises as args[0].
+  if [[ -n ${LAUNCH_NAME-} ]] && ! is_pi_command "${LAUNCH_ARGS[0]-}"; then
+    if ((${#LAUNCH_ARGS[@]})); then
+      LAUNCH_ARGS=(--name "$LAUNCH_NAME" "${LAUNCH_ARGS[@]}")
+    else
+      LAUNCH_ARGS=(--name "$LAUNCH_NAME")
+    fi
+  fi
 
   note "launching pi in $target"
   if ((${#LAUNCH_ARGS[@]})); then
@@ -1402,6 +1431,12 @@ worktree_path_is_managed() {
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
+  # A detached HEAD has no branch to name the session after; launching in the
+  # primary checkout must still work, so leave LAUNCH_NAME empty rather than die.
+  local branch
+  if branch=$(git -C "$primary" symbolic-ref --quiet --short HEAD 2>/dev/null); then
+    LAUNCH_NAME=$(worktree_name_for_branch "$branch")
+  fi
   launch "$primary"
 }
 
@@ -1413,6 +1448,10 @@ cmd_new() {
   validate_branch "$branch"
   [[ $branch == */* ]] ||
     die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
+  name=$(worktree_name_for_branch "$branch")
+  # Set before the reuse early-return so the reused-worktree path and the
+  # fresh-worktree path below both launch under the same name.
+  LAUNCH_NAME=$name
 
   if existing=$(branch_worktree "$branch"); then
     reuse_or_refuse "$branch" "$existing"
@@ -1427,7 +1466,6 @@ cmd_new() {
     ((status == 1)) || die "cannot inspect local branch: $branch"
   fi
 
-  name=$(worktree_name_for_branch "$branch")
   validate_worktree_name "$name"
   target="$managed_root/$name"
   ensure_available_path "$target"
@@ -1458,6 +1496,8 @@ cmd_branch() {
 
   local branch=${LAUNCH_POSITIONAL[0]} existing name target status
   validate_branch "$branch"
+  name=$(worktree_name_for_branch "$branch")
+  LAUNCH_NAME=$name
 
   if existing=$(branch_worktree "$branch"); then
     reuse_or_refuse "$branch" "$existing"
@@ -1466,7 +1506,6 @@ cmd_branch() {
     ((status == 1)) || die 'cannot list repository worktrees'
   fi
 
-  name=$(worktree_name_for_branch "$branch")
   validate_worktree_name "$name"
   target="$managed_root/$name"
   ensure_available_path "$target"
@@ -1531,6 +1570,10 @@ cmd_pr() {
   local branch_existed=0 auto_force=0 hint=''
   valid_pr_number "$number" ||
     die "pull request must be a number: $number"
+  # Named from the validated PR NUMBER, never from head_ref or the worktree
+  # directory name below — both describe the fork's own head branch, so a
+  # hostile PR could otherwise choose its own session name.
+  LAUNCH_NAME="PR-$number"
   validate_pr_launch_args
   validate_pr_path
 
@@ -1936,6 +1979,7 @@ cmd_open() {
 
   local branch=${LAUNCH_POSITIONAL[0]} target status
   validate_branch "$branch"
+  LAUNCH_NAME=$(worktree_name_for_branch "$branch")
   if target=$(branch_worktree "$branch"); then
     :
   else

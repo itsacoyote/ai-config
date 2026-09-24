@@ -256,6 +256,11 @@ An older markerless PR worktree can migrate only when its native Git tracking ma
 and the update is a fast-forward; rewritten history is refused because no last-verified head
 exists yet.
 
+Every launching subcommand also passes `--name` to `claude`, naming the session after the PR
+number (`PR-<n>`), the branch, or the primary checkout's current branch for `root` — branch
+names with slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it,
+since `claude` takes the last value it sees.
+
 ### Why it's a CLI and not a skill
 
 `claude` has no "start in directory" flag — it inherits its working directory from
@@ -302,7 +307,8 @@ Exits non-zero on any failure.
 `codex/scripts/cwt` is an independent Codex port of `clwt`. It preserves the same ten
 commands and the shared `~/github/.worktrees/<owner>/<repo>/` managed root, but launches
 Codex, exports `CWT_REPO_ROOT`, and passes Codex's native `--yolo` flag. Run its launching
-commands from your shell, not from inside an active Codex session.
+commands from your shell, not from inside an active Codex session. Unlike `clwt` and `pwt`,
+`cwt` does not name sessions: Codex has no launch-time session-name option.
 
 ```bash
 codex/scripts/cwt install
@@ -323,6 +329,12 @@ Pi. Run its launching commands from your shell, not from inside an active Pi ses
 Pi has no yolo mode. For pull requests, `pwt` keeps context-file discovery but disables
 extensions and restricts the model to the `read`, `grep`, `find`, and `ls` tools without
 project approval. This is a Pi tool boundary for trusted PRs, not an OS sandbox.
+
+Every launching subcommand also passes `--name` to `pi`, the same way `clwt` does. An
+override must use the two-token form, `--name X` or `-n X` — Pi silently ignores
+`--name=X` — and `pwt` adds no name when the first argument after `--` is a Pi command
+word (`auth`, `install`, `remove`, `uninstall`, `update`, `list`, `config`), so that
+command still runs.
 
 ```bash
 pi/scripts/pwt install

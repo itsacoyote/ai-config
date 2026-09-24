@@ -1196,6 +1196,9 @@ help_text=$(pwt help 2>/dev/null)
 check_equals 'pwt --help prints the same usage as pwt help' "$help_text" "$(pwt --help 2>/dev/null)"
 check_equals 'pwt -h prints the same usage as pwt help' "$help_text" "$(pwt -h 2>/dev/null)"
 check_not_contains 'pwt help omits yolo mode' 'yolo' "$help_text"
+# A phrase from the naming paragraph, not the bare --name flag: the synopsis
+# lines alone would keep this green with the whole paragraph deleted.
+check_output 'help documents session naming' 'naming the session' pwt help
 check_output 'an unknown subcommand is reported as unknown' \
   'unknown command' pwt definitely-not-a-command
 check_fails 'an unknown subcommand exits non-zero' pwt definitely-not-a-command
@@ -1347,7 +1350,44 @@ pwt root >/dev/null 2>&1
 check_equals 'root launches pi from the physical primary checkout' "$PRIMARY" "$(launched pwd)"
 check_equals 'root exports PWT_REPO_ROOT equal to the physical primary checkout' \
   "$PRIMARY" "$(launched PWT_REPO_ROOT)"
-check_equals 'root passes no arguments to pi by default' '0' "$(launched argc)"
+check_equals "root names the session after the primary checkout's branch" '2' "$(launched argc)"
+check_arg_equals 'root sends --name before the session name' 0 '--name'
+check_arg_equals "root names the session after the primary checkout's branch (value)" 1 'main'
+
+launch_reset
+git -C "$PRIMARY" checkout -q --detach main
+pwt root >/dev/null 2>&1
+check_equals 'root on a detached HEAD passes no --name' '0' "$(launched argc)"
+git -C "$PRIMARY" checkout -q main
+
+# `main` has no slash, so only a slashed primary branch proves root slugs it.
+launch_reset
+git -C "$PRIMARY" checkout -q -b feat/root-slug
+pwt root >/dev/null 2>&1
+check_equals "root turns slashes in the primary's branch into dashes (argc)" '2' "$(launched argc)"
+check_arg_equals "root turns slashes in the primary's branch into dashes" 1 'feat-root-slug'
+git -C "$PRIMARY" checkout -q main
+git -C "$PRIMARY" branch -q -D feat/root-slug
+
+launch_reset
+pwt root -- -n custom >/dev/null 2>&1
+check_equals "a developer -n after -- comes after the script's --name (argc)" '4' "$(launched argc)"
+check_arg_equals "a developer -n after -- comes after the script's --name" 0 '--name'
+check_arg_equals "a developer -n after -- comes after the script's --name (branch value)" 1 'main'
+check_arg_equals "a developer -n after -- comes after the script's --name (developer flag)" 2 '-n'
+check_arg_equals "a developer -n after -- comes after the script's --name (developer value)" 3 'custom'
+
+launch_reset
+pwt root -- --continue >/dev/null 2>&1
+check_equals 'root still passes --name when resuming with --continue (argc)' '3' "$(launched argc)"
+check_arg_equals 'root still passes --name when resuming with --continue' 0 '--name'
+check_arg_equals 'root still passes --name when resuming with --continue (branch value)' 1 'main'
+check_arg_equals 'root still passes --name when resuming with --continue (continue)' 2 '--continue'
+
+launch_reset
+pwt root -- update >/dev/null 2>&1
+check_equals 'a Pi command after -- is passed first with no session name (argc)' '1' "$(launched argc)"
+check_arg_equals 'a Pi command after -- is passed first with no session name' 0 'update'
 
 launch_reset
 pwt_with_pi_env relative-agent relative-sessions relative-package \
@@ -1371,12 +1411,14 @@ check_equals 'the worktree launch exports the physical primary checkout' \
 # embedded newlines cannot be flattened by the fixture or assertion.
 launch_reset
 pwt root -- --model 'space value' '' $'line\nbreak' '--flag=value' >/dev/null 2>&1
-check_equals 'normal launch preserves the forwarded argument count' '5' "$(launched argc)"
-check_arg_equals 'normal launch preserves option arguments' 0 '--model'
-check_arg_equals 'normal launch preserves spaces inside one argument' 1 'space value'
-check_arg_equals 'normal launch preserves an empty argument' 2 ''
-check_arg_equals 'normal launch preserves embedded newlines' 3 $'line\nbreak'
-check_arg_equals 'normal launch preserves equals-form arguments' 4 '--flag=value'
+check_equals 'normal launch preserves the forwarded argument count' '7' "$(launched argc)"
+check_arg_equals 'normal launch sends --name before forwarded arguments' 0 '--name'
+check_arg_equals 'normal launch names the session before forwarded arguments' 1 'main'
+check_arg_equals 'normal launch preserves option arguments' 2 '--model'
+check_arg_equals 'normal launch preserves spaces inside one argument' 3 'space value'
+check_arg_equals 'normal launch preserves an empty argument' 4 ''
+check_arg_equals 'normal launch preserves embedded newlines' 5 $'line\nbreak'
+check_arg_equals 'normal launch preserves equals-form arguments' 6 '--flag=value'
 
 launch_reset
 check_fails 'an unknown pwt-side flag fails before pi launches' pwt root --yolo
@@ -1455,9 +1497,20 @@ check_equals 'open launches Pi only from the registered managed physical worktre
   "$WORKTREE" "$(launched pwd)"
 check_equals 'open exports the physical primary checkout' \
   "$PRIMARY" "$(launched PWT_REPO_ROOT)"
-check_equals 'open preserves the forwarded argument count' '3' "$(launched argc)"
-check_arg_equals 'open preserves a forwarded argument containing spaces' 1 'open space'
-check_arg_equals 'open preserves a forwarded empty argument' 2 ''
+check_equals 'open preserves the forwarded argument count' '5' "$(launched argc)"
+check_arg_equals 'open names the session after the branch slug' 0 '--name'
+check_arg_equals 'open names the session after the branch slug (value)' 1 'probe-roots'
+check_arg_equals 'open preserves a forwarded argument containing spaces' 3 'open space'
+check_arg_equals 'open preserves a forwarded empty argument' 4 ''
+
+launch_reset
+pwt open probe/roots -- --continue >/dev/null 2>&1
+check_equals 'open still passes --name when resuming with --continue (argc)' \
+  '3' "$(launched argc)"
+check_arg_equals 'open still passes --name when resuming with --continue' 0 '--name'
+check_arg_equals 'open still passes --name when resuming with --continue (value)' \
+  1 'probe-roots'
+check_arg_equals 'open still passes --continue after the session name' 2 '--continue'
 
 check_fails 'open refuses a registered worktree outside the managed root' \
   pwt open feat/stray
@@ -1522,9 +1575,12 @@ check_equals 'new launches Pi from the physical worktree it created' \
 check 'new bases the branch on the current origin default, not cached origin/HEAD' \
   test -f "$MANAGED/feat-alpha/stable.txt"
 check_equals 'new forwards normal Pi arguments after -- unchanged' \
-  '2' "$(launched argc)"
+  '4' "$(launched argc)"
+check_arg_equals 'new names the session after the branch slug' 0 '--name'
+check_arg_equals 'new names the session after the branch slug (value)' \
+  1 'feat-alpha'
 check_arg_equals 'new preserves a forwarded argument containing spaces' \
-  1 'space value'
+  3 'space value'
 
 alpha_before=$(git -C "$MANAGED/feat-alpha" rev-parse HEAD)
 launch_reset
@@ -1533,6 +1589,11 @@ check_equals 'new reuses an existing managed worktree' \
   "$MANAGED/feat-alpha" "$(launched pwd)"
 check_equals 'new reuse preserves the checked-out branch head' \
   "$alpha_before" "$(git -C "$MANAGED/feat-alpha" rev-parse HEAD)"
+check_arg_equals 'new reusing an existing worktree keeps the branch-slug name' \
+  0 '--name'
+check_arg_equals \
+  'new reusing an existing worktree keeps the branch-slug name (value)' \
+  1 'feat-alpha'
 
 check_fails 'new rejects a branch without a type prefix' pwt new noprefix
 check_output 'new explains that a typed branch is required' 'feat/' pwt new noprefix
@@ -1681,10 +1742,13 @@ check 'branch checks out an existing local branch in the managed root' \
 check_equals 'branch launches Pi from the local branch worktree' \
   "$MANAGED/feat-dormant" "$(launched pwd)"
 check_equals 'local branch launch preserves the forwarded argument count' \
-  '3' "$(launched argc)"
+  '5' "$(launched argc)"
+check_arg_equals 'branch names the session after the branch slug' 0 '--name'
+check_arg_equals 'branch names the session after the branch slug (value)' \
+  1 'feat-dormant'
 check_arg_equals 'local branch launch preserves an argument containing spaces' \
-  1 'local space'
-check_arg_equals 'local branch launch preserves an empty argument' 2 ''
+  3 'local space'
+check_arg_equals 'local branch launch preserves an empty argument' 4 ''
 
 (
   cd "$TMP/seed" || exit 1
@@ -1701,10 +1765,10 @@ check 'branch checks out a branch that exists only on origin' \
 check_equals 'branch launches Pi from the origin branch worktree' \
   "$MANAGED/feat-remote-only" "$(launched pwd)"
 check_equals 'origin branch launch preserves the forwarded argument count' \
-  '3' "$(launched argc)"
+  '5' "$(launched argc)"
 check_arg_equals 'origin branch launch preserves an argument containing spaces' \
-  1 'remote space'
-check_arg_equals 'origin branch launch preserves an empty argument' 2 ''
+  3 'remote space'
+check_arg_equals 'origin branch launch preserves an empty argument' 4 ''
 
 # The origin-only path has its own fetch-to-write boundary. Keep its regression
 # separate from `new` so deleting either duplicate guard is observable.
@@ -1767,6 +1831,11 @@ launch_reset
 pwt branch feat/alpha >/dev/null 2>&1
 check_equals 'branch reuses an existing managed worktree' \
   "$MANAGED/feat-alpha" "$(launched pwd)"
+check_arg_equals 'branch reusing an existing worktree keeps the branch-slug name' \
+  0 '--name'
+check_arg_equals \
+  'branch reusing an existing worktree keeps the branch-slug name (value)' \
+  1 'feat-alpha'
 
 # Git permits each branch in only one worktree. The primary checkout and an
 # unmanaged linked worktree need distinct, useful refusal paths.
@@ -2168,6 +2237,11 @@ check 'pr checks out the pull request into a managed worktree' \
   test -d "$MANAGED/feat-from-pr"
 check_equals 'pr names the worktree from the pull request head ref' \
   "$MANAGED/feat-from-pr" "$(launched pwd)"
+check_arg_equals 'pr names the session PR-<number>, not after the head branch' \
+  0 '--name'
+check_arg_equals \
+  'pr names the session PR-<number>, not after the head branch (value)' \
+  1 'PR-101'
 check 'pr launches Pi in the pull request worktree' test -n "$(launched pwd)"
 check 'pr prepares worktreeinclude files before launch' \
   test -f "$MANAGED/feat-from-pr/.env"
@@ -2229,11 +2303,14 @@ pr_meta 103 feat/pr-passthrough false
 launch_reset
 pwt pr 103 -- --no-session --model 'space value' '' >/dev/null 2>&1
 check_equals 'permitted PR arguments stay unchanged before policy' \
-  '8' "$(launched argc)"
-check_arg_equals 'a permitted post-separator Pi flag reaches Pi literally' 0 '--no-session'
-check_arg_equals 'a forwarded Pi option remains unchanged' 1 '--model'
-check_arg_equals 'a forwarded value preserves spaces' 2 'space value'
-check_arg_equals 'a forwarded empty argument remains present' 3 ''
+  '10' "$(launched argc)"
+check_arg_equals 'PR launch names the session before permitted arguments' 0 '--name'
+check_arg_equals 'PR launch names the session PR-103 before permitted arguments' \
+  1 'PR-103'
+check_arg_equals 'a permitted post-separator Pi flag reaches Pi literally' 2 '--no-session'
+check_arg_equals 'a forwarded Pi option remains unchanged' 3 '--model'
+check_arg_equals 'a forwarded value preserves spaces' 4 'space value'
+check_arg_equals 'a forwarded empty argument remains present' 5 ''
 
 # gh can fail after the detached worktree already exists. The partial tree and
 # its preparation ownership must both be cleared so an explicit retry is clean.
@@ -2408,17 +2485,21 @@ pr_meta 121 feat/pr-policy false
 launch_reset
 check 'PR launch accepts ordinary model, thinking, and prompt arguments' \
   pwt pr 121 -- --model 'model value' --thinking high 'prompt value'
-check_equals 'PR launch appends exactly four enforcement tokens' \
-  '9' "$(launched argc)"
-check_arg_equals 'PR launch preserves the model option first' 0 '--model'
-check_arg_equals 'PR launch preserves the model value' 1 'model value'
-check_arg_equals 'PR launch preserves the thinking option' 2 '--thinking'
-check_arg_equals 'PR launch preserves the thinking value' 3 'high'
-check_arg_equals 'PR launch preserves the prompt before policy' 4 'prompt value'
-check_arg_equals 'PR policy disables extension discovery last' 5 '--no-extensions'
-check_arg_equals 'PR policy appends the tool option' 6 '--tools'
-check_arg_equals 'PR policy appends only read-only tools' 7 'read,grep,find,ls'
-check_arg_equals 'PR policy appends the no-approve trust boundary' 8 '--no-approve'
+check_equals 'PR launch adds the session name and exactly four enforcement tokens' \
+  '11' "$(launched argc)"
+check_arg_equals 'PR launch names the session before forwarded arguments' 0 '--name'
+check_arg_equals 'PR launch names the session PR-121 before forwarded arguments' \
+  1 'PR-121'
+check_arg_equals 'PR launch preserves the model option first' 2 '--model'
+check_arg_equals 'PR launch preserves the model value' 3 'model value'
+check_arg_equals 'PR launch preserves the thinking option' 4 '--thinking'
+check_arg_equals 'PR launch preserves the thinking value' 5 'high'
+check_arg_equals 'PR launch preserves the prompt before policy' 6 'prompt value'
+check_arg_equals 'PR policy disables extension discovery last' 7 '--no-extensions'
+check_arg_equals 'PR policy appends the tool option' 8 '--tools'
+check_arg_equals 'PR policy appends only read-only tools' 9 'read,grep,find,ls'
+check_arg_equals 'PR policy keeps the enforced suffix last after the session name' \
+  10 '--no-approve'
 check_fails 'PR policy keeps AGENTS and CLAUDE context discovery enabled' \
   launched_has_arg '--no-context-files'
 check_fails 'PR policy does not append the short context-disable alias' \
@@ -2428,13 +2509,16 @@ launch_reset
 check 'reused PR worktrees receive the same launch policy' \
   pwt pr 121 -- --provider google
 check_equals 'reused PR launch keeps permitted arguments before policy' \
-  '6' "$(launched argc)"
-check_arg_equals 'reused PR launch preserves its provider option' 0 '--provider'
-check_arg_equals 'reused PR launch preserves its provider value' 1 'google'
-check_arg_equals 'reused PR launch disables extension discovery' 2 '--no-extensions'
-check_arg_equals 'reused PR launch appends the tool option' 3 '--tools'
-check_arg_equals 'reused PR launch appends only read-only tools' 4 'read,grep,find,ls'
-check_arg_equals 'reused PR launch appends no-approve last' 5 '--no-approve'
+  '8' "$(launched argc)"
+check_arg_equals 'reused PR launch names the session before permitted arguments' \
+  0 '--name'
+check_arg_equals 'reused PR launch names the session PR-121' 1 'PR-121'
+check_arg_equals 'reused PR launch preserves its provider option' 2 '--provider'
+check_arg_equals 'reused PR launch preserves its provider value' 3 'google'
+check_arg_equals 'reused PR launch disables extension discovery' 4 '--no-extensions'
+check_arg_equals 'reused PR launch appends the tool option' 5 '--tools'
+check_arg_equals 'reused PR launch appends only read-only tools' 6 'read,grep,find,ls'
+check_arg_equals 'reused PR launch appends no-approve last' 7 '--no-approve'
 
 launch_reset
 dash_value_status=0
@@ -2446,30 +2530,36 @@ else
   not_ok "PR policy preserves dash-leading values using Pi parser semantics ($dash_value_out)"
 fi
 check_equals 'dash-leading values remain before the enforced suffix' \
-  '8' "$(launched argc)"
-check_arg_equals 'dash-leading name option remains unchanged' 0 '--name'
-check_arg_equals 'dash-leading name value remains unchanged' 1 '-review'
-check_arg_equals 'system prompt option remains unchanged' 2 '--system-prompt'
-check_arg_equals 'option-looking system prompt remains a value' 3 '--approve'
+  '10' "$(launched argc)"
+check_arg_equals "the script's --name comes first on pr" 0 '--name'
+check_arg_equals "the script's --name value is PR-121" 1 'PR-121'
+check_arg_equals \
+  "a developer --name on pr comes after the script's --name and before the enforced suffix" \
+  2 '--name'
+check_arg_equals 'dash-leading name value remains unchanged' 3 '-review'
+check_arg_equals 'system prompt option remains unchanged' 4 '--system-prompt'
+check_arg_equals 'option-looking system prompt remains a value' 5 '--approve'
 check_arg_equals 'dash-leading value launch still disables extensions' \
-  4 '--no-extensions'
-check_arg_equals 'dash-leading value launch still appends tools' 5 '--tools'
+  6 '--no-extensions'
+check_arg_equals 'dash-leading value launch still appends tools' 7 '--tools'
 check_arg_equals 'dash-leading value launch still limits tools' \
-  6 'read,grep,find,ls'
+  8 'read,grep,find,ls'
 check_arg_equals 'dash-leading value launch still appends no-approve last' \
-  7 '--no-approve'
+  9 '--no-approve'
 
 launch_reset
 check 'PR policy permits audited policy-neutral Pi flags' \
   pwt pr 121 -- --no-session --offline -p 'review prompt'
 check_equals 'audited flags remain before the policy suffix' \
-  '8' "$(launched argc)"
-check_arg_equals 'audited no-session flag remains unchanged' 0 '--no-session'
-check_arg_equals 'audited offline flag remains unchanged' 1 '--offline'
-check_arg_equals 'audited print flag remains unchanged' 2 '-p'
-check_arg_equals 'audited print prompt remains unchanged' 3 'review prompt'
+  '10' "$(launched argc)"
+check_arg_equals 'audited flags launch names the session first' 0 '--name'
+check_arg_equals 'audited flags launch names the session PR-121' 1 'PR-121'
+check_arg_equals 'audited no-session flag remains unchanged' 2 '--no-session'
+check_arg_equals 'audited offline flag remains unchanged' 3 '--offline'
+check_arg_equals 'audited print flag remains unchanged' 4 '-p'
+check_arg_equals 'audited print prompt remains unchanged' 5 'review prompt'
 check_arg_equals 'audited flag launch still appends policy last' \
-  7 '--no-approve'
+  9 '--no-approve'
 
 launch_reset
 # Pi treats a three-dash token after --print as its prompt, not as an option.
@@ -2477,12 +2567,14 @@ launch_reset
 check 'PR policy preserves Pi print prompts beginning with three dashes' \
   pwt pr 121 -- -p '--- review this change'
 check_equals 'three-dash print prompts remain before the policy suffix' \
-  '6' "$(launched argc)"
-check_arg_equals 'three-dash print option remains unchanged' 0 '-p'
+  '8' "$(launched argc)"
+check_arg_equals 'three-dash print launch names the session first' 0 '--name'
+check_arg_equals 'three-dash print launch names the session PR-121' 1 'PR-121'
+check_arg_equals 'three-dash print option remains unchanged' 2 '-p'
 check_arg_equals 'three-dash print prompt remains unchanged' \
-  1 '--- review this change'
+  3 '--- review this change'
 check_arg_equals 'three-dash print launch still appends policy last' \
-  5 '--no-approve'
+  7 '--no-approve'
 
 launch_reset
 # Pi leaves a dash-leading invalid TUI value for its next parser iteration.
@@ -2490,21 +2582,25 @@ launch_reset
 check 'PR policy accepts a valid TUI mode' \
   pwt pr 121 -- --tui-mode fullscreen
 check_equals 'valid TUI mode remains before the policy suffix' \
-  '6' "$(launched argc)"
-check_arg_equals 'valid TUI mode option remains unchanged' 0 '--tui-mode'
-check_arg_equals 'valid TUI mode value remains unchanged' 1 'fullscreen'
+  '8' "$(launched argc)"
+check_arg_equals 'valid TUI mode launch names the session first' 0 '--name'
+check_arg_equals 'valid TUI mode launch names the session PR-121' 1 'PR-121'
+check_arg_equals 'valid TUI mode option remains unchanged' 2 '--tui-mode'
+check_arg_equals 'valid TUI mode value remains unchanged' 3 'fullscreen'
 check_arg_equals 'valid TUI mode launch still appends policy last' \
-  5 '--no-approve'
+  7 '--no-approve'
 
 launch_reset
 check 'PR policy accepts a non-RPC output mode' \
   pwt pr 121 -- --mode json
 check_equals 'non-RPC output mode remains before the policy suffix' \
-  '6' "$(launched argc)"
-check_arg_equals 'non-RPC mode option remains unchanged' 0 '--mode'
-check_arg_equals 'non-RPC mode value remains unchanged' 1 'json'
+  '8' "$(launched argc)"
+check_arg_equals 'non-RPC mode launch names the session first' 0 '--name'
+check_arg_equals 'non-RPC mode launch names the session PR-121' 1 'PR-121'
+check_arg_equals 'non-RPC mode option remains unchanged' 2 '--mode'
+check_arg_equals 'non-RPC mode value remains unchanged' 3 'json'
 check_arg_equals 'non-RPC mode launch still appends policy last' \
-  5 '--no-approve'
+  7 '--no-approve'
 
 check_pr_policy_rejects 'PR policy rejects --tools overrides' \
   --tools read,bash
@@ -2979,6 +3075,11 @@ check_equals 'fast-forward reuse launches the exact current PR head' \
   "$(git -C "$MANAGED/feat-pr-reuse-refresh" rev-parse HEAD)"
 check_equals 'fast-forward reuse preserves ignored local content' \
   'REUSE_SECRET=keep-me' "$(cat "$MANAGED/feat-pr-reuse-refresh/.env")"
+check_arg_equals 'pr reusing its worktree still names the session PR-<number>' \
+  0 '--name'
+check_arg_equals \
+  'pr reusing its worktree still names the session PR-<number> (value)' \
+  1 'PR-301'
 
 rewrite_pr_head feat/pr-reuse-refresh >/dev/null
 assert_pr_oid_matches_remote 301
@@ -2993,7 +3094,7 @@ launch_reset
 check 'reused PR launches still accept forwarded Pi arguments' \
   pwt pr 301 -- --model 'review value'
 check_arg_equals 'reused PR preserves a forwarded Pi argument unchanged' \
-  1 'review value'
+  3 'review value'
 
 pr_meta 302 feat/pr-reuse-dirty false
 pwt pr 302 >/dev/null 2>&1

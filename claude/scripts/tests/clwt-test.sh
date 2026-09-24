@@ -125,6 +125,7 @@ cat >"$BIN/claude" <<'STUB'
   printf 'pwd=%s\n' "$PWD"
   printf 'CLWT_REPO_ROOT=%s\n' "${CLWT_REPO_ROOT-<unset>}"
   printf 'GIT_SSH_COMMAND=%s\n' "${GIT_SSH_COMMAND-<unset>}"
+  printf 'argc=%s\n' "$#"
   printf 'args=%s\n' "$*"
 } >>"$CLWT_TEST_LOG"
 STUB
@@ -808,7 +809,9 @@ case $root_env in
   *.git) not_ok 'the exported CLWT_REPO_ROOT does not end in .git' ;;
   *) ok 'the exported CLWT_REPO_ROOT does not end in .git' ;;
 esac
-check_equals 'root passes no arguments to claude by default' '' "$(launched args)"
+check_equals "root names the session after the primary checkout's branch" \
+  '--name main' "$(launched args)"
+check_equals 'root passes the name as two separate arguments' '2' "$(launched argc)"
 
 # Invoked from inside a worktree, root must still land in the primary checkout —
 # the case `git rev-parse --show-toplevel` gets wrong.
@@ -823,21 +826,50 @@ check_equals 'CLWT_REPO_ROOT is correct when clwt is invoked from inside a workt
 launch_reset
 clwt root --yolo >/dev/null 2>&1
 check_equals '--yolo passes --dangerously-skip-permissions to claude' \
-  '--dangerously-skip-permissions' "$(launched args)"
+  '--name main --dangerously-skip-permissions' "$(launched args)"
 
 launch_reset
 clwt root >/dev/null 2>&1
-check_equals 'without --yolo no permission flag is passed to claude' '' "$(launched args)"
+check_not_contains 'without --yolo no permission flag is passed to claude' \
+  '--dangerously-skip-permissions' "$(launched args)"
 
 launch_reset
 clwt root --yolo -- --model opus >/dev/null 2>&1
 check_equals '--yolo composes with arguments after --' \
-  '--dangerously-skip-permissions --model opus' "$(launched args)"
+  '--name main --dangerously-skip-permissions --model opus' "$(launched args)"
 
 launch_reset
 clwt root -- --model opus >/dev/null 2>&1
 check_equals 'arguments after -- are passed through to claude' \
-  '--model opus' "$(launched args)"
+  '--name main --model opus' "$(launched args)"
+
+launch_reset
+clwt root --yolo -- --name custom >/dev/null 2>&1
+check_equals "a developer --name after -- comes after the script's --name" \
+  '--name main --dangerously-skip-permissions --name custom' "$(launched args)"
+
+launch_reset
+clwt root -- --continue >/dev/null 2>&1
+check_equals 'root still passes --name when resuming with --continue' \
+  '--name main --continue' "$(launched args)"
+
+# Restored to `main` immediately afterward — every later section assumes the
+# primary sits on main.
+launch_reset
+git -c advice.detachedHead=false -C "$PRIMARY" checkout -q --detach HEAD
+clwt root >/dev/null 2>&1
+check_not_contains 'root on a detached HEAD passes no --name' '--name' "$(launched args)"
+check_equals 'root on a detached HEAD still launches' "$PRIMARY" "$(launched pwd)"
+git -C "$PRIMARY" checkout -q main
+
+# `main` has no slash, so only a slashed primary branch proves root slugs it.
+launch_reset
+git -C "$PRIMARY" checkout -q -b feat/root-slug
+clwt root >/dev/null 2>&1
+check_equals "root turns slashes in the primary's branch into dashes" \
+  '--name feat-root-slug' "$(launched args)"
+git -C "$PRIMARY" checkout -q main
+git -C "$PRIMARY" branch -q -D feat/root-slug
 
 launch_reset
 clwt root -- >/dev/null 2>&1
@@ -859,11 +891,18 @@ check_equals 'open launches claude with the worktree as its working directory' \
   "$MANAGED/feat-listed" "$(launched pwd)"
 check_equals 'open exports CLWT_REPO_ROOT set to the primary checkout' \
   "$PRIMARY" "$(launched CLWT_REPO_ROOT)"
+check_equals 'open names the session after the branch slug' \
+  '--name feat-listed' "$(launched args)"
 
 launch_reset
 clwt open feat/listed --yolo >/dev/null 2>&1
 check_equals '--yolo works on open as well as root' \
-  '--dangerously-skip-permissions' "$(launched args)"
+  '--name feat-listed --dangerously-skip-permissions' "$(launched args)"
+
+launch_reset
+clwt open feat/listed -- --continue >/dev/null 2>&1
+check_equals 'open still passes --name when resuming with --continue' \
+  '--name feat-listed --continue' "$(launched args)"
 
 check_fails 'open refuses a worktree outside the managed root' clwt open feat/stray
 check_output 'open explains that the worktree is outside the managed root' \
@@ -896,6 +935,8 @@ clwt new feat/alpha >/dev/null 2>&1
 check 'new creates a managed worktree' test -d "$MANAGED/feat-alpha"
 check_equals 'new names the worktree from the branch with slashes as dashes' \
   "$MANAGED/feat-alpha" "$(launched pwd)"
+check_equals 'new names the session after the branch slug' \
+  '--name feat-alpha' "$(launched args)"
 if git -C "$PRIMARY" worktree list --porcelain | grep -qF "$MANAGED/feat-alpha"; then
   ok 'new registers the new worktree with git'
 else
@@ -915,7 +956,7 @@ check_equals 'new launches claude in the worktree it created' \
 launch_reset
 clwt new feat/beta --yolo >/dev/null 2>&1
 check_equals '--yolo works on new' \
-  '--dangerously-skip-permissions' "$(launched args)"
+  '--name feat-beta --dangerously-skip-permissions' "$(launched args)"
 
 # Branch-name validation. These become directory names, so they are untrusted
 # input on a filesystem path.
@@ -964,6 +1005,8 @@ check 'branch creates a managed worktree for an existing local branch' \
   test -d "$MANAGED/feat-dormant"
 check_equals 'branch launches claude in that worktree' \
   "$MANAGED/feat-dormant" "$(launched pwd)"
+check_equals 'branch names the session after the branch slug' \
+  '--name feat-dormant' "$(launched args)"
 
 # A branch that exists only on the remote.
 (
@@ -1286,10 +1329,14 @@ launch_reset
 clwt branch feat/alpha >/dev/null 2>&1
 check_equals 'branch reuses an existing managed worktree rather than failing' \
   "$MANAGED/feat-alpha" "$(launched pwd)"
+check_equals 'branch reusing an existing worktree keeps the branch-slug name' \
+  '--name feat-alpha' "$(launched args)"
 launch_reset
 clwt new feat/alpha >/dev/null 2>&1
 check_equals 'new also reuses an existing managed worktree' \
   "$MANAGED/feat-alpha" "$(launched pwd)"
+check_equals 'new reusing an existing worktree keeps the branch-slug name' \
+  '--name feat-alpha' "$(launched args)"
 
 # Case (b): checked out in the primary checkout. `git worktree add` would refuse
 # with "already checked out"; clwt should say something more useful.
@@ -1889,6 +1936,8 @@ check 'pr checks out the pull request into a managed worktree' \
 check_equals 'pr names the worktree from the pull request head ref' \
   "$MANAGED/feat-from-pr" "$(launched pwd)"
 check 'pr launches claude in that worktree' test -n "$(launched pwd)"
+check_equals 'pr names the session PR-<number>, not after the head branch' \
+  '--name PR-101' "$(launched args)"
 check 'pr runs the worktreeinclude copy in the new worktree' \
   test -f "$MANAGED/feat-from-pr/.env"
 check_equals 'the pr worktree is on the head ref branch' \
@@ -1898,6 +1947,11 @@ if printf '%s\n' "$pr_out" | grep -qi 'fork'; then
 else
   ok 'pr does not warn for a same-repo pull request'
 fi
+
+launch_reset
+clwt pr 101 >/dev/null 2>&1
+check_equals 'pr reusing its worktree still names the session PR-<number>' \
+  '--name PR-101' "$(launched args)"
 
 launch_reset
 fork_out=$(clwt pr 202 2>&1)
@@ -1913,7 +1967,19 @@ check_equals 'pr still launches after warning about a fork' \
 launch_reset
 clwt pr 101 --yolo >/dev/null 2>&1
 check_equals '--yolo works on pr as well' \
-  '--dangerously-skip-permissions' "$(launched args)"
+  '--name PR-101 --dangerously-skip-permissions' "$(launched args)"
+
+pr_meta 104 feat/pr-name-flag false
+launch_reset
+clwt pr 104 -- --name custom >/dev/null 2>&1
+check_equals "a developer --name after -- on pr comes after the script's --name" \
+  '--name PR-104 --name custom' "$(launched args)"
+
+pr_meta 105 feat/pr-n-flag false
+launch_reset
+clwt pr 105 -- -n custom >/dev/null 2>&1
+check_equals "a developer -n after -- on pr comes after the script's --name" \
+  '--name PR-105 -n custom' "$(launched args)"
 
 # A merged pull request whose head branch has since been deleted — `gh pr
 # checkout` fails after the worktree already exists. Found by running `clwt pr`
@@ -1971,7 +2037,7 @@ launch_reset
 check 'pr passes --force after -- through to claude untouched' \
   clwt pr 703 -- --force
 check_equals 'the literal --force argument reaches claude' \
-  '--force' "$(launched args)"
+  '--name PR-703 --force' "$(launched args)"
 check_equals 'a --force after -- never reaches gh, so the branch tip is unchanged' \
   "$passthrough_expected" "$(git -C "$PRIMARY" rev-parse feat/pr-force-passthrough)"
 
@@ -2007,6 +2073,10 @@ check_fails 'root rejects --force as an unknown option' clwt root --force
 # alone would keep this green with the whole paragraph deleted.
 check_output 'help documents --force' 'resetting a leftover' clwt help
 check_output 'help documents the no-flag auto-reset' 'provably contained' clwt help
+
+# A phrase from the naming paragraph, not the bare --name flag: the synopsis
+# lines alone would keep this green with the whole paragraph deleted.
+check_output 'help documents session naming' 'naming the session' clwt help
 
 section 'pr reused worktree refresh safety'
 
@@ -3053,6 +3123,8 @@ check 'the README documents the managed root layout' \
   grep -qF '.worktrees' "$README"
 check 'the README documents CLWT_REPO_ROOT' grep -qF 'CLWT_REPO_ROOT' "$README"
 check 'the README documents the --yolo shorthand' grep -qF -- '--yolo' "$README"
+check 'the README documents clwt session naming' \
+  grep -qF 'naming the session' "$README"
 check 'the README says what --yolo bypasses' \
   grep -qF -- '--dangerously-skip-permissions' "$README"
 check 'the README documents the pr --force flag' grep -qF -- '--force' "$README"
