@@ -1347,7 +1347,35 @@ pwt root >/dev/null 2>&1
 check_equals 'root launches pi from the physical primary checkout' "$PRIMARY" "$(launched pwd)"
 check_equals 'root exports PWT_REPO_ROOT equal to the physical primary checkout' \
   "$PRIMARY" "$(launched PWT_REPO_ROOT)"
-check_equals 'root passes no arguments to pi by default' '0' "$(launched argc)"
+check_equals "root names the session after the primary checkout's branch" '2' "$(launched argc)"
+check_arg_equals 'root sends --name before the session name' 0 '--name'
+check_arg_equals "root names the session after the primary checkout's branch (value)" 1 'main'
+
+launch_reset
+git -C "$PRIMARY" checkout -q --detach main
+pwt root >/dev/null 2>&1
+check_equals 'root on a detached HEAD passes no --name' '0' "$(launched argc)"
+git -C "$PRIMARY" checkout -q main
+
+launch_reset
+pwt root -- -n custom >/dev/null 2>&1
+check_equals "a developer -n after -- comes after the script's --name (argc)" '4' "$(launched argc)"
+check_arg_equals "a developer -n after -- comes after the script's --name" 0 '--name'
+check_arg_equals "a developer -n after -- comes after the script's --name (branch value)" 1 'main'
+check_arg_equals "a developer -n after -- comes after the script's --name (developer flag)" 2 '-n'
+check_arg_equals "a developer -n after -- comes after the script's --name (developer value)" 3 'custom'
+
+launch_reset
+pwt root -- --continue >/dev/null 2>&1
+check_equals 'root still passes --name when resuming with --continue (argc)' '3' "$(launched argc)"
+check_arg_equals 'root still passes --name when resuming with --continue' 0 '--name'
+check_arg_equals 'root still passes --name when resuming with --continue (branch value)' 1 'main'
+check_arg_equals 'root still passes --name when resuming with --continue (continue)' 2 '--continue'
+
+launch_reset
+pwt root -- update >/dev/null 2>&1
+check_equals 'a Pi command after -- is passed first with no session name (argc)' '1' "$(launched argc)"
+check_arg_equals 'a Pi command after -- is passed first with no session name' 0 'update'
 
 launch_reset
 pwt_with_pi_env relative-agent relative-sessions relative-package \
@@ -1371,12 +1399,14 @@ check_equals 'the worktree launch exports the physical primary checkout' \
 # embedded newlines cannot be flattened by the fixture or assertion.
 launch_reset
 pwt root -- --model 'space value' '' $'line\nbreak' '--flag=value' >/dev/null 2>&1
-check_equals 'normal launch preserves the forwarded argument count' '5' "$(launched argc)"
-check_arg_equals 'normal launch preserves option arguments' 0 '--model'
-check_arg_equals 'normal launch preserves spaces inside one argument' 1 'space value'
-check_arg_equals 'normal launch preserves an empty argument' 2 ''
-check_arg_equals 'normal launch preserves embedded newlines' 3 $'line\nbreak'
-check_arg_equals 'normal launch preserves equals-form arguments' 4 '--flag=value'
+check_equals 'normal launch preserves the forwarded argument count' '7' "$(launched argc)"
+check_arg_equals 'normal launch sends --name before forwarded arguments' 0 '--name'
+check_arg_equals 'normal launch names the session before forwarded arguments' 1 'main'
+check_arg_equals 'normal launch preserves option arguments' 2 '--model'
+check_arg_equals 'normal launch preserves spaces inside one argument' 3 'space value'
+check_arg_equals 'normal launch preserves an empty argument' 4 ''
+check_arg_equals 'normal launch preserves embedded newlines' 5 $'line\nbreak'
+check_arg_equals 'normal launch preserves equals-form arguments' 6 '--flag=value'
 
 launch_reset
 check_fails 'an unknown pwt-side flag fails before pi launches' pwt root --yolo

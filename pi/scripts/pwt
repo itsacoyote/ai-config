@@ -232,6 +232,7 @@ require_repo() {
 parse_launch_args() {
   LAUNCH_ARGS=()
   LAUNCH_POSITIONAL=()
+  LAUNCH_NAME=''
   while [[ $# -gt 0 ]]; do
     case $1 in
       --)
@@ -254,6 +255,16 @@ parse_launch_args() {
   done
 }
 
+# Pi recognises these words as its own commands only when in args[0]; anywhere
+# else they are an ordinary prompt. Shared so the launch-time --name skip and
+# the pr command block agree on one list.
+is_pi_command() {
+  case ${1-} in
+    auth | install | remove | uninstall | update | list | config) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # PR sessions keep context-file discovery, but must not let forwarded Pi
 # options replace the tool/trust policy, load executable extensions, or resume
 # a session whose stored cwd escapes the selected worktree. Validate first so
@@ -263,11 +274,9 @@ validate_pr_launch_args() {
 
   # Pi handles these commands before it creates the restricted agent session.
   # Some can print credentials, modify package configuration, or self-update.
-  case ${LAUNCH_ARGS[0]-} in
-    auth | install | remove | uninstall | update | list | config)
-      die "pwt pr does not allow Pi command: ${LAUNCH_ARGS[0]}"
-      ;;
-  esac
+  if is_pi_command "${LAUNCH_ARGS[0]-}"; then
+    die "pwt pr does not allow Pi command: ${LAUNCH_ARGS[0]}"
+  fi
 
   while ((index < count)); do
     arg=${LAUNCH_ARGS[$index]}
@@ -348,6 +357,17 @@ launch() {
 
   cd -P "$target" || die "cannot enter directory: $target"
   export PWT_REPO_ROOT="$primary"
+
+  # Prepended so a developer's own `-- --name X` / `-n X` wins by position
+  # (Pi takes the last --name) and launch_pr's enforced suffix stays last.
+  # Skipped for a Pi command, which Pi only recognises as args[0].
+  if [[ -n ${LAUNCH_NAME-} ]] && ! is_pi_command "${LAUNCH_ARGS[0]-}"; then
+    if ((${#LAUNCH_ARGS[@]})); then
+      LAUNCH_ARGS=(--name "$LAUNCH_NAME" "${LAUNCH_ARGS[@]}")
+    else
+      LAUNCH_ARGS=(--name "$LAUNCH_NAME")
+    fi
+  fi
 
   note "launching pi in $target"
   if ((${#LAUNCH_ARGS[@]})); then
@@ -1402,6 +1422,12 @@ worktree_path_is_managed() {
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
+  # A detached HEAD has no branch to name the session after; launching in the
+  # primary checkout must still work, so leave LAUNCH_NAME empty rather than die.
+  local branch
+  if branch=$(git -C "$primary" symbolic-ref --quiet --short HEAD 2>/dev/null); then
+    LAUNCH_NAME=$(worktree_name_for_branch "$branch")
+  fi
   launch "$primary"
 }
 
