@@ -185,7 +185,12 @@ from inside Claude.**
 **Prerequisites:** stock macOS `bash` 3.2+ and `git`. `gh` (authenticated) is needed only by `clwt pr`
 and `clwt prune` — both fail with a clear message rather than guessing if it is missing
 or logged out. The repository must have an `origin` remote, since the managed paths are
-derived from it.
+derived from it. The network steps of `clwt new` and `clwt branch` over an SSH remote
+run ssh in batch mode with a connect timeout, so an unreachable remote fails with git's
+own error instead of hanging; batch mode also means ssh cannot ask for a key passphrase
+or accept a new host key, so load your key with `ssh-add` and connect once with plain
+`ssh` first. A custom ssh command (`GIT_SSH_COMMAND` / `core.sshCommand` / `GIT_SSH`)
+must accept OpenSSH `-o` options, since clwt appends its own after it.
 
 ```bash
 claude/scripts/clwt install     # symlinks clwt + its completion; run once

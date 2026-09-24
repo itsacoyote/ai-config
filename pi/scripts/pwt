@@ -535,11 +535,29 @@ reuse_or_refuse() {
   launch "$existing"
 }
 
+# Prefix assignment, never `export`: export would survive `exec pi` and land
+# these options on every later push in that session. Base follows git's own
+# ssh precedence; options are appended, so a custom command must accept OpenSSH -o.
+remote_git() {
+  local base
+  if [[ -n ${GIT_SSH_COMMAND:-} ]]; then
+    base=$GIT_SSH_COMMAND
+  elif base=$(git -C "$primary" config --get core.sshCommand 2>/dev/null); then
+    :
+  elif [[ -n ${GIT_SSH:-} ]]; then
+    base=$(printf '%q' "$GIT_SSH")
+  else
+    base=ssh
+  fi
+  GIT_SSH_COMMAND="$base -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=2" \
+    git -C "$primary" "$@"
+}
+
 # Query the remote rather than cached origin/HEAD, which can remain stale after
 # a repository changes its default branch.
 default_remote_branch() {
   local ref
-  if ! ref=$(git -C "$primary" ls-remote --symref origin HEAD 2>/dev/null |
+  if ! ref=$(remote_git ls-remote --symref origin HEAD |
     sed -n 's|^ref: refs/heads/\([^[:space:]]*\).*|\1|p' | head -1); then
     die 'cannot determine the current origin default branch'
   fi
@@ -1414,9 +1432,10 @@ cmd_new() {
   target="$managed_root/$name"
   ensure_available_path "$target"
 
+  note "resolving origin's default branch"
   base=$(default_remote_branch)
   note "fetching origin/$base"
-  git -C "$primary" fetch --quiet origin \
+  remote_git fetch --quiet origin \
     "refs/heads/$base:refs/remotes/origin/$base" ||
     die "could not fetch origin/$base"
 
@@ -1463,9 +1482,9 @@ cmd_branch() {
     status=$?
     ((status == 1)) || die "cannot inspect local branch: $branch"
     note "fetching origin/$branch"
-    git -C "$primary" fetch --quiet origin \
-      "refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null ||
-      die "no such branch locally or on origin: $branch"
+    remote_git fetch --quiet origin \
+      "refs/heads/$branch:refs/remotes/origin/$branch" ||
+      die "could not fetch origin/$branch: not on origin, or origin unreachable"
     # Fetch is an external command and can run hooks. Re-check immediately before
     # Git writes so a substituted path is refused instead of followed.
     ensure_available_path "$target"

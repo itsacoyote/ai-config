@@ -138,7 +138,9 @@ Two recurring causes, both worth checking directly:
   used a "force-pushed" head built as a *child* of the old tip — a fast-forward, so the
   checkout succeeded on its own and every assertion stayed green with the feature
   disabled. Mutating the feature off, not just the guard, is what exposed it; where a
-  fixture must have a shape, assert that shape.
+  fixture must have a shape, assert that shape. Transport is the same trap: the suites'
+  file-path remotes never invoke ssh, so ssh-behavior tests point origin at an `ssh://`
+  URL answered by a stub `ssh` on `PATH`.
 
 When an assertion exists to catch a specific regression, say so in a comment — including
 what it would *fail* to catch.
