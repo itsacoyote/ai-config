@@ -882,11 +882,18 @@ check_equals 'open launches claude with the worktree as its working directory' \
   "$MANAGED/feat-listed" "$(launched pwd)"
 check_equals 'open exports CLWT_REPO_ROOT set to the primary checkout' \
   "$PRIMARY" "$(launched CLWT_REPO_ROOT)"
+check_equals 'open names the session after the branch slug' \
+  '--name feat-listed' "$(launched args)"
 
 launch_reset
 clwt open feat/listed --yolo >/dev/null 2>&1
 check_equals '--yolo works on open as well as root' \
-  '--dangerously-skip-permissions' "$(launched args)"
+  '--name feat-listed --dangerously-skip-permissions' "$(launched args)"
+
+launch_reset
+clwt open feat/listed -- --continue >/dev/null 2>&1
+check_equals 'open still passes --name when resuming with --continue' \
+  '--name feat-listed --continue' "$(launched args)"
 
 check_fails 'open refuses a worktree outside the managed root' clwt open feat/stray
 check_output 'open explains that the worktree is outside the managed root' \
@@ -919,6 +926,8 @@ clwt new feat/alpha >/dev/null 2>&1
 check 'new creates a managed worktree' test -d "$MANAGED/feat-alpha"
 check_equals 'new names the worktree from the branch with slashes as dashes' \
   "$MANAGED/feat-alpha" "$(launched pwd)"
+check_equals 'new names the session after the branch slug' \
+  '--name feat-alpha' "$(launched args)"
 if git -C "$PRIMARY" worktree list --porcelain | grep -qF "$MANAGED/feat-alpha"; then
   ok 'new registers the new worktree with git'
 else
@@ -938,7 +947,7 @@ check_equals 'new launches claude in the worktree it created' \
 launch_reset
 clwt new feat/beta --yolo >/dev/null 2>&1
 check_equals '--yolo works on new' \
-  '--dangerously-skip-permissions' "$(launched args)"
+  '--name feat-beta --dangerously-skip-permissions' "$(launched args)"
 
 # Branch-name validation. These become directory names, so they are untrusted
 # input on a filesystem path.
@@ -987,6 +996,8 @@ check 'branch creates a managed worktree for an existing local branch' \
   test -d "$MANAGED/feat-dormant"
 check_equals 'branch launches claude in that worktree' \
   "$MANAGED/feat-dormant" "$(launched pwd)"
+check_equals 'branch names the session after the branch slug' \
+  '--name feat-dormant' "$(launched args)"
 
 # A branch that exists only on the remote.
 (
@@ -1309,10 +1320,14 @@ launch_reset
 clwt branch feat/alpha >/dev/null 2>&1
 check_equals 'branch reuses an existing managed worktree rather than failing' \
   "$MANAGED/feat-alpha" "$(launched pwd)"
+check_equals 'branch reusing an existing worktree keeps the branch-slug name' \
+  '--name feat-alpha' "$(launched args)"
 launch_reset
 clwt new feat/alpha >/dev/null 2>&1
 check_equals 'new also reuses an existing managed worktree' \
   "$MANAGED/feat-alpha" "$(launched pwd)"
+check_equals 'new reusing an existing worktree keeps the branch-slug name' \
+  '--name feat-alpha' "$(launched args)"
 
 # Case (b): checked out in the primary checkout. `git worktree add` would refuse
 # with "already checked out"; clwt should say something more useful.
@@ -1912,6 +1927,8 @@ check 'pr checks out the pull request into a managed worktree' \
 check_equals 'pr names the worktree from the pull request head ref' \
   "$MANAGED/feat-from-pr" "$(launched pwd)"
 check 'pr launches claude in that worktree' test -n "$(launched pwd)"
+check_equals 'pr names the session PR-<number>, not after the head branch' \
+  '--name PR-101' "$(launched args)"
 check 'pr runs the worktreeinclude copy in the new worktree' \
   test -f "$MANAGED/feat-from-pr/.env"
 check_equals 'the pr worktree is on the head ref branch' \
@@ -1921,6 +1938,11 @@ if printf '%s\n' "$pr_out" | grep -qi 'fork'; then
 else
   ok 'pr does not warn for a same-repo pull request'
 fi
+
+launch_reset
+clwt pr 101 >/dev/null 2>&1
+check_equals 'pr reusing its worktree still names the session PR-<number>' \
+  '--name PR-101' "$(launched args)"
 
 launch_reset
 fork_out=$(clwt pr 202 2>&1)
@@ -1936,7 +1958,19 @@ check_equals 'pr still launches after warning about a fork' \
 launch_reset
 clwt pr 101 --yolo >/dev/null 2>&1
 check_equals '--yolo works on pr as well' \
-  '--dangerously-skip-permissions' "$(launched args)"
+  '--name PR-101 --dangerously-skip-permissions' "$(launched args)"
+
+pr_meta 104 feat/pr-name-flag false
+launch_reset
+clwt pr 104 -- --name custom >/dev/null 2>&1
+check_equals "a developer --name after -- on pr comes after the script's --name" \
+  '--name PR-104 --name custom' "$(launched args)"
+
+pr_meta 105 feat/pr-n-flag false
+launch_reset
+clwt pr 105 -- -n custom >/dev/null 2>&1
+check_equals "a developer -n after -- on pr comes after the script's --name" \
+  '--name PR-105 -n custom' "$(launched args)"
 
 # A merged pull request whose head branch has since been deleted — `gh pr
 # checkout` fails after the worktree already exists. Found by running `clwt pr`
@@ -1994,7 +2028,7 @@ launch_reset
 check 'pr passes --force after -- through to claude untouched' \
   clwt pr 703 -- --force
 check_equals 'the literal --force argument reaches claude' \
-  '--force' "$(launched args)"
+  '--name PR-703 --force' "$(launched args)"
 check_equals 'a --force after -- never reaches gh, so the branch tip is unchanged' \
   "$passthrough_expected" "$(git -C "$PRIMARY" rev-parse feat/pr-force-passthrough)"
 
