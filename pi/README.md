@@ -81,7 +81,7 @@ flag.
 
 Every launching subcommand also passes `--name` to Pi, naming the session: `pr <n>` becomes
 `PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the primary
-checkout's current branch, or no name on a detached HEAD. A developer's own override must use
+checkout's current branch, also with slashes as dashes, or no name on a detached HEAD. A developer's own override must use
 the two-token form, `--name X` or `-n X` — Pi silently ignores `--name=X`. No name is added
 when the first argument after `--` is a Pi command word (`auth`, `install`, `remove`,
 `uninstall`, `update`, `list`, `config`), so that command still runs; `pwt pr`'s enforced

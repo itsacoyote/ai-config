@@ -257,8 +257,8 @@ and the update is a fast-forward; rewritten history is refused because no last-v
 exists yet.
 
 Every launching subcommand also passes `--name` to `claude`, naming the session after the PR
-number (`PR-<n>`), the branch (slashes as dashes), or the primary checkout's current branch for
-`root` — no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it,
+number (`PR-<n>`), the branch, or the primary checkout's current branch for `root` — branch
+names with slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it,
 since `claude` takes the last value it sees.
 
 ### Why it's a CLI and not a skill

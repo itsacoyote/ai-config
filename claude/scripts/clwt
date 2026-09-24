@@ -77,8 +77,9 @@ flag.
 
 Every launching subcommand passes --name to claude, naming the session: `pr <n>` becomes
 `PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the
-primary checkout's current branch, or no name on a detached HEAD. A developer's own
-`--name`/`-n` after `--` overrides it, since claude takes the last value it sees.
+primary checkout's current branch, also with slashes as dashes, or no name on a
+detached HEAD. A developer's own `--name`/`-n` after `--` overrides it, since claude
+takes the last value it sees.
 
 Arguments after `--` are passed through to `claude`.
 EOF
@@ -181,8 +182,6 @@ valid_identity_part() {
 #   LAUNCH_POSITIONAL — the subcommand's own operands (a branch, a PR number)
 #   LAUNCH_YOLO       — 1 when --yolo was given
 #   LAUNCH_ARGS       — everything after `--`, handed to claude untouched
-#   LAUNCH_NAME       — session name for --name; set by the caller, not parsed
-#                       here (empty = none)
 #
 # Everything before `--` belongs to clwt. An unrecognized clwt-side flag is an
 # error rather than being forwarded, so a typo like `--yolol` fails loudly
