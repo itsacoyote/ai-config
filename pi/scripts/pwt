@@ -1440,6 +1440,8 @@ cmd_new() {
   [[ $branch == */* ]] ||
     die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
   name=$(worktree_name_for_branch "$branch")
+  # Set before the reuse early-return so the reused-worktree path and the
+  # fresh-worktree path below both launch under the same name.
   LAUNCH_NAME=$name
 
   if existing=$(branch_worktree "$branch"); then
@@ -1486,8 +1488,6 @@ cmd_branch() {
   local branch=${LAUNCH_POSITIONAL[0]} existing name target status
   validate_branch "$branch"
   name=$(worktree_name_for_branch "$branch")
-  # Set before the reuse early-return so the reused-worktree path and the
-  # fresh-worktree path below both launch under the same name.
   LAUNCH_NAME=$name
 
   if existing=$(branch_worktree "$branch"); then

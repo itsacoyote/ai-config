@@ -2473,7 +2473,7 @@ pr_meta 121 feat/pr-policy false
 launch_reset
 check 'PR launch accepts ordinary model, thinking, and prompt arguments' \
   pwt pr 121 -- --model 'model value' --thinking high 'prompt value'
-check_equals 'PR launch appends exactly four enforcement tokens' \
+check_equals 'PR launch adds the session name and exactly four enforcement tokens' \
   '11' "$(launched argc)"
 check_arg_equals 'PR launch names the session before forwarded arguments' 0 '--name'
 check_arg_equals 'PR launch names the session PR-121 before forwarded arguments' \
