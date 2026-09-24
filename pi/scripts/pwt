@@ -1439,6 +1439,8 @@ cmd_new() {
   validate_branch "$branch"
   [[ $branch == */* ]] ||
     die "new needs a typed branch name such as feat/account-recovery or fix/login-timeout"
+  name=$(worktree_name_for_branch "$branch")
+  LAUNCH_NAME=$name
 
   if existing=$(branch_worktree "$branch"); then
     reuse_or_refuse "$branch" "$existing"
@@ -1453,7 +1455,6 @@ cmd_new() {
     ((status == 1)) || die "cannot inspect local branch: $branch"
   fi
 
-  name=$(worktree_name_for_branch "$branch")
   validate_worktree_name "$name"
   target="$managed_root/$name"
   ensure_available_path "$target"
@@ -1484,6 +1485,10 @@ cmd_branch() {
 
   local branch=${LAUNCH_POSITIONAL[0]} existing name target status
   validate_branch "$branch"
+  name=$(worktree_name_for_branch "$branch")
+  # Set before the reuse early-return so the reused-worktree path and the
+  # fresh-worktree path below both launch under the same name.
+  LAUNCH_NAME=$name
 
   if existing=$(branch_worktree "$branch"); then
     reuse_or_refuse "$branch" "$existing"
@@ -1492,7 +1497,6 @@ cmd_branch() {
     ((status == 1)) || die 'cannot list repository worktrees'
   fi
 
-  name=$(worktree_name_for_branch "$branch")
   validate_worktree_name "$name"
   target="$managed_root/$name"
   ensure_available_path "$target"
@@ -1557,6 +1561,10 @@ cmd_pr() {
   local branch_existed=0 auto_force=0 hint=''
   valid_pr_number "$number" ||
     die "pull request must be a number: $number"
+  # Named from the validated PR NUMBER, never from head_ref or the worktree
+  # directory name below — both describe the fork's own head branch, so a
+  # hostile PR could otherwise choose its own session name.
+  LAUNCH_NAME="PR-$number"
   validate_pr_launch_args
   validate_pr_path
 
@@ -1962,6 +1970,7 @@ cmd_open() {
 
   local branch=${LAUNCH_POSITIONAL[0]} target status
   validate_branch "$branch"
+  LAUNCH_NAME=$(worktree_name_for_branch "$branch")
   if target=$(branch_worktree "$branch"); then
     :
   else
