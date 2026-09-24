@@ -862,6 +862,15 @@ check_not_contains 'root on a detached HEAD passes no --name' '--name' "$(launch
 check_equals 'root on a detached HEAD still launches' "$PRIMARY" "$(launched pwd)"
 git -C "$PRIMARY" checkout -q main
 
+# `main` has no slash, so only a slashed primary branch proves root slugs it.
+launch_reset
+git -C "$PRIMARY" checkout -q -b feat/root-slug
+clwt root >/dev/null 2>&1
+check_equals "root turns slashes in the primary's branch into dashes" \
+  '--name feat-root-slug' "$(launched args)"
+git -C "$PRIMARY" checkout -q main
+git -C "$PRIMARY" branch -q -D feat/root-slug
+
 launch_reset
 clwt root -- >/dev/null 2>&1
 check_equals 'a bare -- with no following arguments is not an error' \

@@ -1360,6 +1360,15 @@ pwt root >/dev/null 2>&1
 check_equals 'root on a detached HEAD passes no --name' '0' "$(launched argc)"
 git -C "$PRIMARY" checkout -q main
 
+# `main` has no slash, so only a slashed primary branch proves root slugs it.
+launch_reset
+git -C "$PRIMARY" checkout -q -b feat/root-slug
+pwt root >/dev/null 2>&1
+check_equals "root turns slashes in the primary's branch into dashes (argc)" '2' "$(launched argc)"
+check_arg_equals "root turns slashes in the primary's branch into dashes" 1 'feat-root-slug'
+git -C "$PRIMARY" checkout -q main
+git -C "$PRIMARY" branch -q -D feat/root-slug
+
 launch_reset
 pwt root -- -n custom >/dev/null 2>&1
 check_equals "a developer -n after -- comes after the script's --name (argc)" '4' "$(launched argc)"
