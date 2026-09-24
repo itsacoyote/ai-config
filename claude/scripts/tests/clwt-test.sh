@@ -125,6 +125,7 @@ cat >"$BIN/claude" <<'STUB'
   printf 'pwd=%s\n' "$PWD"
   printf 'CLWT_REPO_ROOT=%s\n' "${CLWT_REPO_ROOT-<unset>}"
   printf 'GIT_SSH_COMMAND=%s\n' "${GIT_SSH_COMMAND-<unset>}"
+  printf 'argc=%s\n' "$#"
   printf 'args=%s\n' "$*"
 } >>"$CLWT_TEST_LOG"
 STUB
@@ -808,7 +809,10 @@ case $root_env in
   *.git) not_ok 'the exported CLWT_REPO_ROOT does not end in .git' ;;
   *) ok 'the exported CLWT_REPO_ROOT does not end in .git' ;;
 esac
-check_equals 'root passes no arguments to claude by default' '' "$(launched args)"
+check_equals 'root passes only its session name by default' '--name main' "$(launched args)"
+check_equals "root names the session after the primary checkout's branch" \
+  '--name main' "$(launched args)"
+check_equals 'root passes the name as two separate arguments' '2' "$(launched argc)"
 
 # Invoked from inside a worktree, root must still land in the primary checkout —
 # the case `git rev-parse --show-toplevel` gets wrong.
@@ -823,21 +827,44 @@ check_equals 'CLWT_REPO_ROOT is correct when clwt is invoked from inside a workt
 launch_reset
 clwt root --yolo >/dev/null 2>&1
 check_equals '--yolo passes --dangerously-skip-permissions to claude' \
-  '--dangerously-skip-permissions' "$(launched args)"
+  '--name main --dangerously-skip-permissions' "$(launched args)"
 
 launch_reset
 clwt root >/dev/null 2>&1
-check_equals 'without --yolo no permission flag is passed to claude' '' "$(launched args)"
+check_not_contains 'without --yolo no permission flag is passed to claude' \
+  '--dangerously-skip-permissions' "$(launched args)"
 
 launch_reset
 clwt root --yolo -- --model opus >/dev/null 2>&1
 check_equals '--yolo composes with arguments after --' \
-  '--dangerously-skip-permissions --model opus' "$(launched args)"
+  '--name main --dangerously-skip-permissions --model opus' "$(launched args)"
 
 launch_reset
 clwt root -- --model opus >/dev/null 2>&1
 check_equals 'arguments after -- are passed through to claude' \
-  '--model opus' "$(launched args)"
+  '--name main --model opus' "$(launched args)"
+
+# claude takes the LAST --name it sees, so a developer's own --name after --
+# wins over the script's by position — clwt does not need to detect it.
+launch_reset
+clwt root --yolo -- --name custom >/dev/null 2>&1
+check_equals "a developer --name after -- comes after the script's --name" \
+  '--name main --dangerously-skip-permissions --name custom' "$(launched args)"
+
+launch_reset
+clwt root -- --continue >/dev/null 2>&1
+check_equals 'root still passes --name when resuming with --continue' \
+  '--name main --continue' "$(launched args)"
+
+# A detached HEAD (or a mid-rebase primary) has no branch to name the session
+# after; root must still launch, just without --name. Restored to `main`
+# immediately afterward — every later section assumes the primary sits on main.
+launch_reset
+git -c advice.detachedHead=false -C "$PRIMARY" checkout -q --detach HEAD
+clwt root >/dev/null 2>&1
+check_not_contains 'root on a detached HEAD passes no --name' '--name' "$(launched args)"
+check_equals 'root on a detached HEAD still launches' "$PRIMARY" "$(launched pwd)"
+git -C "$PRIMARY" checkout -q main
 
 launch_reset
 clwt root -- >/dev/null 2>&1

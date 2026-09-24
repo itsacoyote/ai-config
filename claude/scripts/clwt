@@ -176,6 +176,8 @@ valid_identity_part() {
 #   LAUNCH_POSITIONAL — the subcommand's own operands (a branch, a PR number)
 #   LAUNCH_YOLO       — 1 when --yolo was given
 #   LAUNCH_ARGS       — everything after `--`, handed to claude untouched
+#   LAUNCH_NAME       — session name for --name; set by the caller, not parsed
+#                       here (empty = none)
 #
 # Everything before `--` belongs to clwt. An unrecognized clwt-side flag is an
 # error rather than being forwarded, so a typo like `--yolol` fails loudly
@@ -184,6 +186,7 @@ parse_launch_args() {
   LAUNCH_YOLO=0
   LAUNCH_ARGS=()
   LAUNCH_POSITIONAL=()
+  LAUNCH_NAME=''
   while [[ $# -gt 0 ]]; do
     case $1 in
       --)
@@ -223,6 +226,11 @@ launch() {
 
   command -v claude >/dev/null 2>&1 || die 'claude not found on PATH'
 
+  # Placed first so a developer's own `-- --name X` wins by position: claude
+  # takes the last `--name` it sees, and LAUNCH_ARGS is appended after this.
+  if [[ -n ${LAUNCH_NAME-} ]]; then
+    argv+=(--name "$LAUNCH_NAME")
+  fi
   if ((LAUNCH_YOLO)); then
     argv+=(--dangerously-skip-permissions)
   fi
@@ -946,6 +954,13 @@ remove_worktree() {
 cmd_root() {
   parse_launch_args "$@"
   ((${#LAUNCH_POSITIONAL[@]} == 0)) || die 'root takes no arguments'
+  # A detached HEAD or a mid-rebase primary has no branch to name the session
+  # after — leave LAUNCH_NAME empty rather than dying, since launching in the
+  # primary checkout must still work in that state.
+  local branch
+  if branch=$(git -C "$primary" symbolic-ref --quiet --short HEAD 2>/dev/null); then
+    LAUNCH_NAME=$(worktree_name_for_branch "$branch")
+  fi
   launch "$primary"
 }
 
