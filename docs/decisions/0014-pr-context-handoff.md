@@ -25,13 +25,54 @@ cannot move into the shared `agents/skills/` library as-is (ADR 0010).
   worktree's status and the PR's content cannot place or replace it.
 - `pr` sends the harness's `pr-review` invocation, including the file's path, as the
   startup prompt. `--no-review` suppresses it.
-- A failed fetch stops the launch. A review never starts on partial data.
+- A failed fetch stops the launch, so a review never starts on partial data. Under
+  `--no-review` it only warns and launches with no file, so the flag stays a working
+  escape route.
 - `remove` and `prune` delete the worktree's session folder, including Pi's session history
   for that worktree.
 - The review skills read the file for intake. The Claude skill keeps its `gh` fallback. A
   new portable `agents/skills/pr-review` serves Codex and Pi; in Pi the file is the only
   intake path, and posting becomes a printed command the developer runs.
 - `pwt pr`'s tool/trust boundary is unchanged.
+- The portable skill's Codex and Pi paths differ at intake, QA, and posting. This fits
+  ADR 0010's allowance for small capability differences: both paths are supported, and
+  the method (intake → passes → severity table → curation gate → one review) is the same.
+
+## Context file layout
+
+The contract between the three writers and the two review skills. Writers emit exactly
+this order; readers find sections by these exact headings.
+
+```text
+# Pull request #<n>
+
+- URL: <canonical PR URL>
+- Author: <login>
+- Base: <base ref>
+- Head: <head ref>
+- Head commit: <40-hex head commit ID>
+- Fork: <true|false>
+- Fetched: <UTC time, ISO 8601>
+
+## Description
+## Linked issues
+## Changed files
+## CI checks
+## Conversation comments
+## Reviews
+## Review comments
+## Diff
+```
+
+- Header values are validated identifiers only. The title and every other free-text
+  field live inside a section, never in the header.
+- `Description` holds the `gh` JSON for title and body. The JSON sections (`Linked
+  issues`, `Changed files`, `Conversation comments`, `Reviews`, `Review comments`) hold
+  `gh` JSON output. `CI checks` holds `gh pr checks` text. `Diff` holds `gh pr diff`
+  text.
+- Each section body is one fenced block whose fence is longer than the longest backtick
+  run in that content, or the single line `(none)`. A list `gh` capped ends with the
+  line `(truncated at N)` after its fence.
 
 ## Consequences
 
