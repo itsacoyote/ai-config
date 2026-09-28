@@ -57,6 +57,10 @@ and `clwt` will decline to manage it later.
 `--yolo` on any launching subcommand adds `--dangerously-skip-permissions`. Arguments after `--`
 pass through to `claude`: `clwt new feat/x --yolo -- --model opus`.
 
+Every launching subcommand also passes `--name` to `claude`, naming the session after the PR
+number, branch, or the primary checkout's current branch for `root` — branch names with
+slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it.
+
 Worktrees live at `~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/`.
 
 A local branch left over from an earlier `clwt pr` (the PR merged, or its head force-pushed)
