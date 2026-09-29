@@ -25,8 +25,10 @@ warn() { printf '%s: warning: %s\n' "$PROGRAM" "$*" >&2; }
 # cleaned up regardless of which exit path is taken.
 CLWT_LIST_FILE=''
 CLWT_PR_FETCH_WORKTREE=''
+CLWT_PR_CONTEXT_TMP=''
+CLWT_PR_CHECKS_ERR_FILE=''
 cleanup_on_exit() {
-  rm -f "${CLWT_LIST_FILE:-}"
+  rm -f "${CLWT_LIST_FILE:-}" "${CLWT_PR_CONTEXT_TMP:-}" "${CLWT_PR_CHECKS_ERR_FILE:-}"
   if [[ -n ${CLWT_PR_FETCH_WORKTREE:-} ]]; then
     git worktree remove --force "$CLWT_PR_FETCH_WORKTREE" >/dev/null 2>&1 || true
     rmdir "$CLWT_PR_FETCH_WORKTREE" >/dev/null 2>&1 || true
@@ -138,6 +140,11 @@ require_repo() {
   local common_dir
   common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
     die 'cannot resolve the git common directory'
+  # Physically resolved, not just the raw path git-common-dir returns: the pr
+  # session folder lives under here, and every path it is later compared
+  # against (in the symlink/containment guards) is `pwd -P`'d too.
+  primary_common=$(cd -P "$common_dir" 2>/dev/null && pwd -P) ||
+    die "cannot resolve the git common directory: $common_dir"
   primary=$(cd "$common_dir/.." 2>/dev/null && pwd -P) ||
     die "cannot resolve the primary checkout from: $common_dir"
 
@@ -834,6 +841,331 @@ pr_ignored_paths_are_safe() {
   return 0
 }
 
+# ------------------------------------------------------------- pr context file
+
+# Refuses a session-folder route through a symlinked `clwt`, `sessions`, or
+# `<name>` component, checked before ANY write or delete touches it. A
+# worktree name is derived from a pull request's own head ref (case-preserved
+# by gh, only the / -> - substitution applied) — an attacker-controlled name
+# must never be trusted to redirect a write, or a recursive delete, outside
+# the managed sessions root.
+refuse_symlinked_session_path() {
+  local name=$1
+  [[ ! -L "$primary_common/clwt" ]] ||
+    die "refusing a symlinked clwt directory: $primary_common/clwt"
+  [[ ! -L "$primary_common/clwt/sessions" ]] ||
+    die "refusing a symlinked sessions directory: $primary_common/clwt/sessions"
+  [[ ! -L "$primary_common/clwt/sessions/$name" ]] ||
+    die "refusing a symlinked session folder: $primary_common/clwt/sessions/$name"
+}
+
+# Creates (if needed) and physically resolves the session folder for <name>,
+# verifying it still lands under the managed sessions root even after
+# resolution — defense in depth alongside the symlink refusals above, in case
+# a component were swapped between the refusal check and mkdir. Sets
+# SESSION_FOLDER.
+ensure_session_folder() {
+  local name=$1 dir resolved
+  refuse_symlinked_session_path "$name"
+  dir="$primary_common/clwt/sessions/$name"
+  mkdir -p "$dir" || die "cannot create session folder: $dir"
+  resolved=$(cd -P "$dir" 2>/dev/null && pwd -P) ||
+    die "cannot resolve session folder: $dir"
+  case $resolved in
+    "$primary_common/clwt/sessions/"*) ;;
+    *) die "session folder resolved outside the managed sessions root: $resolved" ;;
+  esac
+  SESSION_FOLDER=$resolved
+}
+
+# Like ensure_session_folder, but for deletion: a folder that was never
+# created (no `pr` run for this worktree yet) or already removed is a no-op,
+# signaled by returning 1 rather than dying. Sets SESSION_FOLDER on success.
+session_folder_if_present() {
+  local name=$1 dir resolved
+  refuse_symlinked_session_path "$name"
+  dir="$primary_common/clwt/sessions/$name"
+  [[ -e $dir ]] || return 1
+  resolved=$(cd -P "$dir" 2>/dev/null && pwd -P) ||
+    die "cannot resolve session folder: $dir"
+  case $resolved in
+    "$primary_common/clwt/sessions/"*) ;;
+    *) die "session folder resolved outside the managed sessions root: $resolved" ;;
+  esac
+  SESSION_FOLDER=$resolved
+}
+
+remove_session_folder() {
+  local name=$1
+  if session_folder_if_present "$name"; then
+    rm -rf "$SESSION_FOLDER" || die "cannot remove session folder: $SESSION_FOLDER"
+  fi
+}
+
+valid_host() {
+  local host=$1
+  case $host in
+    '' | .* | *[!A-Za-z0-9.-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# Parses a canonical PR URL (scheme://host/owner/repo/pull/<n>) into
+# PR_HOST/PR_OWNER/PR_REPO — every context-fetch gh call targets these exact
+# values, never ambient repo/cwd inference, so a context file for one
+# repository can never be built from another's data.
+parse_pr_url() {
+  local url=$1 number=$2 rest host path repo owner
+  case $url in
+    *"://"*/pull/"$number") ;;
+    *) return 1 ;;
+  esac
+  rest=${url#*://}
+  host=${rest%%/*}
+  path=${rest#*/}
+  path=${path%/pull/$number}
+  repo=${path##*/}
+  owner=${path%/*}
+  valid_host "$host" || return 1
+  valid_identity_part "$owner" || return 1
+  valid_identity_part "$repo" || return 1
+  PR_HOST=$host
+  PR_OWNER=$owner
+  PR_REPO=$repo
+}
+
+# Picks a fence at least one backtick longer than the longest run already
+# present in $1 (minimum three, the shortest a markdown fence can be), so an
+# untrusted PR description, comment, review, or diff containing its own
+# fenced block can never terminate the section early. Sets PR_FENCE.
+fence_for() {
+  local content=$1 longest len
+  # grep exits 1 on no match — routine here, since most content has no
+  # backticks at all — which pipefail would otherwise turn into a failure of
+  # this whole assignment; the `|| true` group absorbs that inside the pipe.
+  longest=$(printf '%s\n' "$content" | { grep -oE '`+' || true; } | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+  len=$((longest + 1))
+  ((len >= 3)) || len=3
+  printf -v PR_FENCE '%*s' "$len" ''
+  PR_FENCE=${PR_FENCE// /\`}
+}
+
+# True when a JSON value is an empty array, tolerating incidental whitespace.
+# Used for the paginated review-comments list, which arrives as its own gh
+# api call rather than a field inside the combined `gh pr view` blob below.
+json_array_empty() {
+  local stripped
+  stripped=$(printf '%s' "$1" | tr -d '[:space:]')
+  [[ -z $stripped || $stripped == '[]' ]]
+}
+
+# Prints one ADR-0014 section: a heading, then either the literal line
+# "(none)" for empty content, or a fenced block (see fence_for) plus an
+# optional trailing marker line for a gh-capped list, then a blank separator.
+render_section() {
+  local heading=$1 empty=$2 content=$3 marker=${4:-}
+  printf '## %s\n' "$heading"
+  if ((empty)); then
+    printf '(none)\n\n'
+    return 0
+  fi
+  fence_for "$content"
+  printf '%s\n%s\n%s\n' "$PR_FENCE" "$content" "$PR_FENCE"
+  [[ -z $marker ]] || printf '%s\n' "$marker"
+  printf '\n'
+}
+
+# Fetches this pull request's review context via gh and writes it to
+# <session-folder>/pr-context.md, replacing any existing copy, in the exact
+# section order ADR 0014 defines. Every gh call targets $pr_url (and the host
+# parsed from it) — never ambient repo/cwd inference. The file is assembled
+# in a temp file registered with cleanup_on_exit and moved into place only
+# once every call has succeeded and the pull request's head still matches
+# $expected_oid, so a mid-fetch failure or a moved head never leaves a
+# partial or stale pr-context.md. Returns non-zero on any such failure; the
+# caller decides how to report that (today, a hard `die` naming --no-review).
+write_pr_context() {
+  local number=$1 pr_url=$2 expected_oid=$3 name=$4
+  local folder pr_host pr_owner pr_repo tmp meta
+
+  ensure_session_folder "$name" || return 1
+  folder=$SESSION_FOLDER
+  rm -f "$folder/pr-context.md"
+
+  parse_pr_url "$pr_url" "$number" || return 1
+  pr_host=$PR_HOST
+  pr_owner=$PR_OWNER
+  pr_repo=$PR_REPO
+
+  tmp=$(mktemp "$folder/.pr-context.XXXXXX") || return 1
+  CLWT_PR_CONTEXT_TMP=$tmp
+
+  # tojson forces every result to a JSON-ENCODED STRING, so gh's raw-string
+  # printing (like jq -r) emits it unquoted and single-line regardless of
+  # what the source value looked like — the trick that lets 18 differently
+  # shaped results share one newline-delimited `--jq` output, safely, even
+  # though several of the raw fields (title, body, comments, reviews) are
+  # attacker-controlled text that would otherwise embed literal newlines.
+  meta=$(gh pr view "$pr_url" \
+    --json number,url,author,baseRefName,headRefName,headRefOid,isCrossRepository,title,body,closingIssuesReferences,files,changedFiles,comments,reviews \
+    --jq '
+      .number,
+      .url,
+      .author.login,
+      .baseRefName,
+      .headRefName,
+      .headRefOid,
+      .isCrossRepository,
+      (.body // "" | length),
+      (.closingIssuesReferences // [] | length),
+      (.files // [] | length),
+      (.changedFiles // 0),
+      (.comments // [] | length),
+      (.reviews // [] | length),
+      ({title,body}|tojson),
+      ({closingIssuesReferences}|tojson),
+      ({files}|tojson),
+      ({comments}|tojson),
+      ({reviews}|tojson)
+    ' 2>/dev/null) || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+
+  local pr_number pr_canonical_url pr_author pr_base pr_head pr_head_oid pr_cross
+  local body_len issues_len files_len changed_files comments_len reviews_len
+  local description_json issues_json files_json comments_json reviews_json
+  pr_number=$(printf '%s\n' "$meta" | sed -n '1p')
+  pr_canonical_url=$(printf '%s\n' "$meta" | sed -n '2p')
+  pr_author=$(printf '%s\n' "$meta" | sed -n '3p')
+  pr_base=$(printf '%s\n' "$meta" | sed -n '4p')
+  pr_head=$(printf '%s\n' "$meta" | sed -n '5p')
+  pr_head_oid=$(printf '%s\n' "$meta" | sed -n '6p')
+  pr_cross=$(printf '%s\n' "$meta" | sed -n '7p')
+  body_len=$(printf '%s\n' "$meta" | sed -n '8p')
+  issues_len=$(printf '%s\n' "$meta" | sed -n '9p')
+  files_len=$(printf '%s\n' "$meta" | sed -n '10p')
+  changed_files=$(printf '%s\n' "$meta" | sed -n '11p')
+  comments_len=$(printf '%s\n' "$meta" | sed -n '12p')
+  reviews_len=$(printf '%s\n' "$meta" | sed -n '13p')
+  description_json=$(printf '%s\n' "$meta" | sed -n '14p')
+  issues_json=$(printf '%s\n' "$meta" | sed -n '15p')
+  files_json=$(printf '%s\n' "$meta" | sed -n '16p')
+  comments_json=$(printf '%s\n' "$meta" | sed -n '17p')
+  reviews_json=$(printf '%s\n' "$meta" | sed -n '18p')
+
+  valid_head_oid "$pr_head_oid" || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+
+  local review_comments_json
+  review_comments_json=$(gh api --hostname "$pr_host" --paginate --slurp \
+    "repos/$pr_owner/$pr_repo/pulls/$number/comments" 2>/dev/null) || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+
+  local checks_out checks_rc=0 checks_errfile checks_err
+  checks_errfile=$(mktemp "${TMPDIR:-/tmp}/clwt-pr-checks-err.XXXXXX") || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+  CLWT_PR_CHECKS_ERR_FILE=$checks_errfile
+  checks_out=$(gh pr checks "$pr_url" 2>"$checks_errfile") || checks_rc=$?
+  checks_err=$(cat "$checks_errfile" 2>/dev/null)
+  rm -f "$checks_errfile"
+  CLWT_PR_CHECKS_ERR_FILE=''
+  # Exit 8 is gh's own "checks are still pending" signal, and exit 1 is
+  # overloaded: "a check failed" (data) and "gh could not run at all" (a real
+  # failure) look identical unless stdout carries a result or stderr names
+  # the no-checks-configured case explicitly.
+  case $checks_rc in
+    0 | 8) ;;
+    1)
+      if [[ -z $checks_out ]] && ! printf '%s\n' "$checks_err" | grep -qi 'no checks reported'; then
+        rm -f "$tmp"
+        CLWT_PR_CONTEXT_TMP=''
+        return 1
+      fi
+      ;;
+    *)
+      rm -f "$tmp"
+      CLWT_PR_CONTEXT_TMP=''
+      return 1
+      ;;
+  esac
+
+  local diff_out
+  diff_out=$(gh pr diff "$pr_url" 2>/dev/null) || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+
+  # Re-read after every other call: a head that moved mid-fetch means the
+  # rest of this context (comments, checks, diff) may already describe a
+  # commit the worktree no longer has checked out.
+  local final_oid
+  final_oid=$(gh pr view "$pr_url" --json headRefOid --jq '.headRefOid' 2>/dev/null) || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+  valid_head_oid "$final_oid" || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+  if [[ $final_oid != "$expected_oid" ]]; then
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  fi
+
+  local fetched changed_marker='' review_comments_empty=0
+  fetched=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if ((changed_files > files_len)); then
+    changed_marker="(truncated at $files_len)"
+  fi
+  json_array_empty "$review_comments_json" && review_comments_empty=1
+
+  {
+    printf '# Pull request #%s\n\n' "$pr_number"
+    printf -- '- URL: %s\n' "$pr_canonical_url"
+    printf -- '- Author: %s\n' "$pr_author"
+    printf -- '- Base: %s\n' "$pr_base"
+    printf -- '- Head: %s\n' "$pr_head"
+    printf -- '- Head commit: %s\n' "$expected_oid"
+    printf -- '- Fork: %s\n' "$pr_cross"
+    printf -- '- Fetched: %s\n\n' "$fetched"
+
+    render_section 'Description' "$((body_len == 0))" "$description_json"
+    render_section 'Linked issues' "$((issues_len == 0))" "$issues_json"
+    render_section 'Changed files' "$((files_len == 0))" "$files_json" "$changed_marker"
+    render_section 'CI checks' "$((${#checks_out} == 0))" "$checks_out"
+    render_section 'Conversation comments' "$((comments_len == 0))" "$comments_json"
+    render_section 'Reviews' "$((reviews_len == 0))" "$reviews_json"
+    render_section 'Review comments' "$review_comments_empty" "$review_comments_json"
+    render_section 'Diff' "$((${#diff_out} == 0))" "$diff_out"
+  } >"$tmp" || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+
+  mv "$tmp" "$folder/pr-context.md" || {
+    rm -f "$tmp"
+    CLWT_PR_CONTEXT_TMP=''
+    return 1
+  }
+  CLWT_PR_CONTEXT_TMP=''
+}
+
 reuse_pr_or_refuse() {
   local branch=$1 existing=$2 number=$3 pr_url=$4 head_oid=$5
   local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9
@@ -896,6 +1228,9 @@ reuse_pr_or_refuse() {
   record_pr_markers "$branch" "$pr_url" "$head_oid" ||
     die "could not record the verified identity for pull request #$number"
 
+  write_pr_context "$number" "$pr_url" "$head_oid" "${existing##*/}" ||
+    die "could not fetch pull request #$number's review context; run 'clwt pr $number --no-review' to skip it"
+
   note "reusing existing worktree for $branch at pull request #$number head"
   if [[ $cross == true ]]; then
     warn "pull request #$number comes from a fork — this is code you did not write, and opening it here runs it on your machine"
@@ -947,6 +1282,10 @@ remove_worktree() {
 
   git worktree remove "$target"
   note "removed $target"
+
+  # Shared by remove and prune (the only two callers), so a PR worktree's
+  # pr-context.md is cleaned up regardless of which command removed it.
+  remove_session_folder "${target##*/}"
 
   if ((delete_branch)); then
     # -d, not -D: an unmerged branch should fail loudly rather than vanish.
@@ -1269,6 +1608,12 @@ cmd_pr() {
     abandon_worktree "$target"
     die "could not record the verified identity for pull request #$number"
   }
+
+  # A context-fetch failure here keeps the worktree rather than abandoning
+  # it: markers are already recorded, so a retry takes the reuse path above
+  # instead of re-running the whole checkout.
+  write_pr_context "$number" "$pr_url" "$head_oid" "$name" ||
+    die "could not fetch pull request #$number's review context; run 'clwt pr $number --no-review' to skip it"
 
   if [[ $cross == true ]]; then
     printf '%s: WARNING: pull request #%s comes from a fork — this is code you did not write, and opening it here runs it on your machine\n' \
