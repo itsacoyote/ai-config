@@ -187,6 +187,7 @@ gh_pr_view_context() {
   local number=$1 meta=$2
   local head_ref cross url oid title body issues files changed comments reviews
   local title_len body_len issues_len files_len comments_len reviews_len
+  local number_out=$number author=octocat base=main
   head_ref=$(sed -n 's/^headRefName=//p' "$meta")
   cross=$(sed -n 's/^isCrossRepository=//p' "$meta")
   url=$(sed -n 's/^url=//p' "$meta")
@@ -203,6 +204,29 @@ gh_pr_view_context() {
   if [ -f "$CLWT_GH_PRS/$number.initial-moved-head" ]; then
     oid=$(cat "$CLWT_GH_PRS/$number.initial-moved-head")
   fi
+  # Four more override hooks, same shape as context-url-mismatch: each
+  # mismatches exactly ONE header scalar the combined view call reports,
+  # leaving every other field correct, so each of write_pr_context's
+  # pr_number/pr_head/pr_cross/pr_author/pr_base checks can be proven to
+  # fire on its own rather than riding on another check's message.
+  if [ -f "$CLWT_GH_PRS/$number.context-number-mismatch" ]; then
+    number_out="${number}9"
+  fi
+  if [ -f "$CLWT_GH_PRS/$number.context-headref-mismatch" ]; then
+    head_ref="${head_ref}-mismatched"
+  fi
+  if [ -f "$CLWT_GH_PRS/$number.context-cross-invalid" ]; then
+    cross='maybe'
+  fi
+  if [ -f "$CLWT_GH_PRS/$number.context-author-invalid" ]; then
+    author='evil login'
+  fi
+  if [ -f "$CLWT_GH_PRS/$number.context-author-underscore" ]; then
+    author='octo_cat'
+  fi
+  if [ -f "$CLWT_GH_PRS/$number.context-base-invalid" ]; then
+    base='-bad..base'
+  fi
   title=$(read_fixture "$CLWT_GH_PRS/$number.title" "Test PR #$number")
   body=$(read_fixture "$CLWT_GH_PRS/$number.body" "Test PR #$number body")
   issues=$(read_fixture "$CLWT_GH_PRS/$number.issues.json" '[]')
@@ -217,10 +241,10 @@ gh_pr_view_context() {
   title_len=${#title}
   body_len=${#body}
 
-  printf '%s\n' "$number"
+  printf '%s\n' "$number_out"
   printf '%s\n' "$url"
-  printf '%s\n' "octocat"
-  printf '%s\n' "main"
+  printf '%s\n' "$author"
+  printf '%s\n' "$base"
   printf '%s\n' "$head_ref"
   printf '%s\n' "$oid"
   printf '%s\n' "$cross"
@@ -363,28 +387,42 @@ fi
 if [ "$1" = "api" ]; then
   last=''
   jq_expr=''
+  slurp=0
   prev=''
   for arg in "$@"; do
     if [ "$prev" = "--jq" ]; then jq_expr=$arg; fi
+    [ "$arg" = "--slurp" ] && slurp=1
     prev=$arg
     last=$arg
   done
   printf '%s\n' "$*" >>"$CLWT_GH_API_LOG"
+  # Real gh refuses this combination outright, before it ever reaches an
+  # endpoint: round 1's `--paginate --slurp --jq 'add // []'` only ever
+  # failed against real gh, never this stub, because the stub applied
+  # whatever --jq expression it was given regardless of --slurp.
+  if [ "$slurp" = 1 ] && [ -n "$jq_expr" ]; then
+    echo 'the `--slurp` option is not supported with `--jq` or `--template`' >&2
+    exit 1
+  fi
   case "$last" in
     repos/*/pulls/*/comments)
       number=${last#repos/*/pulls/}
       number=${number%/comments}
-      # The real `--paginate --slurp` shape is an array of PAGES — `[[]]` for
-      # zero results, never a bare `[]` — so the fixture default models that,
-      # and the requested --jq expression (clwt's own flatten, "add // []")
-      # is applied here exactly as real gh would apply it server-side,
-      # via the system jq this suite already requires.
+      # Fixture format: an array of PAGES (`[[]]` for one empty page,
+      # `[[...],[...]]` for two) — real gh applies --jq to EACH page
+      # separately (no --slurp here), so this stub splits on pages with jq
+      # and re-applies the requested expression per page too, via the
+      # system jq this suite already requires. `-r`, not `-c`: gh's --jq
+      # prints like `jq -r`, so a `tojson`-wrapped string comes out
+      # unquoted — the trick clwt's own flatten below relies on.
       raw=$(read_fixture "$CLWT_GH_PRS/$number.review-comments.json" '[[]]')
-      if [ -n "$jq_expr" ]; then
-        printf '%s' "$raw" | jq -c "$jq_expr"
-      else
-        printf '%s' "$raw"
-      fi
+      printf '%s' "$raw" | jq -c '.[]' | while IFS= read -r page; do
+        if [ -n "$jq_expr" ]; then
+          printf '%s' "$page" | jq -r "$jq_expr"
+        else
+          printf '%s\n' "$page"
+        fi
+      done
       exit 0
       ;;
   esac
@@ -556,6 +594,24 @@ pr_head_initial_moved() { printf '%s' "$2" >"$CLWT_GH_PRS/$1.initial-moved-head"
 # url that does not match $pr_url, simulating gh answering about the wrong
 # pull request.
 pr_context_url_mismatch() { : >"$CLWT_GH_PRS/$1.context-url-mismatch"; }
+# pr_context_number_mismatch <number> — the combined view call reports a
+# different pull request number than the one requested.
+pr_context_number_mismatch() { : >"$CLWT_GH_PRS/$1.context-number-mismatch"; }
+# pr_context_headref_mismatch <number> — the combined view call reports a
+# different head ref than the metadata fixture's own headRefName.
+pr_context_headref_mismatch() { : >"$CLWT_GH_PRS/$1.context-headref-mismatch"; }
+# pr_context_cross_invalid <number> — the combined view call reports a
+# non-boolean isCrossRepository value.
+pr_context_cross_invalid() { : >"$CLWT_GH_PRS/$1.context-cross-invalid"; }
+# pr_context_author_invalid <number> — the combined view call reports an
+# author login containing characters no real GitHub login has.
+pr_context_author_invalid() { : >"$CLWT_GH_PRS/$1.context-author-invalid"; }
+# pr_context_author_underscore <number> — the combined view call reports a
+# GitHub Enterprise managed-user-style login containing an underscore.
+pr_context_author_underscore() { : >"$CLWT_GH_PRS/$1.context-author-underscore"; }
+# pr_context_base_invalid <number> — the combined view call reports a base
+# branch name that fails git check-ref-format --branch.
+pr_context_base_invalid() { : >"$CLWT_GH_PRS/$1.context-base-invalid"; }
 # pr_context_path <worktree-name> — pr-context.md's path for a managed
 # worktree's directory name (branch with / as -), matching where clwt writes
 # it: <primary git-common-dir>/clwt/sessions/<name>/pr-context.md.
@@ -824,17 +880,9 @@ seed_leftover_branch() {
       git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null
       ;;
     diverged)
-      local_sha=$(new_commit_on "$base" "diverged from $branch")
-      # `git branch -f` refuses atomically, inside one git process, when
-      # $branch is checked out in another worktree — unlike the worktree-list
-      # scrape above (a separate read, with a window after it), there is no
-      # gap here for force_advance_pr_head to land in. Fixture 615 depends on
-      # this exact order: this suite accumulates 50+ worktrees by the time
-      # that fixture runs, and a `worktree list --porcelain` enumeration slow
-      # enough to lose the race with the scrape above must still be stopped
-      # before it can force-push over $REMOTE.
-      git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null || return 1
       force_advance_pr_head "$branch" >/dev/null || return 1
+      local_sha=$(new_commit_on "$base" "diverged from $branch")
+      git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null
       ;;
     *)
       echo "seed_leftover_branch: unknown relation: $relation (want ahead|diverged)" >&2
@@ -3004,10 +3052,10 @@ header_head=$(sed -n 's/^- Head commit: //p' "$ctx_basic")
 check_equals 'pr-context.md header head commit equals the worktree HEAD' \
   "$worktree_head" "$header_head"
 
-# The gh stub's review-comments default is now the real --paginate --slurp
-# shape ([[]], not a bare []); this is the one place that default's
-# flattened-to-(none) rendering is checked for a PR with no other review
-# comments fixture at all.
+# The gh stub's review-comments default is the fixture's own per-page shape
+# ([[]], a single empty page, not a bare []); this is the one place that
+# default's joined-to-(none) rendering is checked for a PR with no other
+# review comments fixture at all.
 review_comments_default=$(awk '/^## Review comments$/{getline; print; exit}' "$ctx_basic")
 check_equals "a default PR's Review comments section renders (none)" \
   '(none)' "$review_comments_default"
@@ -3055,6 +3103,85 @@ check 'pr fails when the context fetch reports a different canonical URL' \
   test "$mismatch_rc" -ne 0
 check 'pr leaves no pr-context.md for a mismatched canonical URL' \
   test ! -f "$(pr_context_path feat-ctx-url-mismatch)"
+
+# --- gh returning a mismatched header scalar is refused, not rendered ------
+#
+# Each of these overrides exactly ONE header field the combined view call
+# reports, leaving every other field correct — proving each of
+# write_pr_context's pr_number/pr_head/pr_cross/pr_author/pr_base checks
+# fires on its own. Before these, deleting any one of those five checks
+# left no assertion in this suite failing, since nothing else inspects these
+# fields before they reach rendering.
+
+pr_meta 8853 feat/ctx-number-mismatch false
+pr_context_number_mismatch 8853
+launch_reset
+number_mismatch_out=$(clwt pr 8853 2>&1)
+number_mismatch_rc=$?
+check 'pr fails when the context fetch reports a different pull request number' \
+  test "$number_mismatch_rc" -ne 0
+check_contains 'that failure names the pull-request-number mismatch' \
+  'gh returned pull request #' "$number_mismatch_out"
+check 'pr leaves no pr-context.md for a mismatched pull request number' \
+  test ! -f "$(pr_context_path feat-ctx-number-mismatch)"
+
+pr_meta 8863 feat/ctx-headref-mismatch false
+pr_context_headref_mismatch 8863
+launch_reset
+headref_mismatch_out=$(clwt pr 8863 2>&1)
+headref_mismatch_rc=$?
+check 'pr fails when the context fetch reports a different head ref' \
+  test "$headref_mismatch_rc" -ne 0
+check_contains 'that failure names the head ref mismatch' \
+  'gh returned a different head ref' "$headref_mismatch_out"
+check 'pr leaves no pr-context.md for a mismatched head ref' \
+  test ! -f "$(pr_context_path feat-ctx-headref-mismatch)"
+
+pr_meta 8864 feat/ctx-cross-invalid false
+pr_context_cross_invalid 8864
+launch_reset
+cross_invalid_out=$(clwt pr 8864 2>&1)
+cross_invalid_rc=$?
+check 'pr fails when the context fetch reports a non-boolean fork flag' \
+  test "$cross_invalid_rc" -ne 0
+check_contains 'that failure names the invalid fork flag' \
+  'invalid fork flag' "$cross_invalid_out"
+check 'pr leaves no pr-context.md for a non-boolean fork flag' \
+  test ! -f "$(pr_context_path feat-ctx-cross-invalid)"
+
+pr_meta 8865 feat/ctx-author-invalid false
+pr_context_author_invalid 8865
+launch_reset
+author_invalid_out=$(clwt pr 8865 2>&1)
+author_invalid_rc=$?
+check 'pr fails when the context fetch reports an invalid author login' \
+  test "$author_invalid_rc" -ne 0
+check_contains 'that failure names the invalid author login' \
+  'invalid author login' "$author_invalid_out"
+check 'pr leaves no pr-context.md for an invalid author login' \
+  test ! -f "$(pr_context_path feat-ctx-author-invalid)"
+
+# A GitHub Enterprise managed-user login contains an underscore — the author
+# check must accept that, not just reject what it rejects.
+pr_meta 8866 feat/ctx-author-underscore false
+pr_context_author_underscore 8866
+launch_reset
+check 'pr succeeds when the author login contains an underscore (GHE managed user)' \
+  clwt pr 8866
+check 'pr-context.md exists for an underscore author login' \
+  test -f "$(pr_context_path feat-ctx-author-underscore)"
+
+pr_meta 8867 feat/ctx-base-invalid false
+pr_context_base_invalid 8867
+launch_reset
+base_invalid_out=$(clwt pr 8867 2>&1)
+base_invalid_rc=$?
+check 'pr fails when the context fetch reports an invalid base branch name' \
+  test "$base_invalid_rc" -ne 0
+check_contains 'that failure names the invalid base branch name' \
+  'invalid base branch name' "$base_invalid_out"
+check 'pr leaves no pr-context.md for an invalid base branch name' \
+  test ! -f "$(pr_context_path feat-ctx-base-invalid)"
 
 # --- a context-fetch failure keeps the new worktree; a retry reuses it -----
 
@@ -3138,14 +3265,16 @@ check_contains 'pr fences a description containing a triple-backtick line so it 
 # --- fence_for must count backticks through an invalid UTF-8 byte ----------
 #
 # `grep -oE` in a UTF-8 locale can silently find no match on a line containing
-# an invalid UTF-8 byte (this is the GNU grep behavior fence_for's LC_ALL=C
-# awk scan exists to avoid); undercounting there would pick too-short a fence
-# and let the content break out of it. This system's own `grep` (ugrep)
-# happens to handle the invalid byte leniently, so this assertion cannot be
-# toggled red/green against the OLD grep-based implementation on THIS
-# machine — it instead pins the exact expected fence length for the FIXED
-# awk implementation, so a future regression (back to a grep that DOES
-# undercount) still fails it.
+# an invalid UTF-8 byte (this is the GNU/BSD grep behavior fence_for's
+# LC_ALL=C awk scan exists to avoid); undercounting there would pick
+# too-short a fence and let the content break out of it. This assertion DOES
+# toggle red/green against the OLD grep-based implementation when this suite
+# runs the way it actually runs, as `bash clwt-test.sh`: that subprocess
+# resolves `grep` to the real /usr/bin/grep, which undercounts this exact
+# input (confirmed: `grep -oE` on it exits 1, no match). The interactive
+# shell's own `grep` is a wrapper that wraps ugrep instead, which is lenient
+# here — but that wrapper is a shell FUNCTION, never inherited by a `bash
+# script.sh` subprocess, so it is not what the suite's own invocations see.
 pr_meta 8856 feat/ctx-fence-invalid-utf8 false
 pr_diff 8856 "$(printf '\xffbackticks: `````\nend')"
 launch_reset
@@ -3154,6 +3283,53 @@ ctx_fence_utf8=$(pr_context_path feat-ctx-fence-invalid-utf8)
 diff_fence_utf8=$(awk '/^## Diff$/{getline; print; exit}' "$ctx_fence_utf8")
 check_equals 'pr fences a diff line with an invalid UTF-8 byte and a long backtick run' \
   '``````' "$diff_fence_utf8"
+
+# --- fence_for's own awk scan failing aborts the render, not a silently
+# under-sized (or stale) fence ------------------------------------------------
+#
+# No real awk on any real machine actually fails here — every awk executes
+# line 945's END block regardless of input. Exercised instead with a
+# substitute awk scoped to ONE invocation via a PATH prefix, not the whole
+# suite's shared PATH (which would also break the gh stub's own json_escape,
+# and every OTHER test's awk-based parsing of a rendered context file).
+#
+# The failure is triggered by CONTENT, not by matching fence_for's program
+# text: Description (rendered FIRST) succeeds normally and sets PR_FENCE for
+# real, then Diff (rendered LAST) is the one that fails. That ordering is
+# what makes this catch render_section's `|| exit 1` specifically — if only
+# the very first section ever failed, PR_FENCE would still be unset from
+# process start, and `set -u` would abort the render on its own regardless
+# of whether render_section propagates fence_for's failure at all.
+real_awk=$(command -v awk)
+broken_awk_dir=$TMP/broken-awk
+mkdir -p "$broken_awk_dir"
+cat >"$broken_awk_dir/awk" <<'STUB'
+#!/bin/sh
+case "$*" in
+  *RLENGTH*)
+    input=$(cat)
+    case "$input" in
+      *CLWT_TEST_TRIGGER_AWK_FAIL*) exit 1 ;;
+    esac
+    printf '%s' "$input" | "$CLWT_TEST_REAL_AWK" "$@"
+    exit $?
+    ;;
+esac
+exec "$CLWT_TEST_REAL_AWK" "$@"
+STUB
+chmod +x "$broken_awk_dir/awk"
+
+pr_meta 8868 feat/ctx-fence-awk-fails false
+pr_diff 8868 'CLWT_TEST_TRIGGER_AWK_FAIL'
+launch_reset
+fence_awk_fail_out=$(CLWT_TEST_REAL_AWK="$real_awk" PATH="$broken_awk_dir:$PATH" clwt pr 8868 2>&1)
+fence_awk_fail_rc=$?
+check "pr fails when fence_for's own awk scan fails on a LATER section, after an EARLIER one already set a real fence" \
+  test "$fence_awk_fail_rc" -ne 0
+check_contains 'that failure names the render, not a downstream symptom' \
+  "could not render pull request #8868's context" "$fence_awk_fail_out"
+check 'pr leaves no pr-context.md when fence_for cannot run' \
+  test ! -f "$(pr_context_path feat-ctx-fence-awk-fails)"
 
 # --- gh pr checks exit-code rules -------------------------------------------
 
@@ -3189,22 +3365,24 @@ check_fails 'pr fails when gh pr checks exits 1 with empty stdout and an error' 
 check 'pr leaves no pr-context.md when gh pr checks genuinely fails' \
   test ! -f "$(pr_context_path feat-ctx-checks-broken)"
 
-# --- review comments use --paginate/--slurp against the exact repo ---------
+# --- review comments use --paginate against the exact repo, WITHOUT --slurp
+# (real gh rejects --slurp combined with --jq outright) ---------------------
 
 pr_meta 860 feat/ctx-review-comments false
 launch_reset
 clwt pr 860 >/dev/null 2>&1
 api_call=$(grep 'pulls/860/comments' "$CLWT_GH_API_LOG")
 check_contains 'pr requests review comments with --paginate' '--paginate' "$api_call"
-check_contains 'pr requests review comments with --slurp' '--slurp' "$api_call"
+check_not_contains 'pr does not request review comments with --slurp' \
+  '--slurp' "$api_call"
 check_contains 'pr requests review comments against github.com by --hostname' \
   '--hostname github.com' "$api_call"
 check_contains 'pr requests review comments scoped to the exact repository and PR' \
   'repos/owner/project/pulls/860/comments' "$api_call"
 
-# --- gh api --paginate --slurp wraps results in a page array ([[]] for zero
-# results, never a bare []); write_pr_context must flatten it, not just
-# forward it, or an empty PR would render its own wrapper as "content" ------
+# --- gh api --paginate --jq runs per PAGE, not slurped; write_pr_context
+# joins the per-comment lines into an array itself, so an empty PR renders
+# (none) and a two-page result is not left as a page-array wrapper ---------
 
 pr_meta 8860 feat/ctx-review-comments-empty-pages false
 pr_review_comments 8860 '[[]]'
@@ -3212,7 +3390,7 @@ launch_reset
 clwt pr 8860 >/dev/null 2>&1
 ctx_empty_pages=$(pr_context_path feat-ctx-review-comments-empty-pages)
 review_comments_empty_pages=$(awk '/^## Review comments$/{getline; print; exit}' "$ctx_empty_pages")
-check_equals 'pr renders (none) for empty paginated review comments ([[]])' \
+check_equals 'pr renders (none) for a review-comments fetch with zero comments' \
   '(none)' "$review_comments_empty_pages"
 
 pr_meta 8861 feat/ctx-review-comments-two-pages false
@@ -3220,11 +3398,11 @@ pr_review_comments 8861 '[[{"id":1,"body":"first page"}],[{"id":2,"body":"second
 launch_reset
 clwt pr 8861 >/dev/null 2>&1
 ctx_two_pages=$(cat "$(pr_context_path feat-ctx-review-comments-two-pages)")
-check_contains 'pr flattens two paginated pages into one list (first id present)' \
+check_contains 'pr joins two paginated pages into one list (first id present)' \
   '"id":1' "$ctx_two_pages"
-check_contains 'pr flattens two paginated pages into one list (second id present)' \
+check_contains 'pr joins two paginated pages into one list (second id present)' \
   '"id":2' "$ctx_two_pages"
-check_not_contains 'pr does not leave the page-array wrapper in the rendered output' \
+check_not_contains 'pr does not leave a page-array wrapper in the rendered output' \
   '[[' "$ctx_two_pages"
 
 # --- Changed files truncation marker ----------------------------------------
@@ -3483,12 +3661,21 @@ check 'a symlinked sessions directory leaves its target untouched' \
 rm -f "$sessions_dir"
 mv "$TMP/sessions-dir-backup" "$sessions_dir"
 
+# resolve_session_folder's containment check would ALSO refuse this symlink
+# (evil_name resolves outside the managed sessions root), so a bare
+# exit-code-and-untouched pair does not depend on refuse_symlinked_session_
+# path's own `-L "$name"` guard specifically — check_contains on the exact
+# message is what's covered only as a pair with that containment backup.
 pr_meta 866 feat/ctx-symlink-name false
 evil_name=$TMP/evil-name-target
 mkdir -p "$evil_name"
 ln -s "$evil_name" "$sessions_dir/feat-ctx-symlink-name"
 launch_reset
-check_fails 'pr refuses a symlinked session folder' clwt pr 866
+symlink_name_out=$(clwt pr 866 2>&1)
+symlink_name_rc=$?
+check 'pr refuses a symlinked session folder' test "$symlink_name_rc" -ne 0
+check_contains 'pr names the symlinked session folder specifically' \
+  'refusing a symlinked session folder' "$symlink_name_out"
 check 'a symlinked session folder leaves its target untouched' \
   test -z "$(ls -A "$evil_name" 2>/dev/null)"
 rm -f "$sessions_dir/feat-ctx-symlink-name"
@@ -3566,7 +3753,14 @@ clwt new feat/ctx-rm-symlink-name >/dev/null 2>&1
 evil_rm_name=$TMP/evil-rm-name-target
 mkdir -p "$evil_rm_name"
 ln -s "$evil_rm_name" "$sessions_dir/feat-ctx-rm-symlink-name"
-check_fails 'remove refuses a symlinked session folder' clwt remove feat/ctx-rm-symlink-name
+# Same pairing as the pr-path guard above: the containment check in
+# resolve_session_folder is a backup for this one, so check_contains on the
+# exact message is what proves THIS guard specifically, not just its backup.
+symlink_rm_name_out=$(clwt remove feat/ctx-rm-symlink-name 2>&1)
+symlink_rm_name_rc=$?
+check 'remove refuses a symlinked session folder' test "$symlink_rm_name_rc" -ne 0
+check_contains 'remove names the symlinked session folder specifically' \
+  'refusing a symlinked session folder' "$symlink_rm_name_out"
 check 'a symlinked session folder leaves its target untouched on removal' \
   test -z "$(ls -A "$evil_rm_name" 2>/dev/null)"
 rm -f "$sessions_dir/feat-ctx-rm-symlink-name"

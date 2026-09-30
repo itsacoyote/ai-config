@@ -942,13 +942,21 @@ fence_for() {
   # containing an invalid UTF-8 byte — not an error, so pipefail never catches
   # it — which undercounts the fence and lets that content break out of it.
   # A byte-oriented C-locale awk scan has no such blind spot.
+  #
+  # Checked explicitly rather than left to `set -e`: every caller of this
+  # function runs inside write_pr_context, which is itself always invoked as
+  # one side of `||` — that suspends errexit for its entire call tree,
+  # including this one, so a failing awk would otherwise leave $longest
+  # empty and silently fall through to the minimum 3-backtick fence,
+  # regardless of how long a run the content actually contains.
   longest=$(printf '%s\n' "$content" | LC_ALL=C awk '{
     s = $0
     while (match(s, /`+/)) {
       if (RLENGTH > m) m = RLENGTH
       s = substr(s, RSTART + RLENGTH)
     }
-  } END { print m + 0 }')
+  } END { print m + 0 }') || return 1
+  [[ $longest =~ ^[0-9]+$ ]] || return 1
   len=$((longest + 1))
   ((len >= 3)) || len=3
   printf -v PR_FENCE '%*s' "$len" ''
@@ -973,7 +981,13 @@ render_section() {
     printf '(none)\n\n'
     return 0
   fi
-  fence_for "$content"
+  # `|| exit 1`, not `|| return 1`: render_section always runs inside the
+  # command-substitution subshell that builds $body in write_pr_context,
+  # where errexit is suspended (see fence_for) — a `return` here would only
+  # end THIS call and let the next render_section run anyway, silently
+  # dropping a section rather than aborting. `exit` ends that subshell, which
+  # the `body=$( ... ) || abort_pr_context ...` check below it catches.
+  fence_for "$content" || exit 1
   printf '%s\n%s\n%s\n' "$PR_FENCE" "$content" "$PR_FENCE"
   [[ -z $marker ]] || printf '%s\n' "$marker"
   printf '\n'
@@ -1104,6 +1118,11 @@ write_pr_context() {
   # before anything noticed — the final re-read alone only catches a head
   # that is STILL moved by the time it runs, not one that moved away and
   # back in between (an ABA change hidden from a last-read-only check).
+  # This narrows that window, it does not close it: the review-comments,
+  # checks, and diff calls below are still not individually pinned to
+  # expected_oid, so a head that moves away and back between THIS check and
+  # the final re-read can still have them describe a commit other than the
+  # one this context claims to be about.
   [[ $pr_number == "$number" ]] ||
     abort_pr_context "gh returned pull request #$pr_number's data for #$number" || return 1
   [[ $pr_canonical_url == "$pr_url" ]] ||
@@ -1116,8 +1135,10 @@ write_pr_context() {
     abort_pr_context "pull request #$number changed while fetching its context; run clwt pr $number again" || return 1
   [[ $pr_cross == true || $pr_cross == false ]] ||
     abort_pr_context "pull request #$number returned an invalid fork flag" || return 1
-  [[ $pr_author =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]] ||
+  [[ $pr_author =~ ^[A-Za-z0-9_-]+(\[bot\])?$ ]] ||
     abort_pr_context "pull request #$number returned an invalid author login" || return 1
+  git check-ref-format --branch "$pr_base" >/dev/null 2>&1 ||
+    abort_pr_context "pull request #$number returned an invalid base branch name" || return 1
 
   local field
   for field in title_len body_len issues_len files_len changed_files comments_len reviews_len; do
@@ -1126,14 +1147,20 @@ write_pr_context() {
     esac
   done
 
-  local review_comments_json
-  # `add // []` flattens gh's own --paginate --slurp shape — an array of
-  # PAGES, e.g. `[[]]` for zero results, never a bare `[]` — into one plain
-  # array, so json_array_empty below judges the real content instead of
-  # always seeing a non-empty outer wrapper.
-  review_comments_json=$(gh api --hostname "$pr_host" --paginate --slurp --jq 'add // []' \
+  local review_comments_json review_comments_lines
+  # Real gh rejects `--paginate --slurp` combined with `--jq` outright ("the
+  # --slurp option is not supported with --jq or --template"), so --slurp is
+  # dropped here. `--jq '.[] | tojson'` runs per PAGE instead, emitting one
+  # compact JSON object per line for every comment across every page — bash
+  # joins the lines into an array below, with no jq dependency of its own.
+  review_comments_lines=$(gh api --hostname "$pr_host" --paginate --jq '.[] | tojson' \
     "repos/$pr_owner/$pr_repo/pulls/$number/comments" 2>/dev/null) ||
     abort_pr_context "gh api failed while fetching pull request #$number's review comments" || return 1
+  if [[ -z $review_comments_lines ]]; then
+    review_comments_json='[]'
+  else
+    review_comments_json="[$(printf '%s' "$review_comments_lines" | tr '\n' ',')]"
+  fi
 
   local checks_out checks_rc=0 checks_errfile checks_err checks_err_lower
   checks_errfile=$(mktemp "${TMPDIR:-/tmp}/clwt-pr-checks-err.XXXXXX") ||
@@ -1184,10 +1211,12 @@ write_pr_context() {
   description_empty=$((title_len == 0 && body_len == 0))
 
   # Rendered into a variable — with a trailing marker that survives command
-  # substitution's newline-stripping and is trimmed back off below — so the
-  # write to $tmp is the ONE actual file write to check. A `{ ... } >"$tmp"`
-  # group instead reports only the LAST command's exit status, silently
-  # hiding an earlier write failure inside it.
+  # substitution's newline-stripping and is trimmed back off below — rather
+  # than a `{ ... } >"$tmp"` group, which would report only the LAST
+  # command's exit status and hide an earlier write failure inside it. The
+  # `||` below is what catches render_section's `exit 1` on a fence_for
+  # failure: that only ends this subshell, so the failure is otherwise
+  # invisible to everything after it (see render_section).
   local body
   body=$( {
     printf '# Pull request #%s\n\n' "$number"
