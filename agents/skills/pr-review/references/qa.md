@@ -18,13 +18,18 @@ obvious edge cases hold.
 
 ## Two paths, depending on what the harness can do
 
-**Can run commands** (shell, dev server, browser driver available): exercise the real
-behavior — hit the endpoint, drive the UI, run the CLI, walk the actual flow — and report what
-you observed: the command run and its actual output, or the UI steps and what rendered.
+**Can run commands** (shell, dev server, browser driver available): before installing,
+building, testing, or starting anything from the PR, name the risk in one line and get the
+developer's **explicit confirmation for this PR** — never on a fork (see Intake's `Fork:`
+check). A delegated subagent only takes this path when its task explicitly says that
+confirmation was already given for this PR; otherwise it treats itself as the read-only path
+below. Once confirmed, exercise the real behavior — hit the endpoint, drive the UI, run the
+CLI, walk the actual flow — and report what you observed: the command run and its actual
+output, or the UI steps and what rendered.
 
-**Cannot run commands** (read-only session): trace the code path statically instead — follow
-the wiring from entry point to output and confirm it's consistent with the claim. Then hand the
-developer a copy-pasteable verification package:
+**Cannot run commands** (read-only session, on a fork, or no confirmation given): trace the
+code path statically instead — follow the wiring from entry point to output and confirm it's
+consistent with the claim. Then hand the developer a copy-pasteable verification package:
 
 - **UI feature** — the exact route/URL, any login or seed data needed, numbered steps to reach
   and exercise the feature, and what correct behavior looks like at each step.
