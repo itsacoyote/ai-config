@@ -242,6 +242,9 @@ gh_pr_view_context() {
   if [ -f "$CWT_GH_PRS/$number.context-base-invalid" ]; then
     base='-bad..base'
   fi
+  if [ -f "$CWT_GH_PRS/$number.context-base-missing" ]; then
+    base='feat/this-base-branch-does-not-exist'
+  fi
   title=$(read_fixture "$CWT_GH_PRS/$number.title" "Test PR #$number")
   body=$(read_fixture "$CWT_GH_PRS/$number.body" "Test PR #$number body")
   issues=$(read_fixture "$CWT_GH_PRS/$number.issues.json" '[]')
@@ -537,17 +540,25 @@ export CWT_GH_API_LOG="$TMP/gh-api.log"
 mkdir -p "$CWT_GH_STATES" "$CWT_GH_PRS"
 : >"$CWT_GH_API_LOG"
 pr_state() { printf '%s\n' "$2" >"$CWT_GH_STATES/$(printf '%s' "$1" | tr '/' '-')"; }
+# write_pr_meta <number> <head-ref> <is-cross-repository> <oid> [head-owner]
+# [head-repo] — the combined-header printf every pr_meta* variant below
+# shares, factored out once a third variant needed it. owner/repo default to
+# the identity cwt derives from $REMOTE ($HOME/remotes/owner/project.git),
+# i.e. "origin is the pull request's own repository".
+write_pr_meta() {
+  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
+    "$2" "$3" "${5:-owner}" "${6:-project}" \
+    "https://github.com/owner/project/pull/$1" "$4" >"$CWT_GH_PRS/$1"
+}
+
 # pr_meta <number> <head-ref> <is-cross-repository> [head-owner] [head-repo] —
-# owner/repo default to the identity cwt derives from $REMOTE
-# ($HOME/remotes/owner/project.git), i.e. "origin is the pull request's own
-# repository". Override them for a pull request whose head lives somewhere else,
-# which is what a fork-workflow clone (origin=fork, upstream=base) looks like.
+# override head-owner/head-repo for a pull request whose head lives somewhere
+# else, which is what a fork-workflow clone (origin=fork, upstream=base) looks
+# like.
 pr_meta() {
   local oid
   oid=$(push_pr_head "$2") || return 1
-  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
-    "$2" "$3" "${4:-owner}" "${5:-project}" \
-    "https://github.com/owner/project/pull/$1" "$oid" >"$CWT_GH_PRS/$1"
+  write_pr_meta "$1" "$2" "$3" "$oid" "${4:-}" "${5:-}"
 }
 
 # pr_meta_with_file <number> <head-ref> <is-cross-repository> <path>
@@ -557,9 +568,7 @@ pr_meta() {
 pr_meta_with_file() {
   local oid
   oid=$(push_pr_head_with_file "$2" "$4" "${5:-$4}") || return 1
-  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
-    "$2" "$3" owner project \
-    "https://github.com/owner/project/pull/$1" "$oid" >"$CWT_GH_PRS/$1"
+  write_pr_meta "$1" "$2" "$3" "$oid"
 }
 
 # pr_meta_from_main <number> <head-ref> [<old-path> <new-path> <content>] —
@@ -570,9 +579,26 @@ pr_meta_with_file() {
 pr_meta_from_main() {
   local oid
   oid=$(push_pr_head_from_main "$2" "${3:-}" "${4:-}" "${5:-}") || return 1
-  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
-    "$2" false owner project \
-    "https://github.com/owner/project/pull/$1" "$oid" >"$CWT_GH_PRS/$1"
+  write_pr_meta "$1" "$2" false "$oid"
+}
+
+# pr_meta_from_sha <number> <head-ref> <parent-sha> — like pr_meta, but the
+# pull request head is parented on an EXPLICIT, already-superseded commit
+# rather than origin/main's current tip (see push_pr_head_from_sha), for a
+# fixture that must have branched BEFORE the base advanced further.
+pr_meta_from_sha() {
+  local oid
+  oid=$(push_pr_head_from_sha "$2" "$3") || return 1
+  write_pr_meta "$1" "$2" false "$oid"
+}
+
+# pr_meta_from_main_adding <number> <head-ref> <path> [<content>] — like
+# pr_meta_from_main, but adds <path> instead of the generic unrelated marker
+# (see push_pr_head_from_main_adding).
+pr_meta_from_main_adding() {
+  local oid
+  oid=$(push_pr_head_from_main_adding "$2" "$3" "${4:-}") || return 1
+  write_pr_meta "$1" "$2" false "$oid"
 }
 
 # --- pr-context.md fixtures -------------------------------------------------
@@ -652,6 +678,11 @@ pr_context_author_underscore() { : >"$CWT_GH_PRS/$1.context-author-underscore"; 
 # pr_context_base_invalid <number> — the combined view call reports a base
 # branch name that fails git check-ref-format --branch.
 pr_context_base_invalid() { : >"$CWT_GH_PRS/$1.context-base-invalid"; }
+# pr_context_base_missing <number> — the combined view call reports a
+# validly-formatted base branch name that has no refs/remotes/origin/<name>
+# in the worktree at all (unlike context-base-invalid, which fails format
+# validation before the Req 4b guard ever runs).
+pr_context_base_missing() { : >"$CWT_GH_PRS/$1.context-base-missing"; }
 # pr_context_path <worktree-name> — pr-context.md's path for a managed
 # worktree's directory name (branch with / as -), matching where cwt writes
 # it: <primary git-common-dir>/cwt/sessions/<name>/pr-context.md.
@@ -708,6 +739,15 @@ cached_object() {
   git -C "$PRIMARY" rev-parse "refs/pr-fixture-cache/$branch"
 }
 
+# push_and_print <branch> <sha> — force-pushes <sha> to <branch> on $REMOTE
+# from the scratch clone and prints <sha>: the shared tail every
+# push_pr_head* variant below ends with.
+push_and_print() {
+  local branch=$1 sha=$2
+  git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
+  printf '%s\n' "$sha"
+}
+
 # push_pr_head <branch> — gives a pr_meta fixture a REAL head branch on
 # $REMOTE, pushed from the scratch clone (never $PRIMARY — see
 # ensure_scratch_push) so $PRIMARY's own origin tracking ref for it stays
@@ -717,22 +757,34 @@ push_pr_head() {
   ensure_scratch_push
   sha=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse HEAD^{tree})" \
     -p HEAD -m "initial head for $branch ($RANDOM$RANDOM)")
-  git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
-  printf '%s\n' "$sha"
+  push_and_print "$branch" "$sha"
 }
 
-# commit_adding_path <parent-sha> <path> <content> — plumbing helper: a new
-# commit, parented on <parent-sha>, whose tree is <parent-sha>'s tree with
-# <path> added/replaced. A `symlink:<target>` content builds a symlink blob
-# instead of a regular file. Prints the new commit sha. Uses a throwaway
-# GIT_INDEX_FILE rather than $SCRATCH_PUSH's real index, so building one
-# fixture's tree never disturbs another's and nothing here depends on what
-# $SCRATCH_PUSH happens to have checked out.
-commit_adding_path() {
-  local parent=$1 path=$2 content=$3 idx mode blob tree
+# with_fixture_tree <parent-sha> <message> <mutate-fn> [mutate-args...] —
+# shared scaffold for commit_adding_path/commit_moving_path: builds a
+# throwaway index seeded from <parent-sha>'s tree (never $SCRATCH_PUSH's real
+# index, so building one fixture's tree never disturbs another's and nothing
+# here depends on what $SCRATCH_PUSH happens to have checked out), lets
+# <mutate-fn> edit it via GIT_INDEX_FILE, writes the resulting tree, and
+# commits it on <parent-sha>. Prints the new commit sha.
+with_fixture_tree() {
+  local parent=$1 message=$2 mutate=$3
+  shift 3
+  local idx tree
   idx=$(mktemp "$TMP/pr-fixture-index.XXXXXX")
   rm -f "$idx"
   GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" read-tree "$parent"
+  "$mutate" "$idx" "$@"
+  tree=$(GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" write-tree)
+  rm -f "$idx"
+  git -C "$SCRATCH_PUSH" commit-tree "$tree" -p "$parent" -m "$message"
+}
+
+# _fixture_add_path <idx> <path> <content> — with_fixture_tree's mutate-fn
+# for commit_adding_path. A `symlink:<target>` content builds a symlink blob
+# instead of a regular file.
+_fixture_add_path() {
+  local idx=$1 path=$2 content=$3 mode blob
   case $content in
     symlink:*)
       mode=120000
@@ -744,9 +796,23 @@ commit_adding_path() {
       ;;
   esac
   GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --add --cacheinfo "$mode,$blob,$path"
-  tree=$(GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" write-tree)
-  rm -f "$idx"
-  git -C "$SCRATCH_PUSH" commit-tree "$tree" -p "$parent" -m "add $path"
+}
+
+# commit_adding_path <parent-sha> <path> <content> — plumbing helper: a new
+# commit, parented on <parent-sha>, whose tree is <parent-sha>'s tree with
+# <path> added/replaced. Prints the new commit sha.
+commit_adding_path() {
+  local parent=$1 path=$2 content=$3
+  with_fixture_tree "$parent" "add $path" _fixture_add_path "$path" "$content"
+}
+
+# _fixture_move_path <idx> <old-path> <new-path> <content> —
+# with_fixture_tree's mutate-fn for commit_moving_path.
+_fixture_move_path() {
+  local idx=$1 old=$2 new=$3 content=$4 blob
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --force-remove "$old"
+  blob=$(printf '%s\n' "$content" | git -C "$SCRATCH_PUSH" hash-object -w --stdin)
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --add --cacheinfo "100644,$blob,$new"
 }
 
 # commit_moving_path <parent-sha> <old-path> <new-path> <content> — like
@@ -755,16 +821,8 @@ commit_adding_path() {
 # --no-renames diff) — exactly what the "renamed-away .agents file" fixture
 # needs: the OLD path must still show up on its own line.
 commit_moving_path() {
-  local parent=$1 old=$2 new=$3 content=$4 idx blob tree
-  idx=$(mktemp "$TMP/pr-fixture-index.XXXXXX")
-  rm -f "$idx"
-  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" read-tree "$parent"
-  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --force-remove "$old"
-  blob=$(printf '%s\n' "$content" | git -C "$SCRATCH_PUSH" hash-object -w --stdin)
-  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --add --cacheinfo "100644,$blob,$new"
-  tree=$(GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" write-tree)
-  rm -f "$idx"
-  git -C "$SCRATCH_PUSH" commit-tree "$tree" -p "$parent" -m "move $old to $new"
+  local parent=$1 old=$2 new=$3 content=$4
+  with_fixture_tree "$parent" "move $old to $new" _fixture_move_path "$old" "$new" "$content"
 }
 
 # push_pr_head_with_file <branch> <path> [<content>] — like push_pr_head, but
@@ -777,16 +835,18 @@ push_pr_head_with_file() {
   local branch=$1 path=$2 content=${3:-$path} sha
   ensure_scratch_push
   sha=$(commit_adding_path "$(git -C "$SCRATCH_PUSH" rev-parse HEAD)" "$path" "$content")
-  git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
-  printf '%s\n' "$sha"
+  push_and_print "$branch" "$sha"
 }
 
 # advance_origin_main_with_file <path> [<content>] — genuinely advances
 # $REMOTE's own main branch (not a PR head) to add <path>, then fetches that
 # advance into $PRIMARY so its origin/main tracking ref — what the Req 4b
-# guard's merge-base is computed against — sees it. For the "base already has
-# .agents/skills" fixture, which must prove the guard looks at what the PULL
-# REQUEST itself changed, not merely what the tree currently contains.
+# guard's merge-base (and its base-divergence check) are computed against —
+# sees it. For the "base already has .agents/skills" fixture, which must
+# prove the guard looks at what the PULL REQUEST itself changed, not merely
+# what the tree currently contains. Prints the new main tip, for a caller
+# that needs to branch a PR off this exact point before a LATER advance
+# moves main past it (the stale-restore fixture).
 advance_origin_main_with_file() {
   local path=$1 content=${2:-$path} base sha
   ensure_scratch_push
@@ -795,6 +855,7 @@ advance_origin_main_with_file() {
   sha=$(commit_adding_path "$base" "$path" "$content")
   git -C "$SCRATCH_PUSH" push -q origin "$sha:refs/heads/main"
   git -C "$PRIMARY" fetch -q origin main
+  printf '%s\n' "$sha"
 }
 
 # push_pr_head_from_main <branch> [<old-path> <new-path> <content>] — like
@@ -817,8 +878,41 @@ push_pr_head_from_main() {
     sha=$(commit_adding_path "$base" "pr-notes-$(printf '%s' "$branch" | tr '/' '-').txt" \
       "unrelated change for $branch")
   fi
-  git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
-  printf '%s\n' "$sha"
+  push_and_print "$branch" "$sha"
+}
+
+# push_pr_head_from_main_adding <branch> <path> [<content>] — like
+# push_pr_head_from_main with no path arguments, but adds <path> (content
+# defaults to <path> itself) instead of the generic unrelated marker file.
+# Parented on origin/main's CURRENT tip, so a fixture built from this never
+# ALSO trips shadow_base_diverged on its own merely by existing: unlike
+# push_pr_head_with_file, which builds on $SCRATCH_PUSH's stale clone-time
+# HEAD and so inherits whatever .agents/.codex content the base has since
+# accumulated as a one-sided (absent-on-head) tree. For fixtures that must
+# isolate the per-path merge-base scan from that separate base-divergence
+# check.
+push_pr_head_from_main_adding() {
+  local branch=$1 path=$2 content=${3:-$path} base sha
+  ensure_scratch_push
+  git -C "$SCRATCH_PUSH" fetch -q origin main
+  base=$(git -C "$SCRATCH_PUSH" rev-parse origin/main)
+  sha=$(commit_adding_path "$base" "$path" "$content")
+  push_and_print "$branch" "$sha"
+}
+
+# push_pr_head_from_sha <branch> <parent-sha> — like push_pr_head_from_main,
+# but parented on an EXPLICIT commit rather than origin/main's current tip:
+# for a pull request that branched BEFORE the base advanced further (the
+# stale-restore fixture, where main's own later change must land only AFTER
+# this branch point). The PR commit itself only adds an unrelated marker
+# file; whatever <parent-sha> already carries under .agents/.codex reaches
+# the resulting head untouched.
+push_pr_head_from_sha() {
+  local branch=$1 parent=$2 sha
+  ensure_scratch_push
+  sha=$(commit_adding_path "$parent" "pr-notes-$(printf '%s' "$branch" | tr '/' '-').txt" \
+    "unrelated change for $branch")
+  push_and_print "$branch" "$sha"
 }
 
 # force_advance_pr_head <branch> — force-moves an EXISTING PR head on $REMOTE
@@ -2661,7 +2755,7 @@ rm -f "$FAILGIT/git"
 # request, must not withhold the prompt — the guard looks at what the pull
 # request itself changed relative to its merge base, not merely what the
 # checked-out tree contains.
-advance_origin_main_with_file '.agents/skills/existing/SKILL.md' 'pre-existing skill'
+advance_origin_main_with_file '.agents/skills/existing/SKILL.md' 'pre-existing skill' >/dev/null
 
 pr_meta_from_main 960 feat/shadow-base-already
 launch_reset
@@ -2679,6 +2773,88 @@ launch_reset
 shadow_renamed_out=$(cwt pr 961 2>&1)
 check_contains 'pr withholds the review prompt when a renamed-away .agents file counts' \
   '.agents or .codex' "$shadow_renamed_out"
+
+# An unqualified "origin/$base_ref" is ambiguous: git's own ref-disambiguation
+# order tries refs/heads before refs/remotes, so a pull request whose own
+# head branch happens to be named "origin/main" makes that string resolve to
+# the checked-out branch itself once `gh pr checkout` creates it — comparing
+# HEAD against HEAD and finding no .agents change at all, even though the
+# branch added one relative to the REAL origin/main.
+pr_meta_with_file 962 origin/main false \
+  '.agents/skills/pr-review/SKILL.md' 'malicious skill'
+launch_reset
+shadow_ambiguous_ref_out=$(cwt pr 962 2>&1)
+check_contains 'pr withholds the review prompt when the PR head branch name itself collides with origin/main' \
+  '.agents or .codex' "$shadow_ambiguous_ref_out"
+check_equals 'the ambiguous-ref collision sends no startup prompt at all' '' "$(launched args)"
+
+# `:(icase)` only folds ASCII, so a case-insensitive filesystem (APFS) can
+# open a non-ASCII confusable like U+017F ("ſ", LATIN SMALL LETTER LONG S) as
+# ".agents" — caught here by failing closed on the byte itself, not by
+# matching against a literal ".agents" string. Built with pr_meta_from_main_adding
+# (parented on origin/main's current tip, adding ONLY this one new top-level
+# path) rather than pr_meta_with_file: the real ".agents" this section's
+# earlier fixtures already added to origin/main must reach this PR's head
+# unchanged, so the only thing that can make it withhold is this fixture's
+# own ".agenſ" path — not shadow_base_diverged's separate one-sided-tree rule.
+shadow_confusable_path=$(printf '.agen\xc5\xbf/skills/pr-review/SKILL.md')
+pr_meta_from_main_adding 963 feat/shadow-confusable "$shadow_confusable_path" 'malicious skill'
+launch_reset
+shadow_confusable_out=$(cwt pr 963 2>&1)
+check_contains 'pr withholds the review prompt when a top-level dir is a non-ASCII confusable of .agents' \
+  '.agents or .codex' "$shadow_confusable_out"
+
+# The fail-closed rule is "any top-level byte outside printable ASCII", not
+# "looks like .agents" — a non-ASCII top-level dir unrelated to skills at all
+# still withholds. Same pr_meta_from_main_adding isolation as above.
+shadow_nonascii_path=$(printf '\xc3\xa9trange/notes.md')
+pr_meta_from_main_adding 964 feat/shadow-nonascii-unrelated "$shadow_nonascii_path" 'unrelated content'
+launch_reset
+shadow_nonascii_out=$(cwt pr 964 2>&1)
+check_contains 'pr withholds the review prompt when any top-level path component is non-ASCII' \
+  '.agents or .codex' "$shadow_nonascii_out"
+
+# Sanity check on the two fixtures above: an ordinary ASCII top-level change
+# outside .agents/.codex must still send the prompt normally. Parented on
+# origin/main's CURRENT tip (pr_meta_from_main, like the "base already has
+# .agents/skills" fixture above) rather than $SCRATCH_PUSH's stale clone-time
+# HEAD — a PR built on that older ancestor would predate the .agents folder
+# this section's earlier fixtures already added to origin/main, which
+# shadow_base_diverged is specified to (acceptably) flag as a one-sided tree
+# on its own; this fixture must stay clear of that to test what it says it
+# tests.
+pr_meta_from_main 965 feat/shadow-ordinary-change
+launch_reset
+cwt pr 965 >/dev/null 2>&1
+check_equals 'pr sends the review prompt for an ordinary top-level change outside .agents/.codex' \
+  "--
+\$pr-review 965 $(pr_context_path feat-shadow-ordinary-change)" \
+  "$(launched_arg_list | tail -2)"
+
+# A pull request that still carries an OLD .agents file completely unchanged
+# from its own merge base shows NO diff there against that merge base — the
+# base branch is the thing that moved, changing the same file AFTER this
+# branch forked. Only a direct comparison against origin/$base_ref's CURRENT
+# tip (not the merge base) catches this.
+stale_base_sha=$(advance_origin_main_with_file '.agents/skills/stale/SKILL.md' 'original content')
+advance_origin_main_with_file '.agents/skills/stale/SKILL.md' 'updated content' >/dev/null
+pr_meta_from_sha 970 feat/shadow-stale-restore "$stale_base_sha"
+launch_reset
+shadow_stale_out=$(cwt pr 970 2>&1)
+check_contains 'pr withholds the review prompt when the PR still carries a .agents file the base has since changed' \
+  '.agents or .codex' "$shadow_stale_out"
+
+# A base branch name cwt cannot resolve to a local refs/remotes/origin/<name>
+# at all (a stale clone, or a base branch renamed/deleted upstream since the
+# last fetch) fails closed exactly like a confirmed match, the same as an
+# unresolvable merge-base.
+pr_meta 971 feat/shadow-base-missing false
+pr_context_base_missing 971
+launch_reset
+shadow_base_missing_out=$(cwt pr 971 2>&1)
+check_contains 'pr withholds the review prompt when origin/$base_ref cannot be resolved at all' \
+  'this-base-branch-does-not-exist' "$shadow_base_missing_out"
+check 'pr still launches when the base ref cannot be resolved' test -n "$(launched pwd)"
 
 section 'pr --force'
 
