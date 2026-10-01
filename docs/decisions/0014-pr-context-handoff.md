@@ -34,6 +34,16 @@ cannot move into the shared `agents/skills/` library as-is (ADR 0010).
   new portable `agents/skills/pr-review` serves Codex and Pi; in Pi the file is the only
   intake path, and posting becomes a printed command the developer runs.
 - `pwt pr`'s tool/trust boundary is unchanged.
+- A pull request could otherwise replace the review by shipping its own
+  `.agents/skills/pr-review` (Codex does not rank a personal skill above a project one on a
+  name collision; Pi keeps the first-discovered skill). `cwt pr` withholds the startup
+  prompt — warning, not refusing to launch — when a local `git diff` of the checked-out PR
+  against its merge base touches a path under `.agents` or `.codex`, failing closed on a
+  symlinked entry or a non-ASCII top-level name it cannot safely fold. `pwt pr` instead pins
+  Pi's skill discovery to the personal `~/.agents/skills/pr-review` with `--no-skills
+  --skill <path>`, ahead of its existing tool/trust suffix, and refuses a passthrough
+  `--skill`/`--no-skills` in review mode. Claude needs neither guard: it ranks personal
+  skills above project ones.
 - The portable skill's Codex and Pi paths differ at intake, QA, and posting. This fits
   ADR 0010's allowance for small capability differences: both paths are supported, and
   the method (intake → passes → severity table → curation gate → one review) is the same.
@@ -84,6 +94,11 @@ this order; readers find sections by these exact headings.
   contract between the CLIs and the skills; changing it means changing every producer and
   consumer.
 - Removing a PR worktree now also deletes its Pi conversation history.
+- The `.agents`/`.codex` guard and the skill pin stop a pull request from *replacing* the
+  review skill, but not from changing a root `AGENTS.md` (or `CLAUDE.md` for Claude) that
+  the harness loads into the auto-started session — that was already true when the review
+  was typed by hand. The fork warning on the launch is the only signal of that; it is not a
+  new risk this feature introduces.
 
 ## Alternatives considered
 

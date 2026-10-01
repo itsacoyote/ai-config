@@ -4356,6 +4356,8 @@ check 'the README says what --yolo bypasses' \
   grep -qF -- '--dangerously-skip-permissions' "$README"
 check 'the README documents the pr --force flag' grep -qF -- '--force' "$README"
 check 'the clwt skill documents the pr --force flag' grep -qF -- '--force' "$SKILL"
+check 'the README documents the pr --no-review flag' grep -qF -- '--no-review' "$README"
+check 'the clwt skill documents the pr --no-review flag' grep -qF -- '--no-review' "$SKILL"
 check 'the README documents verified refresh of reused PR worktrees' \
   grep -qF 'last head that `clwt` verified' "$README"
 check 'the clwt skill says --force cannot bypass PR reuse checks' \

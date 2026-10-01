@@ -1,7 +1,8 @@
 # Shared Agent Skills
 
 Portable [Open Agent Skills](https://agentskills.io/) used by both Codex and Pi live in
-`agents/skills/`. Put a skill here only when its core instructions, references, and scripts
+`agents/skills/` — currently `branch-names`, `create-pr`, `git-commit`, `pr-review`, and
+`writing-skills`. Put a skill here only when its core instructions, references, and scripts
 work in both harnesses; keep harness-specific configuration under `codex/` or `pi/`.
 
 The source layout mirrors the personal discovery location:

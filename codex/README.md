@@ -8,12 +8,12 @@ Portable Open Agent Skills shared with Pi live separately under [`../agents/skil
 | File | What it is |
 |---|---|
 | `AGENTS.md` | Always-on engineering conventions, loaded from a project's root |
-| `../agents/skills/` | Portable skills for commits, branches, PRs, and skill authoring |
+| `../agents/skills/` | Portable skills for commits, branches, PRs, PR review, and skill authoring |
 | rules/ai-config.rules | Codex command approval rules managed by this repository |
 
 The skills use Codex's native Agent Skills layout — Codex invokes them implicitly when the
 task matches a skill's description, or explicitly via `$git-commit`, `$branch-names`,
-`$create-pr`, `$writing-skills`.
+`$create-pr`, `$pr-review`, `$writing-skills`.
 
 ## Install into a project
 
@@ -93,7 +93,7 @@ source ~/.local/share/bash-completion/completions/cwt
 | `cwt new <type>/<slug>` | Create a branch from the current origin default, create its worktree, and launch Codex. |
 | `cwt branch <branch>` | Check out an existing local or origin branch and launch Codex. |
 | `cwt open <branch>` | Launch Codex in an existing managed worktree. |
-| `cwt pr <number> [--force]` | Check out a pull request, warn for forks, and launch Codex. |
+| `cwt pr <number> [--force] [--no-review]` | Check out a pull request, warn for forks, and launch Codex. |
 | `cwt root` | Launch Codex in the primary checkout. |
 | `cwt remove <branch> [--delete-branch]` | Remove a clean managed worktree. |
 | `cwt prune [--yes]` | Find worktrees with merged pull requests; `--yes` applies the dry run. |
@@ -125,6 +125,22 @@ safely resume a PR worktree created by the other.
 An older markerless PR worktree can migrate only when its native Git tracking matches the PR
 and the update is a fast-forward; rewritten history is refused because no last-verified head
 exists yet.
+
+Unless `--no-review`, `cwt pr <n>` also fetches the PR's context into `pr-context.md`, in a
+session folder alongside the worktree (never inside it, so it never shows in `git status`),
+and sends a one-line `$pr-review <n> <path>` startup prompt, so the session opens already
+reviewing. `--no-review` skips the prompt but still writes the file; a context-fetch failure
+then only warns instead of refusing to launch. `cwt remove`/`cwt prune` delete the session
+folder with the worktree. Unlike Claude, Codex does not rank a personal skill above a
+project one on a name collision, so `cwt pr` additionally withholds the prompt (warning
+instead, still launching) when the checked-out PR's diff against its merge base touches a
+path under `.agents` or `.codex` — a pull request could otherwise ship its own
+`.agents/skills/pr-review` and replace the review the prompt is about to start. That guard
+runs entirely from a local `git diff` against the verified checkout, never from `gh`'s diff
+text, and also withholds on a symlinked `.agents`/`.codex` entry or a non-ASCII top-level
+name it cannot safely fold. Even with the guard holding, a PR can still change a root
+`AGENTS.md` that the launched session loads; the fork warning is the only signal of that, so
+treat a fork PR's own `pr <n>` launch with the same caution as running any of its code.
 
 ### Untracked files and beads
 

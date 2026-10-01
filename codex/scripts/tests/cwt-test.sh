@@ -4813,6 +4813,7 @@ check 'the Codex README documents native --yolo' grep -qF -- '--yolo' "$CODEX_RE
 check 'the Codex README says --yolo bypasses approvals and sandboxing' \
   grep -qiE 'approvals?.*sandbox|sandbox.*approvals?' "$CODEX_README"
 check 'the Codex README documents the pr --force flag' grep -qF -- '--force' "$CODEX_README"
+check 'the Codex README documents the pr --no-review flag' grep -qF -- '--no-review' "$CODEX_README"
 check 'the Codex README documents verified refresh of reused PR worktrees' \
   grep -qF 'last head that `cwt` verified' "$CODEX_README"
 check 'the Codex README says --force cannot bypass PR reuse checks' \
