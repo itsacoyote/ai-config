@@ -1324,8 +1324,11 @@ shadow_component_matches() {
 }
 
 # shadow_toplevel_ids <target> <commit-ish> — prints "<lowercased-name>
-# <object>" for every top-level tree entry whose ASCII-case-folded name is
-# .agents or .codex. -z is still required to read ls-tree safely (an
+# <mode> <object> <name>" for every top-level tree entry whose ASCII-case-
+# folded name is .agents or .codex. The trailing <name> is the entry's own
+# on-disk case (never folded) so a caller can pathspec it back exactly — git
+# ls-tree has no case-insensitive pathspec magic, so the fold only ever
+# happens in this shell. -z is still required to read ls-tree safely (an
 # adversarial top-level name could carry a literal newline), but once
 # filtered down to exactly those two literals the printed output is plain
 # ASCII, so the caller can compare it with ordinary string equality.
@@ -1348,7 +1351,7 @@ shadow_toplevel_ids() {
     name=${entry#*$'\t'}
     read -r mode type obj <<<"$metadata"
     lower=$(shadow_lowercase "$name")
-    [[ $lower == .agents || $lower == .codex ]] && printf '%s %s\n' "$lower" "$obj"
+    [[ $lower == .agents || $lower == .codex ]] && printf '%s %s %s %s\n' "$lower" "$mode" "$obj" "$name"
   done <"$file"
   rm -f "$file"
 }
@@ -1362,10 +1365,50 @@ shadow_toplevel_ids() {
 # request no longer matches what review against the real base would see.
 shadow_base_diverged() {
   local target=$1 head_oid=$2 base_oid=$3 head_ids base_ids
-  head_ids=$(shadow_toplevel_ids "$target" "$head_oid") || return 0
-  base_ids=$(shadow_toplevel_ids "$target" "$base_oid") || return 0
+  head_ids=$(shadow_toplevel_ids "$target" "$head_oid") || {
+    PR_SHADOW_REASON='could not read the .agents/.codex trees'
+    return 0
+  }
+  base_ids=$(shadow_toplevel_ids "$target" "$base_oid") || {
+    PR_SHADOW_REASON='could not read the .agents/.codex trees'
+    return 0
+  }
   [[ "$(printf '%s\n' "$head_ids" | sort)" == "$(printf '%s\n' "$base_ids" | sort)" ]] && return 1
   return 0
+}
+
+# shadow_toplevel_symlink <target> <commit-ish> — true when any top-level
+# .agents/.codex entry at <commit-ish> (any ASCII-case variant, per
+# shadow_toplevel_ids) is itself a symlink, or has one anywhere beneath it.
+# Catches what neither the diff scan in pr_shadows_skills nor
+# shadow_base_diverged can: a symlink the base branch already ships
+# (".agents -> tools/agents", or a nested
+# ".agents/skills/pr-review -> ../../shared/pr-review") whose own top-level
+# object id the pull request never changes, because it only edits content at
+# the symlink's TARGET path elsewhere in the tree. Fails closed on any git
+# error.
+shadow_toplevel_symlink() {
+  local target=$1 commit=$2 ids line lower mode obj name file entry entry_mode
+  ids=$(shadow_toplevel_ids "$target" "$commit") || return 0
+  [[ -z $ids ]] && return 1
+  while IFS= read -r line; do
+    [[ -z $line ]] && continue
+    read -r lower mode obj name <<<"$line"
+    file=$(mktemp "${TMPDIR:-/tmp}/cwt-pr-shadow-symlink.XXXXXX") || return 0
+    if ! git -C "$target" ls-tree -r -z "$commit" -- "$name" >"$file" 2>/dev/null; then
+      rm -f "$file"
+      return 0
+    fi
+    while IFS= read -r -d '' entry; do
+      entry_mode=${entry%% *}
+      if [[ $entry_mode == 120000 ]]; then
+        rm -f "$file"
+        return 0
+      fi
+    done <"$file"
+    rm -f "$file"
+  done <<<"$ids"
+  return 1
 }
 
 pr_shadows_skills() {
@@ -1402,6 +1445,11 @@ pr_shadows_skills() {
     fi
   done <"$diff_file"
   rm -f "$diff_file"
+
+  if shadow_toplevel_symlink "$target" "$head_oid"; then
+    PR_SHADOW_REASON='ships a symlink under .agents/.codex'
+    return 0
+  fi
 
   shadow_base_diverged "$target" "$head_oid" "$base_oid"
 }

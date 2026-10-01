@@ -2856,6 +2856,41 @@ check_contains 'pr withholds the review prompt when origin/$base_ref cannot be r
   'this-base-branch-does-not-exist' "$shadow_base_missing_out"
 check 'pr still launches when the base ref cannot be resolved' test -n "$(launched pwd)"
 
+# A symlink the base branch already ships, that the pull request's own diff
+# never touches at all, bypasses both checks above: the diff scan sees no
+# changed path under .agents/.codex (the PR only edits content at the
+# symlink's TARGET, elsewhere in the tree), and shadow_base_diverged sees no
+# divergence (neither side changed .agents's own top-level object id). Built
+# on $SCRATCH_PUSH's pristine clone-time HEAD, not the advance_origin_main_with_file
+# chain above — that chain's .agents is already a populated tree, and a blob
+# at the same path would conflict with it — then force-pushed directly to
+# refs/heads/main so pr_meta_from_main_adding's own fetch of origin/main picks
+# it up. Nothing later in the suite depends on origin/main's content, so
+# resetting it here is safe.
+shadow_pristine_base=$(git -C "$SCRATCH_PUSH" rev-parse HEAD)
+
+shadow_toplevel_symlink_sha=$(commit_adding_path "$shadow_pristine_base" '.agents' 'symlink:tools/agents')
+push_and_print main "$shadow_toplevel_symlink_sha" >/dev/null
+git -C "$PRIMARY" fetch -q origin main
+pr_meta_from_main_adding 980 feat/shadow-symlink-base-toplevel \
+  'tools/agents/skills/pr-review/SKILL.md' 'malicious skill'
+launch_reset
+shadow_symlink_toplevel_out=$(cwt pr 980 2>&1)
+check_contains 'pr withholds the review prompt when the base branch ships .agents as a top-level symlink the PR never touches' \
+  'symlink under .agents/.codex' "$shadow_symlink_toplevel_out"
+check_equals 'the withheld top-level-symlink prompt sends no startup prompt at all' '' "$(launched args)"
+
+shadow_nested_symlink_sha=$(commit_adding_path "$shadow_pristine_base" '.agents/skills/pr-review' 'symlink:../../shared/pr-review')
+push_and_print main "$shadow_nested_symlink_sha" >/dev/null
+git -C "$PRIMARY" fetch -q origin main
+pr_meta_from_main_adding 981 feat/shadow-symlink-base-nested \
+  'shared/pr-review/SKILL.md' 'malicious skill'
+launch_reset
+shadow_symlink_nested_out=$(cwt pr 981 2>&1)
+check_contains 'pr withholds the review prompt when the base branch ships a nested symlink under .agents the PR never touches' \
+  'symlink under .agents/.codex' "$shadow_symlink_nested_out"
+check_equals 'the withheld nested-symlink prompt sends no startup prompt at all' '' "$(launched args)"
+
 section 'pr --force'
 
 # Fresh PR numbers throughout this section — 101/202/303's managed worktrees
