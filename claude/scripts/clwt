@@ -43,7 +43,8 @@ Usage:
   clwt new <branch> [-- <args>]     branch from the origin default, then launch
   clwt branch <branch> [-- <args>]  check out an existing branch, then launch
   clwt open <branch> [-- <args>]    launch in an existing managed worktree
-  clwt pr <n> [--force] [-- <args>]  check out a pull request, then launch
+  clwt pr <n> [--force] [--no-review] [-- <args>]
+                                    check out a pull request, then launch
   clwt root [-- <args>]             launch in the primary checkout
   clwt remove <branch> [--delete-branch]
   clwt prune [--yes]                sweep worktrees whose branch has merged
@@ -76,6 +77,15 @@ Without the flag, `clwt pr` resets a leftover branch on its own only when the
 branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
+
+Unless `--no-review`, `clwt pr` fetches the pull request's review context into
+`pr-context.md`, in a session folder alongside the worktree (not inside it) —
+granted to claude via `--add-dir` — then sends a one-line startup prompt
+telling it to review that file. `clwt remove`/`clwt prune` delete the file
+with the worktree. `--no-review` skips the prompt but still writes the file;
+a context-fetch failure then only warns instead of refusing to launch. A
+symlink, containment, or mkdir refusal on the session folder itself stays
+fatal either way — that signals tampering, not a transient fetch failure.
 
 Every launching subcommand passes --name to claude, naming the session: `pr <n>` becomes
 `PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the
@@ -939,23 +949,19 @@ valid_host() {
 fence_for() {
   local content=$1 longest len
   # LC_ALL=C: `grep -oE` in a UTF-8 locale silently finds no match on a line
-  # containing an invalid UTF-8 byte — not an error, so pipefail never catches
-  # it — which undercounts the fence and lets that content break out of it.
-  # A byte-oriented C-locale awk scan has no such blind spot.
-  #
-  # Checked explicitly rather than left to `set -e`: every caller of this
-  # function runs inside write_pr_context, which is itself always invoked as
-  # one side of `||` — that suspends errexit for its entire call tree,
-  # including this one, so a failing awk would otherwise leave $longest
-  # empty and silently fall through to the minimum 3-backtick fence,
-  # regardless of how long a run the content actually contains.
+  # with an invalid UTF-8 byte, undercounting the fence. A byte-oriented
+  # C-locale awk scan has no such blind spot.
   longest=$(printf '%s\n' "$content" | LC_ALL=C awk '{
     s = $0
     while (match(s, /`+/)) {
       if (RLENGTH > m) m = RLENGTH
       s = substr(s, RSTART + RLENGTH)
     }
-  } END { print m + 0 }') || return 1
+  } END { print m + 0 }')
+  # Also what catches the awk scan itself failing: errexit is suspended for
+  # this whole call tree (every caller runs inside write_pr_context's own
+  # `||`), so a failing awk leaves $longest empty, which this regex rejects
+  # rather than silently falling through to the minimum 3-backtick fence.
   [[ $longest =~ ^[0-9]+$ ]] || return 1
   len=$((longest + 1))
   ((len >= 3)) || len=3
@@ -1213,10 +1219,7 @@ write_pr_context() {
   # Rendered into a variable — with a trailing marker that survives command
   # substitution's newline-stripping and is trimmed back off below — rather
   # than a `{ ... } >"$tmp"` group, which would report only the LAST
-  # command's exit status and hide an earlier write failure inside it. The
-  # `||` below is what catches render_section's `exit 1` on a fence_for
-  # failure: that only ends this subshell, so the failure is otherwise
-  # invisible to everything after it (see render_section).
+  # command's exit status and hide an earlier write failure inside it.
   local body
   body=$( {
     printf '# Pull request #%s\n\n' "$number"
@@ -1250,10 +1253,33 @@ write_pr_context() {
   CLWT_PR_CONTEXT_TMP=''
 }
 
+# Decides what a `clwt pr` launch does with write_pr_context's outcome — shared
+# by the fresh-checkout and reused-worktree paths so the --no-review contract
+# lives in exactly one place. --no-review always skips the prompt, success or
+# not; on a fetch failure it downgrades the fatal `die` to a `warn` that never
+# names --no-review (the flag is already in effect). Without --no-review, a
+# fetch failure stays fatal. This never runs after a symlink/containment/mkdir
+# refusal: those call `die` directly inside write_pr_context, before this
+# function is ever reached — --no-review does not soften them.
+finish_pr_context() {
+  local no_review=$1 number=$2 ctx_ok=$3
+  if ((no_review)); then
+    ((ctx_ok)) || warn "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
+    return 0
+  fi
+  ((ctx_ok)) ||
+    die "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}; run 'clwt pr $number --no-review' to skip it"
+  # `--` fences the prompt from any variadic option already sitting at the end
+  # of LAUNCH_ARGS (a developer's own passthrough `--add-dir`, `--allowedTools`,
+  # etc.) so it is never read as one more value for that option instead of its
+  # own argument.
+  LAUNCH_ARGS+=(--add-dir "$SESSION_FOLDER" -- "/pr-review $number $SESSION_FOLDER/pr-context.md")
+}
+
 reuse_pr_or_refuse() {
   local branch=$1 existing=$2 number=$3 pr_url=$4 head_oid=$5
-  local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9
-  local marker_url marker_head legacy=0 current collision_rc final
+  local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9 no_review=${10}
+  local marker_url marker_head legacy=0 current collision_rc final ctx_ok
 
   require_reusable_worktree "$branch" "$existing"
 
@@ -1312,8 +1338,9 @@ reuse_pr_or_refuse() {
   record_pr_markers "$branch" "$pr_url" "$head_oid" ||
     die "could not record the verified identity for pull request #$number"
 
-  write_pr_context "$number" "$pr_url" "$head_oid" "${existing##*/}" "$head_ref" "$cross" ||
-    die "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}; run 'clwt pr $number --no-review' to skip it"
+  ctx_ok=1
+  write_pr_context "$number" "$pr_url" "$head_oid" "${existing##*/}" "$head_ref" "$cross" || ctx_ok=0
+  finish_pr_context "$no_review" "$number" "$ctx_ok"
 
   note "reusing existing worktree for $branch at pull request #$number head"
   if [[ $cross == true ]]; then
@@ -1513,15 +1540,16 @@ cmd_prune() {
 # into a disposable worktree, prove the real worktree is clean and belongs to
 # this PR, then fast-forward or reset from its last verified head.
 cmd_pr() {
-  # `--force` is pr-only — parse_launch_args must not learn it, or
-  # branch/new/open/root silently start accepting it too. Stripped here, before
-  # the remainder reaches the shared parser. Stops at the first `--`: from
-  # there on every argument belongs to claude (the `--` contract the shared
-  # parser itself implements), and scanning the whole argv would misread
-  # `clwt pr 12 -- --force` as a request to reset the branch instead of
-  # forwarding a literal --force to claude.
+  # `--force` and `--no-review` are pr-only — parse_launch_args must not learn
+  # them, or branch/new/open/root silently start accepting them too. Stripped
+  # here, before the remainder reaches the shared parser. Stops at the first
+  # `--`: from there on every argument belongs to claude (the `--` contract the
+  # shared parser itself implements), and scanning the whole argv would misread
+  # `clwt pr 12 -- --force` as a request to reset the branch (or `-- --no-review`
+  # as a request to skip the review prompt) instead of forwarding the literal
+  # flag to claude.
   local -a rest=()
-  local force=0
+  local force=0 no_review=0
   while [[ $# -gt 0 ]]; do
     case $1 in
       --)
@@ -1530,6 +1558,9 @@ cmd_pr() {
         ;;
       --force)
         force=1
+        ;;
+      --no-review)
+        no_review=1
         ;;
       *)
         rest+=("$1")
@@ -1591,7 +1622,7 @@ cmd_pr() {
   local existing
   if existing=$(branch_worktree "$head_ref"); then
     reuse_pr_or_refuse "$head_ref" "$existing" "$number" "$pr_url" "$head_oid" \
-      "$head_ref" "$head_owner" "$head_repo" "$cross"
+      "$head_ref" "$head_owner" "$head_repo" "$cross" "$no_review"
   fi
 
   # Captured UNCONDITIONALLY, outside the $cross gate below: only the
@@ -1702,8 +1733,9 @@ cmd_pr() {
   # A context-fetch failure here keeps the worktree rather than abandoning
   # it: markers are already recorded, so a retry takes the reuse path above
   # instead of re-running the whole checkout.
-  write_pr_context "$number" "$pr_url" "$head_oid" "$name" "$head_ref" "$cross" ||
-    die "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}; run 'clwt pr $number --no-review' to skip it"
+  local ctx_ok=1
+  write_pr_context "$number" "$pr_url" "$head_oid" "$name" "$head_ref" "$cross" || ctx_ok=0
+  finish_pr_context "$no_review" "$number" "$ctx_ok"
 
   if [[ $cross == true ]]; then
     printf '%s: WARNING: pull request #%s comes from a fork — this is code you did not write, and opening it here runs it on your machine\n' \

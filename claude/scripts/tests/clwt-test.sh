@@ -847,6 +847,16 @@ new_commit_on() {
 # STALE tracking ref that must be fetched mid-fixture (see fixtures 705/706,
 # which interleave fetch_stale_tracking_ref with rewrite_pr_head) — a helper
 # arm judging against the live head would test a different, easier property.
+#
+# The diverged arm's order is load-bearing: force_advance_pr_head MUST run
+# before new_commit_on, which MUST run before `branch -f`. new_commit_on
+# branches its local commit off `base` — the PR head captured BEFORE the
+# force-advance — so the local branch only comes out actually diverged (not
+# an ancestor of the now-current remote tip) when the remote has already
+# moved past `base` by the time `branch -f` lands it. Running `branch -f`
+# before the force-advance, or basing the new commit on a freshly re-read
+# head instead of the captured `base`, would leave the two tips coincidentally
+# related instead of genuinely diverged.
 seed_leftover_branch() {
   local branch=$1 relation=$2 base new_head local_sha wt_list
 
@@ -882,7 +892,7 @@ seed_leftover_branch() {
     diverged)
       force_advance_pr_head "$branch" >/dev/null || return 1
       local_sha=$(new_commit_on "$base" "diverged from $branch")
-      git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null
+      git -C "$PRIMARY" branch -f "$branch" "$local_sha" >/dev/null || return 1
       ;;
     *)
       echo "seed_leftover_branch: unknown relation: $relation (want ahead|diverged)" >&2
@@ -1153,6 +1163,11 @@ section 'launch primitive, root, and --yolo'
 # for: that the launched process really is rooted in the target directory.
 launch_reset() { : >"$CLWT_TEST_LOG"; }
 launched() { sed -n "s/^$1=//p" "$CLWT_TEST_LOG" | tail -1; }
+# Every `arg=` line from the last launch, one argument per line and IN ORDER —
+# unlike `launched`, which only ever returns the LAST matching line. Needed to
+# assert that a multi-word element (the review prompt) survived as ONE argv
+# entry rather than several, and to check its position among trailing args.
+launched_arg_list() { sed -n 's/^arg=//p' "$CLWT_TEST_LOG"; }
 
 launch_reset
 clwt root >/dev/null 2>&1
@@ -2285,8 +2300,12 @@ cat >"$PRIMARY/.worktreeinclude" <<'PATTERNS'
 PATTERNS
 printf 'SECRET=1\n' >"$PRIMARY/.env"
 
+# --no-review throughout this section except where a test is specifically
+# about the review prompt (see 'pr review prompt' below) — keeps these
+# assertions about naming/--yolo/passthrough ordering, not a session-folder
+# path that would make every one of them fragile.
 launch_reset
-pr_out=$(clwt pr 101 2>&1)
+pr_out=$(clwt pr 101 --no-review 2>&1)
 check 'pr checks out the pull request into a managed worktree' \
   test -d "$MANAGED/feat-from-pr"
 check_equals 'pr names the worktree from the pull request head ref' \
@@ -2305,7 +2324,7 @@ else
 fi
 
 launch_reset
-clwt pr 101 >/dev/null 2>&1
+clwt pr 101 --no-review >/dev/null 2>&1
 check_equals 'pr reusing its worktree still names the session PR-<number>' \
   '--name PR-101' "$(launched args)"
 
@@ -2321,19 +2340,19 @@ check_equals 'pr still launches after warning about a fork' \
   "$MANAGED/feat-forked" "$(launched pwd)"
 
 launch_reset
-clwt pr 101 --yolo >/dev/null 2>&1
+clwt pr 101 --yolo --no-review >/dev/null 2>&1
 check_equals '--yolo works on pr as well' \
   '--name PR-101 --dangerously-skip-permissions' "$(launched args)"
 
 pr_meta 104 feat/pr-name-flag false
 launch_reset
-clwt pr 104 -- --name custom >/dev/null 2>&1
+clwt pr 104 --no-review -- --name custom >/dev/null 2>&1
 check_equals "a developer --name after -- on pr comes after the script's --name" \
   '--name PR-104 --name custom' "$(launched args)"
 
 pr_meta 105 feat/pr-n-flag false
 launch_reset
-clwt pr 105 -- -n custom >/dev/null 2>&1
+clwt pr 105 --no-review -- -n custom >/dev/null 2>&1
 check_equals "a developer -n after -- on pr comes after the script's --name" \
   '--name PR-105 -n custom' "$(launched args)"
 
@@ -2363,6 +2382,92 @@ check_output 'pr says it needs gh' 'pr needs gh' clwt pr 101
 rm -f "$CLWT_GH_UNAVAILABLE"
 rm -f "$PRIMARY/.worktreeinclude"
 
+section 'pr review prompt'
+
+# Fresh PR numbers (900s) throughout — the 101/104/105/703 fixtures above are
+# now deliberately run with --no-review so THEIR assertions stay about naming
+# and passthrough ordering, not this section's session-folder path.
+
+pr_meta 901 feat/review-prompt false
+launch_reset
+clwt pr 901 >/dev/null 2>&1
+ctx_901=$(pr_context_path feat-review-prompt)
+dir_901=$(pr_session_dir feat-review-prompt)
+check_equals 'pr launches claude with -- and /pr-review <n> <context path> as the last two arguments' \
+  "--
+/pr-review 901 $ctx_901" "$(launched_arg_list | tail -2)"
+check_equals 'pr adds the session folder with --add-dir before --' \
+  "--add-dir
+$dir_901
+--
+/pr-review 901 $ctx_901" "$(launched_arg_list | tail -4)"
+
+launch_reset
+clwt pr 901 >/dev/null 2>&1
+check_equals 'pr on a reused worktree launches with the review prompt' \
+  "--
+/pr-review 901 $ctx_901" "$(launched_arg_list | tail -2)"
+
+pr_meta 902 feat/review-prompt-no-review false
+launch_reset
+clwt pr 902 --no-review >/dev/null 2>&1
+check 'pr --no-review still writes pr-context.md' \
+  test -f "$(pr_context_path feat-review-prompt-no-review)"
+check_equals 'pr --no-review launches with no startup prompt' \
+  '--name PR-902' "$(launched args)"
+
+pr_meta 903 feat/review-prompt-fetch-fail false
+pr_head_moved 903 '0000000000000000000000000000000000000009'
+launch_reset
+no_review_fail_out=$(clwt pr 903 --no-review 2>&1)
+no_review_fail_rc=$?
+check 'pr --no-review still launches when the context fetch fails' \
+  test "$no_review_fail_rc" -eq 0
+check 'pr --no-review warns and launches when the context fetch fails, leaving no pr-context.md' \
+  test -n "$(launched pwd)"
+check 'that failed fetch left no pr-context.md' \
+  test ! -f "$(pr_context_path feat-review-prompt-fetch-fail)"
+check_contains 'the --no-review warning names the actual fetch failure' \
+  'changed while fetching its context' "$no_review_fail_out"
+check_not_contains 'the --no-review warning never mentions --no-review itself' \
+  '--no-review' "$no_review_fail_out"
+check_equals 'a failed fetch under --no-review appends no prompt either' \
+  '--name PR-903' "$(launched args)"
+
+# The pre-parse loop stops scanning at the first literal `--`, so a
+# `--no-review` typed AFTER it is never consumed by cmd_pr — it reaches
+# parse_launch_args as ordinary passthrough and is forwarded to claude as-is.
+pr_meta 904 feat/review-prompt-literal-no-review false
+launch_reset
+clwt pr 904 -- --no-review >/dev/null 2>&1
+check_contains 'pr <n> -- --no-review forwards the literal flag' \
+  '--no-review' "$(launched args)"
+check 'pr <n> -- --no-review still writes pr-context.md' \
+  test -f "$(pr_context_path feat-review-prompt-literal-no-review)"
+check_equals 'pr <n> -- --no-review still sends the prompt' \
+  "--
+/pr-review 904 $(pr_context_path feat-review-prompt-literal-no-review)" \
+  "$(launched_arg_list | tail -2)"
+
+pr_meta 905 feat/review-prompt-passthrough false
+launch_reset
+clwt pr 905 -- --name custom >/dev/null 2>&1
+check_equals 'pr keeps -- passthrough arguments before the review prompt' \
+  "--name PR-905 --name custom --add-dir $(pr_session_dir feat-review-prompt-passthrough) -- /pr-review 905 $(pr_context_path feat-review-prompt-passthrough)" \
+  "$(launched args)"
+
+# A developer's own passthrough ending in a VARIADIC option (one that takes
+# any number of trailing values, like --add-dir) is exactly what the fence `--`
+# before the prompt protects against: without it, the prompt string would read
+# as one more value for the developer's --add-dir instead of its own argument.
+pr_meta 906 feat/review-prompt-variadic false
+launch_reset
+clwt pr 906 -- --add-dir foo bar >/dev/null 2>&1
+check_equals 'pr keeps the review prompt positional after a variadic --add-dir passthrough' \
+  "--
+/pr-review 906 $(pr_context_path feat-review-prompt-variadic)" \
+  "$(launched_arg_list | tail -2)"
+
 section 'pr --force'
 
 # Fresh PR numbers throughout this section — 101/202/303's managed worktrees
@@ -2391,7 +2496,7 @@ pr_meta 703 feat/pr-force-passthrough false
 passthrough_expected=$(sed -n 's/^headRefOid=//p' "$CLWT_GH_PRS/703")
 launch_reset
 check 'pr passes --force after -- through to claude untouched' \
-  clwt pr 703 -- --force
+  clwt pr 703 --no-review -- --force
 check_equals 'the literal --force argument reaches claude' \
   '--name PR-703 --force' "$(launched args)"
 check_equals 'a --force after -- never reaches gh, so the branch tip is unchanged' \
@@ -3288,7 +3393,7 @@ check_equals 'pr fences a diff line with an invalid UTF-8 byte and a long backti
 # under-sized (or stale) fence ------------------------------------------------
 #
 # No real awk on any real machine actually fails here — every awk executes
-# line 945's END block regardless of input. Exercised instead with a
+# fence_for's END block regardless of input. Exercised instead with a
 # substitute awk scoped to ONE invocation via a PATH prefix, not the whole
 # suite's shared PATH (which would also break the gh stub's own json_escape,
 # and every OTHER test's awk-based parsing of a rendered context file).
@@ -4089,6 +4194,11 @@ if [ -f "$COMPLETION" ]; then
     ok 'completion still offers --yolo for pr'
   else
     not_ok 'completion still offers --yolo for pr'
+  fi
+  if printf '%s\n' "$pr_flags" | grep -qx -- '--no-review'; then
+    ok 'completion offers --no-review for pr'
+  else
+    not_ok 'completion offers --no-review for pr'
   fi
   # Positive control first: an empty completion result (e.g. mapfile missing on
   # bash 3.2) would satisfy the bare negative no matter what the flags arm

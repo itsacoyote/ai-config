@@ -92,7 +92,7 @@ _clwt() {
   if [[ $cur == -* ]]; then
     case $cmd in
       new | branch | open | root) flags='--yolo' ;;
-      pr) flags='--yolo --force' ;;
+      pr) flags='--yolo --force --no-review' ;;
       remove) flags='--delete-branch' ;;
       prune) flags='--yes' ;;
       *) flags='' ;;
