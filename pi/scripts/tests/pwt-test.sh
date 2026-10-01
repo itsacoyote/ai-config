@@ -4114,6 +4114,113 @@ check 'pr leaves no pr-context.md when the head moved during the fetch' \
 check 'pr never launches Pi when the head moved during the fetch' \
   test -z "$(launched pwd)"
 
+# --- the SAME head-moved message fires even when only the FIRST combined
+# view call sees the moved head (an ABA change: away and back before the
+# final re-check), not just when the final re-check itself is stale -------
+
+pr_meta 8851 feat/ctx-aba false
+pr_head_initial_moved 8851 '0000000000000000000000000000000000000008'
+launch_reset
+aba_out=$(pwt pr 8851 2>&1)
+aba_rc=$?
+check 'pr fails when the head moved away and back before the final re-check (ABA)' \
+  test "$aba_rc" -ne 0
+check_contains 'the ABA failure also names "changed while fetching"' \
+  'changed while fetching' "$aba_out"
+check 'pr leaves no pr-context.md for the ABA head change' \
+  test ! -f "$(pr_context_path feat-ctx-aba)"
+
+# --- gh answering about the wrong pull request is refused, not rendered ----
+
+pr_meta 8852 feat/ctx-url-mismatch false
+pr_context_url_mismatch 8852
+launch_reset
+mismatch_out=$(pwt pr 8852 2>&1)
+mismatch_rc=$?
+check 'pr fails when the context fetch reports a different canonical URL' \
+  test "$mismatch_rc" -ne 0
+check 'pr leaves no pr-context.md for a mismatched canonical URL' \
+  test ! -f "$(pr_context_path feat-ctx-url-mismatch)"
+
+# --- gh returning a mismatched header scalar is refused, not rendered ------
+#
+# Each of these overrides exactly ONE header field the combined view call
+# reports, leaving every other field correct — proving each of
+# write_pr_context's pr_number/pr_head/pr_cross/pr_author/pr_base checks
+# fires on its own. Before these, deleting any one of those five checks
+# left no assertion in this suite failing, since nothing else inspects these
+# fields before they reach rendering.
+
+pr_meta 8853 feat/ctx-number-mismatch false
+pr_context_number_mismatch 8853
+launch_reset
+number_mismatch_out=$(pwt pr 8853 2>&1)
+number_mismatch_rc=$?
+check 'pr fails when the context fetch reports a different pull request number' \
+  test "$number_mismatch_rc" -ne 0
+check_contains 'that failure names the pull-request-number mismatch' \
+  'gh returned pull request #' "$number_mismatch_out"
+check 'pr leaves no pr-context.md for a mismatched pull request number' \
+  test ! -f "$(pr_context_path feat-ctx-number-mismatch)"
+
+pr_meta 8863 feat/ctx-headref-mismatch false
+pr_context_headref_mismatch 8863
+launch_reset
+headref_mismatch_out=$(pwt pr 8863 2>&1)
+headref_mismatch_rc=$?
+check 'pr fails when the context fetch reports a different head ref' \
+  test "$headref_mismatch_rc" -ne 0
+check_contains 'that failure names the head ref mismatch' \
+  'gh returned a different head ref' "$headref_mismatch_out"
+check 'pr leaves no pr-context.md for a mismatched head ref' \
+  test ! -f "$(pr_context_path feat-ctx-headref-mismatch)"
+
+pr_meta 8864 feat/ctx-cross-invalid false
+pr_context_cross_invalid 8864
+launch_reset
+cross_invalid_out=$(pwt pr 8864 2>&1)
+cross_invalid_rc=$?
+check 'pr fails when the context fetch reports a non-boolean fork flag' \
+  test "$cross_invalid_rc" -ne 0
+check_contains 'that failure names the invalid fork flag' \
+  'invalid fork flag' "$cross_invalid_out"
+check 'pr leaves no pr-context.md for a non-boolean fork flag' \
+  test ! -f "$(pr_context_path feat-ctx-cross-invalid)"
+
+pr_meta 8865 feat/ctx-author-invalid false
+pr_context_author_invalid 8865
+launch_reset
+author_invalid_out=$(pwt pr 8865 2>&1)
+author_invalid_rc=$?
+check 'pr fails when the context fetch reports an invalid author login' \
+  test "$author_invalid_rc" -ne 0
+check_contains 'that failure names the invalid author login' \
+  'invalid author login' "$author_invalid_out"
+check 'pr leaves no pr-context.md for an invalid author login' \
+  test ! -f "$(pr_context_path feat-ctx-author-invalid)"
+
+# A GitHub Enterprise managed-user login contains an underscore — the author
+# check must accept that, not just reject what it rejects.
+pr_meta 8866 feat/ctx-author-underscore false
+pr_context_author_underscore 8866
+launch_reset
+check 'pr succeeds when the author login contains an underscore (GHE managed user)' \
+  pwt pr 8866
+check 'pr-context.md exists for an underscore author login' \
+  test -f "$(pr_context_path feat-ctx-author-underscore)"
+
+pr_meta 8867 feat/ctx-base-invalid false
+pr_context_base_invalid 8867
+launch_reset
+base_invalid_out=$(pwt pr 8867 2>&1)
+base_invalid_rc=$?
+check 'pr fails when the context fetch reports an invalid base branch name' \
+  test "$base_invalid_rc" -ne 0
+check_contains 'that failure names the invalid base branch name' \
+  'invalid base branch name' "$base_invalid_out"
+check 'pr leaves no pr-context.md for an invalid base branch name' \
+  test ! -f "$(pr_context_path feat-ctx-base-invalid)"
+
 # --- a context-fetch failure keeps the new worktree; a retry reuses it -----
 
 pr_meta 852 feat/ctx-retry false
@@ -4193,6 +4300,118 @@ desc_fence=$(awk '/^## Description$/{getline; print; exit}' "$ctx_fence")
 check_contains 'pr fences a description containing a triple-backtick line so it cannot close the section' \
   '````' "$desc_fence"
 
+# --- fence_for must count backticks through an invalid UTF-8 byte ----------
+#
+# `grep -oE` in a UTF-8 locale can silently find no match on a line containing
+# an invalid UTF-8 byte (this is the GNU/BSD grep behavior fence_for's
+# LC_ALL=C awk scan exists to avoid); undercounting there would pick
+# too-short a fence and let the content break out of it. This assertion DOES
+# toggle red/green against the OLD grep-based implementation when this suite
+# runs the way it actually runs, as `bash pwt-test.sh`: that subprocess
+# resolves `grep` to the real /usr/bin/grep, which undercounts this exact
+# input (confirmed: `grep -oE` on it exits 1, no match). The interactive
+# shell's own `grep` is a wrapper that wraps ugrep instead, which is lenient
+# here — but that wrapper is a shell FUNCTION, never inherited by a `bash
+# script.sh` subprocess, so it is not what the suite's own invocations see.
+pr_meta 8856 feat/ctx-fence-invalid-utf8 false
+pr_diff 8856 "$(printf '\xffbackticks: `````\nend')"
+launch_reset
+pwt pr 8856 >/dev/null 2>&1
+ctx_fence_utf8=$(pr_context_path feat-ctx-fence-invalid-utf8)
+diff_fence_utf8=$(awk '/^## Diff$/{getline; print; exit}' "$ctx_fence_utf8")
+check_equals 'pr fences a diff line with an invalid UTF-8 byte and a long backtick run' \
+  '``````' "$diff_fence_utf8"
+
+# --- fence_for's own awk scan failing aborts the render, not a silently
+# under-sized (or stale) fence ------------------------------------------------
+#
+# No real awk on any real machine actually fails here — every awk executes
+# fence_for's END block regardless of input. Exercised instead with a
+# substitute awk scoped to ONE invocation via a PATH prefix, not the whole
+# suite's shared PATH (which would also break the gh stub's own json_escape,
+# and every OTHER test's awk-based parsing of a rendered context file).
+#
+# The failure is triggered by CONTENT, not by matching fence_for's program
+# text: Description (rendered FIRST) succeeds normally and sets PR_FENCE for
+# real, then Diff (rendered LAST) is the one that fails. That ordering is
+# what makes this catch render_section's `|| exit 1` specifically — if only
+# the very first section ever failed, PR_FENCE would still be unset from
+# process start, and `set -u` would abort the render on its own regardless
+# of whether render_section propagates fence_for's failure at all.
+real_awk=$(command -v awk)
+broken_awk_dir=$TMP/broken-awk
+mkdir -p "$broken_awk_dir"
+cat >"$broken_awk_dir/awk" <<'STUB'
+#!/bin/sh
+case "$*" in
+  *RLENGTH*)
+    input=$(cat)
+    case "$input" in
+      *PWT_TEST_TRIGGER_AWK_FAIL*) exit 1 ;;
+      # "-1", not a non-arithmetic string: `$((longest + 1))` accepts it
+      # silently (arithmetic, not a variable reference), so removing the
+      # `[[ $longest =~ ^[0-9]+$ ]]` guard is what has to catch this, not
+      # `set -u` tripping over an unbound-variable reference in a bogus
+      # arithmetic expression (which a non-numeric WORD like "not-a-number"
+      # would trigger on its own, masking whether this guard exists at all).
+      *PWT_TEST_TRIGGER_AWK_NONNUMERIC*) printf -- '-1'; exit 0 ;;
+    esac
+    printf '%s' "$input" | "$PWT_TEST_REAL_AWK" "$@"
+    exit $?
+    ;;
+esac
+exec "$PWT_TEST_REAL_AWK" "$@"
+STUB
+chmod +x "$broken_awk_dir/awk"
+
+pr_meta 8868 feat/ctx-fence-awk-fails false
+pr_diff 8868 'PWT_TEST_TRIGGER_AWK_FAIL'
+launch_reset
+fence_awk_fail_out=$(PWT_TEST_REAL_AWK="$real_awk" PATH="$broken_awk_dir:$PATH" pwt pr 8868 2>&1)
+fence_awk_fail_rc=$?
+check "pr fails when fence_for's own awk scan fails on a LATER section, after an EARLIER one already set a real fence" \
+  test "$fence_awk_fail_rc" -ne 0
+check_contains 'that failure names the render, not a downstream symptom' \
+  "could not render pull request #8868's context" "$fence_awk_fail_out"
+check 'pr leaves no pr-context.md when fence_for cannot run' \
+  test ! -f "$(pr_context_path feat-ctx-fence-awk-fails)"
+
+# --- fence_for's own numeric guard, distinct from the awk-fails case above:
+# the awk process EXITS 0 and prints "-1" for $longest — arithmetically
+# valid (so `$((longest + 1))` and `set -u` both accept it without
+# complaint), just not what `^[0-9]+$` allows. Only the
+# `[[ $longest =~ ^[0-9]+$ ]]` guard — not the command substitution's own
+# `|| return 1`, and not an unbound-variable trip from a non-arithmetic
+# WORD like "not-a-number" — is what catches this.
+
+pr_meta 8872 feat/ctx-fence-nonnumeric false
+pr_diff 8872 'PWT_TEST_TRIGGER_AWK_NONNUMERIC'
+launch_reset
+fence_nonnumeric_out=$(PWT_TEST_REAL_AWK="$real_awk" PATH="$broken_awk_dir:$PATH" pwt pr 8872 2>&1)
+fence_nonnumeric_rc=$?
+check "pr fails when fence_for's longest-run scan returns non-numeric output" \
+  test "$fence_nonnumeric_rc" -ne 0
+check_contains 'that failure also names the render, not a downstream symptom' \
+  "could not render pull request #8872's context" "$fence_nonnumeric_out"
+check 'pr leaves no pr-context.md when fence_for returns a non-numeric length' \
+  test ! -f "$(pr_context_path feat-ctx-fence-nonnumeric)"
+
+# --- the initial combined view's own oid-FORMAT check fires before the
+# equality check, distinct from the ABA case above (which uses a validly
+# formatted but WRONG oid) --------------------------------------------------
+
+pr_meta 8871 feat/ctx-initial-oid-invalid false
+pr_head_initial_moved 8871 'not-a-valid-oid'
+launch_reset
+initial_oid_invalid_out=$(pwt pr 8871 2>&1)
+initial_oid_invalid_rc=$?
+check 'pr fails when the initial combined view reports an invalid head object ID' \
+  test "$initial_oid_invalid_rc" -ne 0
+check_contains 'that failure names the invalid head object ID' \
+  'invalid head object ID' "$initial_oid_invalid_out"
+check 'pr leaves no pr-context.md for an invalid initial head object ID' \
+  test ! -f "$(pr_context_path feat-ctx-initial-oid-invalid)"
+
 # --- gh pr checks exit-code rules -------------------------------------------
 
 pr_meta 856 feat/ctx-checks-pending false
@@ -4208,6 +4427,16 @@ launch_reset
 check 'pr writes the file when gh pr checks exits 1 with output' pwt pr 857
 check 'pr-context.md exists for a failed-check run with output' \
   test -f "$(pr_context_path feat-ctx-checks-failed)"
+
+pr_meta 8858 feat/ctx-checks-none-reported false
+pr_checks 8858 1 '' 'no checks reported on the a1b2c3d commit'
+launch_reset
+check 'pr writes the file when gh pr checks exits 1 with "no checks reported"' \
+  pwt pr 8858
+ctx_no_checks=$(pr_context_path feat-ctx-checks-none-reported)
+checks_section_none=$(awk '/^## CI checks$/{getline; print; exit}' "$ctx_no_checks")
+check_equals 'CI checks renders (none) when gh pr checks reports none configured' \
+  '(none)' "$checks_section_none"
 
 pr_meta 858 feat/ctx-checks-broken false
 pr_checks 858 1 '' 'gh: some other real failure'
@@ -4249,6 +4478,40 @@ check_contains 'pr passes the PR host to gh api' \
 check_contains 'pr requests review comments scoped to the exact repository and PR' \
   'repos/owner/project/pulls/860/comments' "$api_call"
 
+# --- a non-github.com origin pins gh api to ITS OWN host, not github.com --
+#
+# write_pr_context's own identity check (pr_url_identity) requires
+# PR_BASE_HOST to equal origin_host, so proving the pin is real means origin
+# itself must also be on the foreign host — not just the PR's URL — and the
+# checkout's real `git fetch` still has to succeed against it. `url.<base>.
+# insteadOf` can't do that: it rewrites the URL for EVERY consumer, including
+# `git remote get-url origin` (which pwt's own host derivation reads), so
+# origin would report the REAL host back, not the fake one. git's `file://`
+# transport instead ignores whatever authority precedes the path, so
+# `file://enterprise.example$REMOTE` fetches $REMOTE for real while `remote
+# get-url` still reports the literal host "enterprise.example" unmolested.
+# The 8859 fixture gets that same host in BOTH copies: the number-keyed
+# lookup the initial `gh pr view`/`gh pr checkout` calls read via meta_root,
+# and the full-URL lookup write_pr_context's own combined view call always
+# uses regardless of meta_root (see gh stub's `*/pull/*` override). Mutation
+# check: hard-coding `--hostname github.com` in the review-comments gh api
+# call passes every other assertion in this suite but fails this one.
+
+pr_meta 8859 feat/ctx-host-pin false
+sed 's#^url=https://github.com/#url=https://enterprise.example/#' \
+  "$PWT_GH_PRS/8859" >"$PWT_GH_PRS/8859.tmp"
+mv "$PWT_GH_PRS/8859.tmp" "$PWT_GH_PRS/8859"
+cp "$PWT_GH_PRS/8859" "$PWT_GH_OTHER_PRS/8859"
+git -C "$PRIMARY" remote set-url origin "file://enterprise.example$REMOTE"
+launch_reset
+check 'pr succeeds against a non-github.com origin' pwt pr 8859
+host_pin_call=$(grep 'pulls/8859/comments' "$PWT_GH_API_LOG")
+check_contains 'pr pins gh api to the PR host (enterprise.example)' \
+  '--hostname enterprise.example' "$host_pin_call"
+check_not_contains 'pr does not fall back to --hostname github.com' \
+  '--hostname github.com' "$host_pin_call"
+git -C "$PRIMARY" remote set-url origin "$REMOTE"
+
 # --- gh api --paginate --jq runs per PAGE, not slurped; write_pr_context
 # joins the per-comment lines into an array itself, so an empty PR renders
 # (none) and a two-page result is not left as a page-array wrapper ---------
@@ -4264,6 +4527,17 @@ check_contains 'pr joins two paginated pages into one list (second id present)' 
   '"id":2' "$ctx_pages"
 check_not_contains 'pr does not leave a page-array wrapper in the rendered output' \
   '[[' "$ctx_pages"
+
+# --- an explicit single-empty-page fixture also renders (none) -------------
+
+pr_meta 8860 feat/ctx-review-comments-empty-pages false
+pr_review_comments 8860 '[[]]'
+launch_reset
+pwt pr 8860 >/dev/null 2>&1
+ctx_empty_pages=$(pr_context_path feat-ctx-review-comments-empty-pages)
+review_comments_empty_pages=$(awk '/^## Review comments$/{getline; print; exit}' "$ctx_empty_pages")
+check_equals 'pr renders (none) for a review-comments fetch with zero comments' \
+  '(none)' "$review_comments_empty_pages"
 
 # --- Changed files truncation marker ----------------------------------------
 
@@ -4281,6 +4555,24 @@ changed_files_tail=$(awk '/^## Changed files$/{f=1; next} f && /^```+$/{n++; if 
   "$(pr_context_path feat-ctx-truncated)")
 check_equals 'the truncation marker is the line right after the closing fence' \
   '(truncated at 2)' "$changed_files_tail"
+
+# --- a non-numeric count from gh is refused before it reaches arithmetic ---
+
+pr_meta 8862 feat/ctx-nonnumeric-count false
+pr_issues 8862 '[]' 'not-a-number'
+launch_reset
+nonnumeric_out=$(pwt pr 8862 2>&1)
+nonnumeric_rc=$?
+check 'pr fails when gh returns a non-numeric issues count' \
+  test "$nonnumeric_rc" -ne 0
+# Not just check_fails: bash arithmetic on a non-numeric operand errors out
+# on its own further down (rendering "Linked issues"), so a bare exit-code
+# check would still pass with the validation loop deleted. The message is
+# what proves THIS check is what actually fired, not a downstream crash.
+check_contains 'the failure names the non-numeric field' \
+  'non-numeric issues_len' "$nonnumeric_out"
+check 'pr leaves no pr-context.md for a non-numeric count' \
+  test ! -f "$(pr_context_path feat-ctx-nonnumeric-count)"
 
 # --- a hard gh failure names --no-review and launches nothing --------------
 
@@ -4310,6 +4602,193 @@ launch_reset
 pwt pr 863 >/dev/null 2>&1 || true
 check 'pr removes a stale pr-context.md before fetching, so a failed fetch leaves none' \
   test ! -f "$(pr_context_path feat-ctx-stale)"
+
+# --- a stale pr-context.md that cannot be removed fails loudly -------------
+# `rm -f` on a directory prints an error and exits non-zero (it refuses
+# unconditionally, empty or not, without -r) but that exit status used to be
+# discarded outright — silently leaving the "stale" directory in place while
+# the rest of write_pr_context ran anyway.
+
+pr_meta 8857 feat/ctx-stale-dir false
+launch_reset
+pwt pr 8857 >/dev/null 2>&1
+stale_dir_path=$(pr_context_path feat-ctx-stale-dir)
+check 'a pr-context.md exists before being replaced with a directory' \
+  test -f "$stale_dir_path"
+rm -f "$stale_dir_path"
+mkdir -p "$stale_dir_path"
+touch "$stale_dir_path/occupant"
+launch_reset
+stale_dir_out=$(pwt pr 8857 2>&1)
+stale_dir_rc=$?
+check 'pr fails when a stale pr-context.md cannot be removed (it is a directory)' \
+  test "$stale_dir_rc" -ne 0
+check_contains 'the failure names the stale pr-context.md removal' \
+  'stale pr-context.md' "$stale_dir_out"
+check 'the occupied directory is left untouched, not blindly rm -rf-ed' \
+  test -f "$stale_dir_path/occupant"
+rm -rf "$stale_dir_path"
+
+# --- killing pwt mid-fetch relies on the EXIT trap, not explicit cleanup --
+#
+# Every explicit failure path in write_pr_context already does its own
+# `rm -f "$tmp"` before returning, so those paths would still pass with
+# PWT_PR_CONTEXT_TMP never wired into cleanup_on_exit at all. The only way
+# to exercise the trap itself is to kill the process while it is blocked
+# mid-fetch, before any explicit cleanup runs. Mutation check: dropping
+# `"${PWT_PR_CONTEXT_TMP:-}" "${PWT_PR_CHECKS_ERR_FILE:-}"` from
+# cleanup_on_exit's `rm -f` line leaves the temp file behind here, while
+# every other pr-context test still passes.
+
+pr_meta 8869 feat/ctx-trap-kill false
+pr_diff_hang 8869
+launch_reset
+pwt pr 8869 >"$TMP/pwt-trap-kill.out" 2>&1 &
+trap_pid=$!
+trap_session_dir=$(pr_session_dir feat-ctx-trap-kill)
+waited=0
+while [ -z "$(find "$trap_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)" ] && [ "$waited" -lt 100 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+check 'the temp context file exists while the fetch is blocked mid-flight' \
+  test -n "$(find "$trap_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)"
+# pwt (the test helper) backgrounds `pwt() { pwt_in ...; }` calling
+# `pwt_in() { (cd "$dir" && "$PWT" "$@"); }`, which is two process forks
+# deep from trap_pid ($!): the parens subshell, then the real script it
+# execs. Killing trap_pid itself only reaches the outer wrapper, not the
+# process actually holding the EXIT trap we're testing — so the real script
+# is found by its command line instead of by a fixed number of pgrep hops.
+# `-o` (oldest), not `| tail -1`: bash 3.2's subshell wrapper for
+# "cd ... && $PWT ..." also carries "$PWT pr 8869" in its own command line
+# under `ps`, so the pattern matches BOTH processes. `tail -1` picked
+# whichever one `pgrep` happened to print last — on this bash that is the
+# wrapper, not the execed script — and killing the wrapper never delivers
+# the signal to the process actually holding the EXIT trap. The real script
+# is reliably the older of the two.
+script_pid=$(pgrep -o -f "$PWT pr 8869")
+kill -TERM "${script_pid:-$trap_pid}" 2>/dev/null
+wait "$trap_pid" 2>/dev/null
+pr_diff_resume 8869
+check 'killing pwt mid-fetch leaves no temp context file behind (the EXIT trap cleaned it up)' \
+  test -z "$(find "$trap_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)"
+rm -f "$TMP/pwt-trap-kill.out"
+# The checkout itself completed before the kill (write_pr_context runs after
+# it); left in place it's just an inert worktree, but later sections assert
+# exact worktree/branch inventories, so it is cleaned up like every other
+# fixture in this suite.
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-trap-kill" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-trap-kill >/dev/null 2>&1
+
+# --- killing pwt mid-checks relies on the EXIT trap too, for the OTHER
+# temp file cleanup_on_exit registers (PWT_PR_CHECKS_ERR_FILE) — the
+# trap-kill test above only ever exercises PWT_PR_CONTEXT_TMP, because by
+# the time the diff call (where IT hangs) runs, the checks call is already
+# done and PWT_PR_CHECKS_ERR_FILE has already been cleared. Mutation check:
+# dropping "${PWT_PR_CHECKS_ERR_FILE:-}" from cleanup_on_exit's `rm -f`
+# line leaves the checks error temp file behind here while the trap-kill
+# test above still passes.
+
+pr_meta 8870 feat/ctx-checks-trap-kill false
+pr_checks_hang 8870
+launch_reset
+# The real TMPDIR is shared with every other process on the machine (and
+# with earlier, possibly-killed runs of this very suite); matched by name
+# pattern alone, a stale leftover from any of those would be mistaken for
+# THIS run's file. Snapshotting what already matches before launching, and
+# only accepting a name absent from that snapshot, is what makes this
+# specific to the file pwt just created.
+checks_err_before=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'pwt-pr-checks-err.*' 2>/dev/null)
+pwt pr 8870 >"$TMP/pwt-checks-trap-kill.out" 2>&1 &
+checks_trap_pid=$!
+waited=0
+checks_err_file=''
+while [ "$waited" -lt 100 ]; do
+  checks_err_after=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'pwt-pr-checks-err.*' 2>/dev/null)
+  checks_err_file=$(comm -13 <(printf '%s\n' "$checks_err_before" | sort) <(printf '%s\n' "$checks_err_after" | sort) | head -1)
+  [ -n "$checks_err_file" ] && break
+  sleep 0.1
+  waited=$((waited + 1))
+done
+check 'the checks error temp file exists while gh pr checks is blocked mid-flight' \
+  test -n "$checks_err_file"
+checks_script_pid=$(pgrep -o -f "$PWT pr 8870")
+kill -TERM "${checks_script_pid:-$checks_trap_pid}" 2>/dev/null
+wait "$checks_trap_pid" 2>/dev/null
+pr_checks_resume 8870
+check 'killing pwt mid-checks leaves no checks error temp file behind (the EXIT trap cleaned it up)' \
+  test ! -e "$checks_err_file"
+rm -f "$TMP/pwt-checks-trap-kill.out"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-checks-trap-kill" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-checks-trap-kill >/dev/null 2>&1
+
+# --- a pr-context.md symlink planted mid-fetch cannot redirect the final
+# move (L2): the move must never treat that destination as a directory to
+# move INTO, even though it is a symlink pointing at one -----------------
+
+pr_meta 871 feat/ctx-symlink-move false
+pr_diff_hang 871
+launch_reset
+pwt pr 871 >"$TMP/pwt-symlink-move.out" 2>&1 &
+move_pid=$!
+move_session_dir=$(pr_session_dir feat-ctx-symlink-move)
+waited=0
+while [ -z "$(find "$move_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)" ] && [ "$waited" -lt 100 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+evil_move_target="$TMP/evil-move-target"
+mkdir -p "$evil_move_target"
+ctx_move_path=$(pr_context_path feat-ctx-symlink-move)
+rm -f "$ctx_move_path"
+ln -s "$evil_move_target" "$ctx_move_path"
+pr_diff_resume 871
+wait "$move_pid"
+move_rc=$?
+check 'pr still succeeds when a symlink is planted at pr-context.md mid-fetch' \
+  test "$move_rc" -eq 0
+check 'pr refuses to write pull request context through a pr-context.md symlink (target stays empty)' \
+  test -z "$(ls -A "$evil_move_target" 2>/dev/null)"
+check 'pr-context.md is a real file, not the planted symlink, after the move' \
+  test -f "$ctx_move_path" -a ! -L "$ctx_move_path"
+rm -f "$TMP/pwt-symlink-move.out"
+
+# --- a REAL directory (not a symlink) planted at pr-context.md mid-fetch
+# defeats mv_no_target_directory's -T/-h guard — that flag only refuses a
+# symlink pointing at a directory, not an actual directory, so `mv` moves
+# the temp file INTO it and still exits 0. The post-mv `[[ -f ... ]]` check
+# is what has to catch THIS, since the symlink test above never exercises
+# it (there, -h/-T already prevents the move from landing inside the
+# planted target in the first place).
+
+pr_meta 8873 feat/ctx-dir-move false
+pr_diff_hang 8873
+launch_reset
+pwt pr 8873 >"$TMP/pwt-dir-move.out" 2>&1 &
+dirmove_pid=$!
+dirmove_session_dir=$(pr_session_dir feat-ctx-dir-move)
+waited=0
+while [ -z "$(find "$dirmove_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)" ] && [ "$waited" -lt 100 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+ctx_dirmove_path=$(pr_context_path feat-ctx-dir-move)
+rm -f "$ctx_dirmove_path"
+mkdir -p "$ctx_dirmove_path"
+touch "$ctx_dirmove_path/occupant"
+pr_diff_resume 8873
+wait "$dirmove_pid"
+dirmove_rc=$?
+check 'pr fails when a real directory is planted at pr-context.md mid-fetch' \
+  test "$dirmove_rc" -ne 0
+dirmove_out=$(cat "$TMP/pwt-dir-move.out")
+check_contains 'that failure names the non-regular-file landing, not a downstream symptom' \
+  'did not land as a regular file' "$dirmove_out"
+check 'the planted directory is still a directory, not replaced' \
+  test -d "$ctx_dirmove_path"
+check 'the planted directory still holds its original occupant, untouched' \
+  test -f "$ctx_dirmove_path/occupant"
+rm -rf "$TMP/pwt-dir-move.out" "$ctx_dirmove_path"
 
 # --- symlink guards, write path (ensure_session_folder) --------------------
 #
@@ -4406,14 +4885,14 @@ check 'prune deletes the pruned worktree session folder' \
 # --- symlink guards, delete path (session_folder_if_present) ---------------
 #
 # Same shape as the write-path guards above, but exercised through `remove`.
-# remove_worktree checks the session path BEFORE calling `git worktree
-# remove`, not just before the session folder's own delete afterward — so
-# for the FIRST of these three, the worktree itself must still exist after
-# the refusal, proving `git worktree remove` never ran. Mutation check:
-# moving that check back to after `git worktree remove` (its original
-# position) makes only that one assertion fail; the other two guards below
-# still only ever refuse from session_folder_if_present, after the worktree
-# is already gone, so their survival/exit assertions don't move.
+# remove_worktree calls refuse_symlinked_session_path (pwt:~1787) exactly
+# ONCE, and that one call checks all three components (pwt dir, sessions
+# dir, name) — before `git worktree remove` ever runs, not just before the
+# session folder's own delete afterward. So for ALL THREE of these, the
+# worktree itself must still exist after the refusal, proving `git worktree
+# remove` never ran. Mutation check: moving that check back to after `git
+# worktree remove` (its original position) makes all three worktree-survival
+# assertions below fail, not just the first.
 
 launch_reset
 pwt new feat/ctx-rm-symlink-pwt >/dev/null 2>&1
@@ -4442,8 +4921,12 @@ ln -s "$evil_rm_sessions" "$sessions_dir"
 check_fails 'remove refuses a symlinked sessions directory' pwt remove feat/ctx-rm-symlink-sessions
 check 'a symlinked sessions directory leaves its target untouched on removal' \
   test -z "$(ls -A "$evil_rm_sessions" 2>/dev/null)"
+check 'the worktree itself still exists — refused before git worktree remove ran (sessions)' \
+  test -d "$MANAGED/feat-ctx-rm-symlink-sessions"
 rm -f "$sessions_dir"
 mv "$TMP/sessions-dir-backup" "$sessions_dir"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-rm-symlink-sessions" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-rm-symlink-sessions >/dev/null 2>&1
 
 launch_reset
 pwt new feat/ctx-rm-symlink-name >/dev/null 2>&1
@@ -4460,7 +4943,13 @@ check_contains 'remove names the symlinked session folder specifically' \
   'refusing a symlinked session folder' "$symlink_rm_name_out"
 check 'a symlinked session folder leaves its target untouched on removal' \
   test -z "$(ls -A "$evil_rm_name" 2>/dev/null)"
+check 'the worktree itself still exists — refused before git worktree remove ran (name)' \
+  test -d "$MANAGED/feat-ctx-rm-symlink-name"
 rm -f "$sessions_dir/feat-ctx-rm-symlink-name"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-rm-symlink-name" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-rm-symlink-name >/dev/null 2>&1
+
+# ---------------------------------------------------------- worktree includes
 
 section 'worktreeinclude'
 
