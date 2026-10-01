@@ -1332,8 +1332,16 @@ shadow_component_matches() {
 # adversarial top-level name could carry a literal newline), but once
 # filtered down to exactly those two literals the printed output is plain
 # ASCII, so the caller can compare it with ordinary string equality.
+#
+# Fails closed (returns 1) if ANY top-level entry's name carries a byte
+# outside printable ASCII — same *[!\ -~]* test as shadow_component_matches —
+# not just one that happens to literal-match .agents/.codex after folding.
+# ASCII-only lowering can't tell what a non-ASCII byte folds to on a
+# case-insensitive filesystem (APFS folds U+017F "ſ" onto "s"), so a
+# confusable top-level name (".agentſ") would otherwise just fail the
+# literal-string comparison below and be silently treated as irrelevant.
 shadow_toplevel_ids() {
-  local target=$1 commit=$2 file entry metadata name mode type obj lower
+  local target=$1 commit=$2 file entry metadata name mode type obj lower LC_ALL=C
   file=$(mktemp "${TMPDIR:-/tmp}/cwt-pr-shadow-tree.XXXXXX") || return 1
   if ! git -C "$target" ls-tree -z "$commit" >"$file" 2>/dev/null; then
     rm -f "$file"
@@ -1349,6 +1357,12 @@ shadow_toplevel_ids() {
     esac
     metadata=${entry%%$'\t'*}
     name=${entry#*$'\t'}
+    case $name in
+      *[!\ -~]*)
+        rm -f "$file"
+        return 1
+        ;;
+    esac
     read -r mode type obj <<<"$metadata"
     lower=$(shadow_lowercase "$name")
     [[ $lower == .agents || $lower == .codex ]] && printf '%s %s %s %s\n' "$lower" "$mode" "$obj" "$name"
@@ -1385,18 +1399,38 @@ shadow_base_diverged() {
 # (".agents -> tools/agents", or a nested
 # ".agents/skills/pr-review -> ../../shared/pr-review") whose own top-level
 # object id the pull request never changes, because it only edits content at
-# the symlink's TARGET path elsewhere in the tree. Fails closed on any git
-# error.
+# the symlink's TARGET path elsewhere in the tree.
+#
+# Recurses via the entry's own tree object id (mode 040000), never a `--
+# <name>` pathspec: a pathspec-restricted ls-tree errors under
+# GIT_GLOB_PATHSPECS/GIT_ICASE_PATHSPECS (exit 128), which used to withhold
+# every pull request with the wrong reason regardless of whether .agents/
+# .codex held anything suspicious at all. Reading the mode shadow_toplevel_ids
+# already returned also means a mode-120000 entry needs no ls-tree call —
+# it's already the symlink being searched for.
+#
+# Fails closed on any git/mktemp error, setting PR_SHADOW_REASON like
+# shadow_base_diverged so the caller doesn't overwrite a real failure reason
+# with the generic "ships a symlink" message.
 shadow_toplevel_symlink() {
   local target=$1 commit=$2 ids line lower mode obj name file entry entry_mode
-  ids=$(shadow_toplevel_ids "$target" "$commit") || return 0
+  ids=$(shadow_toplevel_ids "$target" "$commit") || {
+    PR_SHADOW_REASON='could not read the .agents/.codex trees'
+    return 0
+  }
   [[ -z $ids ]] && return 1
   while IFS= read -r line; do
     [[ -z $line ]] && continue
     read -r lower mode obj name <<<"$line"
-    file=$(mktemp "${TMPDIR:-/tmp}/cwt-pr-shadow-symlink.XXXXXX") || return 0
-    if ! git -C "$target" ls-tree -r -z "$commit" -- "$name" >"$file" 2>/dev/null; then
+    [[ $mode == 120000 ]] && return 0
+    [[ $mode == 040000 ]] || continue
+    file=$(mktemp "${TMPDIR:-/tmp}/cwt-pr-shadow-symlink.XXXXXX") || {
+      PR_SHADOW_REASON='could not read the .agents/.codex trees'
+      return 0
+    }
+    if ! git -C "$target" ls-tree -r -z "$obj" >"$file" 2>/dev/null; then
       rm -f "$file"
+      PR_SHADOW_REASON='could not read the .agents/.codex trees'
       return 0
     fi
     while IFS= read -r -d '' entry; do
@@ -1447,7 +1481,7 @@ pr_shadows_skills() {
   rm -f "$diff_file"
 
   if shadow_toplevel_symlink "$target" "$head_oid"; then
-    PR_SHADOW_REASON='ships a symlink under .agents/.codex'
+    PR_SHADOW_REASON=${PR_SHADOW_REASON:-'ships a symlink under .agents/.codex'}
     return 0
   fi
 

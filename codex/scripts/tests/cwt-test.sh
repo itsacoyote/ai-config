@@ -2831,6 +2831,24 @@ check_equals 'pr sends the review prompt for an ordinary top-level change outsid
 \$pr-review 965 $(pr_context_path feat-shadow-ordinary-change)" \
   "$(launched_arg_list | tail -2)"
 
+# ai-config-luz.13 INFO-1: shadow_toplevel_symlink used to recurse into a
+# regular (mode 040000) .agents/.codex directory with a `git ls-tree --
+# <name>` pathspec, which errors (exit 128) under GIT_GLOB_PATHSPECS/
+# GIT_ICASE_PATHSPECS — withholding every PR, including this ordinary one,
+# with the wrong reason. The fix recurses via the directory's own tree
+# object id instead, so the env var changes nothing about the outcome.
+# Reuses origin/main's current tip, like the 965 fixture above — a real
+# (non-symlink) .agents directory, from the advance_origin_main_with_file
+# fixture before test 960 — and must run before the 980+ fixtures below
+# permanently replace main's tip with a top-level symlink.
+pr_meta_from_main 966 feat/shadow-glob-pathspecs-env
+launch_reset
+GIT_GLOB_PATHSPECS=1 cwt pr 966 >/dev/null 2>&1
+check_equals 'INFO-1: GIT_GLOB_PATHSPECS=1 does not change the outcome for an ordinary clean PR with a regular .agents dir' \
+  "--
+\$pr-review 966 $(pr_context_path feat-shadow-glob-pathspecs-env)" \
+  "$(launched_arg_list | tail -2)"
+
 # A pull request that still carries an OLD .agents file completely unchanged
 # from its own merge base shows NO diff there against that merge base — the
 # base branch is the thing that moved, changing the same file AFTER this
@@ -2890,6 +2908,32 @@ shadow_symlink_nested_out=$(cwt pr 981 2>&1)
 check_contains 'pr withholds the review prompt when the base branch ships a nested symlink under .agents the PR never touches' \
   'symlink under .agents/.codex' "$shadow_symlink_nested_out"
 check_equals 'the withheld nested-symlink prompt sends no startup prompt at all' '' "$(launched args)"
+
+# ai-config-luz.13 LOW-1: the same top-level-symlink attack as 980 above, but
+# the base branch's entry is named with a non-ASCII confusable of .agents
+# (U+017F "ſ", which APFS folds onto "s") rather than the literal string.
+# shadow_toplevel_ids's old ASCII-only fold left this entry neither matching
+# ".agents" nor flagged as suspicious, so it was silently skipped — the PR
+# below (editing only the symlink's target, same as 980) sent its prompt
+# normally. The fix fails shadow_toplevel_ids closed on any non-ASCII
+# top-level byte, so this now withholds via "could not read the .agents/
+# .codex trees" (shadow_toplevel_symlink's own tree-read failed, not a
+# confirmed symlink match) rather than via "symlink under .agents/.codex".
+# This is the last fixture to force-push a synthetic tip to "main" in this
+# section — it leaves a permanent non-ASCII top-level entry there, which
+# would fail shadow_toplevel_ids closed for any later fixture built on
+# origin/main's current tip.
+shadow_nonascii_symlink_name=$(printf '.agent\xc5\xbf')
+shadow_toplevel_nonascii_sha=$(commit_adding_path "$shadow_pristine_base" "$shadow_nonascii_symlink_name" 'symlink:tools/agents')
+push_and_print main "$shadow_toplevel_nonascii_sha" >/dev/null
+git -C "$PRIMARY" fetch -q origin main
+pr_meta_from_main_adding 982 feat/shadow-symlink-base-nonascii \
+  'tools/agents/skills/pr-review/SKILL.md' 'malicious skill'
+launch_reset
+shadow_symlink_nonascii_out=$(cwt pr 982 2>&1)
+check_contains 'pr withholds the review prompt when the base branch top level is a non-ASCII confusable of .agents (S4)' \
+  'could not read the .agents/.codex trees' "$shadow_symlink_nonascii_out"
+check_equals 'the withheld non-ASCII top-level prompt sends no startup prompt at all' '' "$(launched args)"
 
 section 'pr --force'
 
