@@ -116,6 +116,19 @@ mkdir -p "$TMP/other-volume/worktrees/owner/project"
 mkdir -p "$HOME/github/owner"
 ln -s "$TMP/other-volume/worktrees" "$HOME/github/.worktrees"
 
+# Review mode pins Pi's skill discovery to ~/.agents/skills/pr-review,
+# physically resolved. Seeded here as a SYMLINK to a fixture directory — it is
+# one in the real ai-config checkout too — so the suite exercises physical
+# resolution rather than a plain directory a resolver could pass by luck.
+PR_REVIEW_SKILL_FIXTURE="$TMP/pr-review-skill-fixture"
+mkdir -p "$PR_REVIEW_SKILL_FIXTURE" "$HOME/.agents/skills"
+printf '# pr-review\n' >"$PR_REVIEW_SKILL_FIXTURE/SKILL.md"
+ln -s "$PR_REVIEW_SKILL_FIXTURE" "$HOME/.agents/skills/pr-review"
+# The physical path pwt's resolver reports: may differ from
+# $PR_REVIEW_SKILL_FIXTURE's own spelling if $TMP sits under a symlinked
+# ancestor (macOS's /tmp and /var are themselves symlinks).
+PR_REVIEW_SKILL_PHYSICAL=$(cd -P "$PR_REVIEW_SKILL_FIXTURE" && pwd -P)
+
 REMOTE="$HOME/remotes/owner/project.git"
 PRIMARY_LOGICAL="$HOME/github/owner/project"
 MANAGED="$HOME/github/.worktrees/owner/project"
@@ -1549,6 +1562,7 @@ check_not_contains 'pwt help omits yolo mode' 'yolo' "$help_text"
 # A phrase from the naming paragraph, not the bare --name flag: the synopsis
 # lines alone would keep this green with the whole paragraph deleted.
 check_output 'help documents session naming' 'naming the session' pwt help
+check_output 'usage documents --no-review' '--no-review' pwt help
 check_output 'an unknown subcommand is reported as unknown' \
   'unknown command' pwt definitely-not-a-command
 check_fails 'an unknown subcommand exits non-zero' pwt definitely-not-a-command
@@ -2651,7 +2665,7 @@ check_equals 'pr still launches after the fork warning' \
 
 pr_meta 103 feat/pr-passthrough false
 launch_reset
-pwt pr 103 -- --no-session --model 'space value' '' >/dev/null 2>&1
+pwt pr 103 --no-review -- --no-session --model 'space value' '' >/dev/null 2>&1
 check_equals 'permitted PR arguments stay unchanged before policy' \
   '10' "$(launched argc)"
 check_arg_equals 'PR launch names the session before permitted arguments' 0 '--name'
@@ -2834,7 +2848,7 @@ section 'pr-policy'
 pr_meta 121 feat/pr-policy false
 launch_reset
 check 'PR launch accepts ordinary model, thinking, and prompt arguments' \
-  pwt pr 121 -- --model 'model value' --thinking high 'prompt value'
+  pwt pr 121 --no-review -- --model 'model value' --thinking high 'prompt value'
 check_equals 'PR launch adds the session name and exactly four enforcement tokens' \
   '11' "$(launched argc)"
 check_arg_equals 'PR launch names the session before forwarded arguments' 0 '--name'
@@ -2857,7 +2871,7 @@ check_fails 'PR policy does not append the short context-disable alias' \
 
 launch_reset
 check 'reused PR worktrees receive the same launch policy' \
-  pwt pr 121 -- --provider google
+  pwt pr 121 --no-review -- --provider google
 check_equals 'reused PR launch keeps permitted arguments before policy' \
   '8' "$(launched argc)"
 check_arg_equals 'reused PR launch names the session before permitted arguments' \
@@ -2872,7 +2886,7 @@ check_arg_equals 'reused PR launch appends no-approve last' 7 '--no-approve'
 
 launch_reset
 dash_value_status=0
-dash_value_out=$(pwt pr 121 -- --name -review \
+dash_value_out=$(pwt pr 121 --no-review -- --name -review \
   --system-prompt --approve 2>&1) || dash_value_status=$?
 if [ "$dash_value_status" -eq 0 ]; then
   ok 'PR policy preserves dash-leading values using Pi parser semantics'
@@ -2899,7 +2913,7 @@ check_arg_equals 'dash-leading value launch still appends no-approve last' \
 
 launch_reset
 check 'PR policy permits audited policy-neutral Pi flags' \
-  pwt pr 121 -- --no-session --offline -p 'review prompt'
+  pwt pr 121 --no-review -- --no-session --offline -p 'review prompt'
 check_equals 'audited flags remain before the policy suffix' \
   '10' "$(launched argc)"
 check_arg_equals 'audited flags launch names the session first' 0 '--name'
@@ -2915,7 +2929,7 @@ launch_reset
 # Pi treats a three-dash token after --print as its prompt, not as an option.
 # This catches a validator that scans the prompt as an unknown flag instead.
 check 'PR policy preserves Pi print prompts beginning with three dashes' \
-  pwt pr 121 -- -p '--- review this change'
+  pwt pr 121 --no-review -- -p '--- review this change'
 check_equals 'three-dash print prompts remain before the policy suffix' \
   '8' "$(launched argc)"
 check_arg_equals 'three-dash print launch names the session first' 0 '--name'
@@ -2930,7 +2944,7 @@ launch_reset
 # Pi leaves a dash-leading invalid TUI value for its next parser iteration.
 # This catches a validator that skips a hidden policy override as that value.
 check 'PR policy accepts a valid TUI mode' \
-  pwt pr 121 -- --tui-mode fullscreen
+  pwt pr 121 --no-review -- --tui-mode fullscreen
 check_equals 'valid TUI mode remains before the policy suffix' \
   '8' "$(launched argc)"
 check_arg_equals 'valid TUI mode launch names the session first' 0 '--name'
@@ -2942,7 +2956,7 @@ check_arg_equals 'valid TUI mode launch still appends policy last' \
 
 launch_reset
 check 'PR policy accepts a non-RPC output mode' \
-  pwt pr 121 -- --mode json
+  pwt pr 121 --no-review -- --mode json
 check_equals 'non-RPC output mode remains before the policy suffix' \
   '8' "$(launched argc)"
 check_arg_equals 'non-RPC mode launch names the session first' 0 '--name'
@@ -4948,6 +4962,165 @@ check 'the worktree itself still exists — refused before git worktree remove r
 rm -f "$sessions_dir/feat-ctx-rm-symlink-name"
 git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-rm-symlink-name" >/dev/null 2>&1
 git -C "$PRIMARY" branch -D feat/ctx-rm-symlink-name >/dev/null 2>&1
+
+# ------------------------------------------------------------- pr review mode
+
+section 'pr review mode'
+
+# --- default review mode: skill pin, enforced suffix, prompt order ---------
+
+pr_meta 950 feat/review-prompt-basic false
+launch_reset
+pwt pr 950 >/dev/null 2>&1
+review_ctx_950=$(pr_context_path feat-review-prompt-basic)
+check_equals 'pr review mode launch has exactly ten argv elements' \
+  '10' "$(launched argc)"
+check_arg_equals 'pr review mode names the session first' 0 '--name'
+check_arg_equals 'pr review mode names the session PR-950' 1 'PR-950'
+check_arg_equals 'pr passes --no-skills before --skill in review mode' 2 '--no-skills'
+check_arg_equals \
+  'pr passes --no-skills --skill <physical personal pr-review path> before the enforced suffix' \
+  3 '--skill'
+check_arg_equals \
+  'pr passes the physical personal pr-review skill path before the enforced suffix' \
+  4 "$PR_REVIEW_SKILL_PHYSICAL"
+check_arg_equals 'pr disables extension discovery after the skill pin' 5 '--no-extensions'
+check_arg_equals 'pr policy appends the tool option after the skill pin' 6 '--tools'
+check_arg_equals 'pr policy limits tools to read-only after the skill pin' \
+  7 'read,grep,find,ls'
+check_arg_equals 'pr policy appends no-approve last in the enforced suffix' 8 '--no-approve'
+check_arg_equals \
+  'pr launches pi with /skill:pr-review <n> <context path> as the last argument' \
+  9 "/skill:pr-review 950 $review_ctx_950"
+# Adjacency, not just position: the suffix's own last token sits directly
+# before the prompt, with nothing else in between.
+suffix_before_prompt_index=$(($(launched argc) - 2))
+check_arg_equals 'pr keeps the enforced tool suffix as the last options before the prompt' \
+  "$suffix_before_prompt_index" '--no-approve'
+
+# --- reused worktree still sends the review prompt --------------------------
+
+launch_reset
+pwt pr 950 >/dev/null 2>&1
+reused_prompt_index=$(($(launched argc) - 1))
+check_arg_equals 'pr on a reused worktree launches with the review prompt' \
+  "$reused_prompt_index" "/skill:pr-review 950 $review_ctx_950"
+
+# --- missing personal skill dies naming --no-review, never launches --------
+#
+# A real pr_meta fixture is required here, not just a numeric argument: the
+# resolver must die BEFORE any gh call, and without a fixture a broken
+# resolver would still exit non-zero via the unrelated "cannot resolve pull
+# request" failure further down, passing this check for the wrong reason.
+
+pr_meta 951 feat/review-prompt-missing-skill false
+launch_reset
+mv "$HOME/.agents/skills/pr-review" "$TMP/pr-review-skill-link-backup"
+missing_skill_out=$(pwt pr 951 2>&1)
+missing_skill_rc=$?
+mv "$TMP/pr-review-skill-link-backup" "$HOME/.agents/skills/pr-review"
+check 'pr exits non-zero naming --no-review when ~/.agents/skills/pr-review is missing, and never launches pi' \
+  test "$missing_skill_rc" -ne 0
+check_contains 'the missing personal skill failure names --no-review' \
+  '--no-review' "$missing_skill_out"
+check_equals 'a missing personal skill never launches pi' '' "$(launched pwd)"
+
+# A present directory with no SKILL.md inside is refused the same way — the
+# requirement is the file, not merely the resolved path existing.
+launch_reset
+rm -f "$PR_REVIEW_SKILL_FIXTURE/SKILL.md"
+missing_md_out=$(pwt pr 951 2>&1)
+missing_md_rc=$?
+printf '# pr-review\n' >"$PR_REVIEW_SKILL_FIXTURE/SKILL.md"
+check 'pr exits non-zero when the personal pr-review skill has no SKILL.md' \
+  test "$missing_md_rc" -ne 0
+check_contains 'the missing SKILL.md failure names --no-review' \
+  '--no-review' "$missing_md_out"
+check_equals 'a missing SKILL.md never launches pi' '' "$(launched pwd)"
+
+# --- review mode refuses passthrough --skill / --no-skills / -ns -----------
+#
+# Each gets a real pr_meta fixture: without one, a broken refusal would still
+# exit non-zero (and never launch) via the unrelated "cannot resolve pull
+# request" failure, passing these checks for the wrong reason. With a real
+# fixture, a broken refusal runs the checkout through to a real `pi` launch.
+
+pr_meta 952 feat/review-prompt-refuse-skill false
+launch_reset
+check_fails 'pr refuses a passthrough --skill in review mode' \
+  pwt pr 952 -- --skill ./evil-skill
+check_equals 'a refused passthrough --skill never launches pi' '' "$(launched pwd)"
+
+pr_meta 953 feat/review-prompt-refuse-no-skills false
+launch_reset
+check_fails 'pr refuses a passthrough --no-skills in review mode' \
+  pwt pr 953 -- --no-skills
+check_equals 'a refused passthrough --no-skills never launches pi' '' "$(launched pwd)"
+
+pr_meta 958 feat/review-prompt-refuse-ns false
+launch_reset
+check_fails 'pr refuses a passthrough -ns in review mode' \
+  pwt pr 958 -- -ns
+check_equals 'a refused passthrough -ns never launches pi' '' "$(launched pwd)"
+
+# The refusal is specific to review mode, not a blanket ban on these flags —
+# --no-review (not its own named test, but what would silently break if the
+# refusal stopped checking no_review) must still accept them.
+pr_meta 957 feat/review-prompt-skill-override-no-review false
+launch_reset
+check 'a passthrough --skill is allowed under --no-review' \
+  pwt pr 957 --no-review -- --skill ./some-skill
+
+# --- --no-review: no skill flags, no prompt, context still written ---------
+
+pr_meta 954 feat/review-prompt-no-review false
+launch_reset
+pwt pr 954 --no-review >/dev/null 2>&1
+ctx_954=$(pr_context_path feat-review-prompt-no-review)
+check 'pr --no-review still writes pr-context.md' test -f "$ctx_954"
+check_equals 'pr --no-review launches with no skill flags and no prompt and still writes pr-context.md' \
+  '6' "$(launched argc)"
+check_arg_equals 'pr --no-review still disables extension discovery' 2 '--no-extensions'
+check_arg_equals 'pr --no-review still appends the tool option' 3 '--tools'
+check_arg_equals 'pr --no-review still limits tools to read-only' 4 'read,grep,find,ls'
+check_arg_equals 'pr --no-review still appends no-approve last' 5 '--no-approve'
+check_fails 'pr --no-review never adds --no-skills' launched_has_arg '--no-skills'
+check_fails 'pr --no-review never adds --skill' launched_has_arg '--skill'
+check_fails 'pr --no-review never adds a review prompt' \
+  launched_has_arg "/skill:pr-review 954 $ctx_954"
+
+# --- --no-review: a context-fetch failure only warns, and still launches ---
+
+pr_meta 955 feat/review-prompt-fetch-fail false
+pr_head_moved 955 '0000000000000000000000000000000000000009'
+launch_reset
+fetch_fail_out=$(pwt pr 955 --no-review 2>&1)
+fetch_fail_rc=$?
+ctx_955=$(pr_context_path feat-review-prompt-fetch-fail)
+check 'pr --no-review still launches when the context fetch fails' \
+  test "$fetch_fail_rc" -eq 0
+check 'pr --no-review warns and launches when the context fetch fails, leaving no pr-context.md' \
+  test ! -f "$ctx_955"
+check_contains 'the --no-review warning names the actual fetch failure' \
+  'warning:' "$fetch_fail_out"
+check_not_contains 'the --no-review warning never mentions --no-review itself' \
+  '--no-review' "$fetch_fail_out"
+check_equals 'a failed fetch under --no-review still launches pi' \
+  "$MANAGED/feat-review-prompt-fetch-fail" "$(launched pwd)"
+check_fails 'a failed fetch under --no-review appends no review prompt either' \
+  launched_has_arg "/skill:pr-review 955 $ctx_955"
+
+# --- a literal `-- --no-review` is Pi's problem, not pwt's own flag ---------
+
+pr_meta 956 feat/review-prompt-literal-no-review false
+launch_reset
+no_review_literal_out=$(pwt pr 956 -- --no-review 2>&1)
+no_review_literal_rc=$?
+check 'pr <n> -- --no-review is rejected as a disallowed Pi option' \
+  test "$no_review_literal_rc" -ne 0
+check_contains 'the rejection names the disallowed --no-review option' \
+  'does not allow Pi option: --no-review' "$no_review_literal_out"
+check_equals 'a disallowed --no-review passthrough never launches pi' '' "$(launched pwd)"
 
 # ---------------------------------------------------------- worktree includes
 
@@ -7058,13 +7231,18 @@ if [ -f "$COMPLETION" ]; then
   else
     not_ok 'completion offers each supported flag to its owning command'
   fi
+  if printf '%s\n' "$pr_flags" | grep -qx -- '--no-review'; then
+    ok 'completion offers --no-review for pr'
+  else
+    not_ok 'completion offers --no-review for pr'
+  fi
 
   all_flags=''
   for sub in new branch open pr root list remove prune install help; do
     command_flags=$(complete_for pwt "$sub" operand '--')
     all_flags=$(printf '%s\n%s\n' "$all_flags" "$command_flags")
     case $sub in
-      pr) expected_flag='--force' ;;
+      pr) expected_flag=$'--force\n--no-review' ;;
       remove) expected_flag='--delete-branch' ;;
       prune) expected_flag='--yes' ;;
       *) expected_flag='' ;;

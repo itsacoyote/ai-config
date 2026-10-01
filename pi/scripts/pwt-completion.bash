@@ -143,7 +143,7 @@ _pwt() {
 
   if [[ $cur == -* ]]; then
     case $cmd in
-      pr) flags='--force' ;;
+      pr) flags='--force --no-review' ;;
       remove) flags='--delete-branch' ;;
       prune) flags='--yes' ;;
       *) flags='' ;;

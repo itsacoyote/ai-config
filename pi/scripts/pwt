@@ -50,7 +50,8 @@ Usage:
   pwt new <branch> [-- <args>]     branch from the origin default, then launch
   pwt branch <branch> [-- <args>]  check out an existing branch, then launch
   pwt open <branch> [-- <args>]    launch in an existing managed worktree
-  pwt pr <n> [--force] [-- <args>]  check out a pull request, then launch read-only
+  pwt pr <n> [--force] [--no-review] [-- <args>]
+                                    check out a pull request, then launch read-only
   pwt root [-- <args>]             launch in the primary checkout
   pwt remove <branch> [--delete-branch]
   pwt prune [--yes]                sweep worktrees whose branch has merged
@@ -81,14 +82,30 @@ branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
 
+Unless `--no-review`, `pwt pr` fetches the pull request's review context into
+`pr-context.md` in a session folder alongside the worktree (not inside it), pins
+Pi's skill discovery to the personal `~/.agents/skills/pr-review` skill (so a
+pull request shipping its own `.agents/skills/pr-review` cannot replace the
+review — Pi keeps the first-discovered skill on a name collision), and sends a
+one-line startup prompt telling Pi to run that skill against the fetched file.
+If the personal skill, or its `SKILL.md`, is missing, `pwt pr` exits non-zero
+naming `--no-review`. In review mode, a passthrough `--skill`, `--no-skills`,
+or `-ns` is refused for the same reason. `pwt remove`/`pwt prune` delete the
+file with the worktree. `--no-review` skips the skill pin and the prompt but
+still writes the file; a context-fetch failure then only warns instead of
+refusing to launch. A symlink, containment, or mkdir refusal on the session
+folder itself stays fatal either way — that signals tampering, not a
+transient fetch failure.
+
 Every launching subcommand passes --name to pi, naming the session: `pr <n>` becomes
 `PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the
 primary checkout's current branch, also with slashes as dashes, or no name on a
 detached HEAD. A developer's own override must use the two-token form, `--name X`
 or `-n X` — pi silently ignores `--name=X`. No name is added when the first argument
 after `--` is a pi command word (auth, install, remove, uninstall, update, list,
-config), so that command still runs; `pwt pr`'s enforced tool/trust suffix still
-comes last.
+config), so that command still runs; `pwt pr`'s skill-pin flags and enforced
+tool/trust suffix still come last, with the review startup prompt as the final
+argument of all.
 
 Arguments after `--` are passed through to `pi` unchanged.
 EOF
@@ -286,7 +303,15 @@ is_pi_command() {
 # options replace the tool/trust policy, load executable extensions, or resume
 # a session whose stored cwd escapes the selected worktree. Validate first so
 # a dangling value-taking option cannot consume an enforcement token.
+#
+# In review mode (not --no-review), a passthrough --skill, --no-skills, or -ns
+# is refused outright: launch_pr itself adds --no-skills --skill <personal
+# path> so Pi's skill discovery resolves to exactly one skill named
+# pr-review, and a developer-forwarded flag of the same shape could otherwise
+# override which skill path wins or re-enable discovery of a PR-shipped
+# .agents/skills that shadows it.
 validate_pr_launch_args() {
+  local no_review=$1
   local index=0 arg next count=${#LAUNCH_ARGS[@]}
 
   # Pi handles these commands before it creates the restricted agent session.
@@ -298,9 +323,20 @@ validate_pr_launch_args() {
   while ((index < count)); do
     arg=${LAUNCH_ARGS[$index]}
     case $arg in
+      --skill)
+        ((no_review)) ||
+          die "pwt pr does not allow passthrough $arg in review mode; run with --no-review to allow it"
+        index=$((index + 1))
+        ((index < count)) ||
+          die "pwt pr needs a value after Pi option: $arg"
+        ;;
+      --no-skills | -ns)
+        ((no_review)) ||
+          die "pwt pr does not allow passthrough $arg in review mode; run with --no-review to allow it"
+        ;;
       --provider | --model | --api-key | --system-prompt | \
         --append-system-prompt | --name | \
-        --models | --thinking | --skill | --prompt-template | --theme | -n)
+        --models | --thinking | --prompt-template | --theme | -n)
         index=$((index + 1))
         ((index < count)) ||
           die "pwt pr needs a value after Pi option: $arg"
@@ -333,7 +369,7 @@ validate_pr_launch_args() {
         ;;
       --help | -h | --version | -v | --no-session | \
         --no-tools | -nt | --no-builtin-tools | -nbt | \
-        --no-extensions | -ne | --no-skills | -ns | \
+        --no-extensions | -ne | \
         --no-prompt-templates | -np | --no-themes | --list-models | \
         --verbose | --no-approve | -na | --offline)
         ;;
@@ -366,6 +402,20 @@ resolve_pi() {
     die 'cannot resolve the pi executable directory'
   pi_command="$directory/$basename"
   [[ -f $pi_command && -x $pi_command ]] || die 'pi on PATH is not an executable file'
+}
+
+# Review mode pins Pi's skill discovery to this path (launch_pr's --no-skills
+# --skill) instead of letting Pi discover ~/.agents/skills on its own, so a
+# project .agents/skills shipped by the pull request cannot shadow it. Resolved
+# physically — ~/.agents/skills/pr-review is itself a symlink into the
+# ai-config checkout — and before `launch` changes cwd, while $HOME still has
+# its caller-intended meaning. Sets PERSONAL_PR_REVIEW_SKILL.
+PERSONAL_PR_REVIEW_SKILL=''
+resolve_personal_pr_review_skill() {
+  local path="$HOME/.agents/skills/pr-review" physical
+  physical=$(resolve_path "$path") || return 1
+  [[ -d $physical && -f "$physical/SKILL.md" ]] || return 1
+  PERSONAL_PR_REVIEW_SKILL=$physical
 }
 
 launch() {
@@ -438,8 +488,12 @@ validate_pr_path() {
 
 # Keep the enforced suffix adjacent to exec so no later PR preparation can
 # accidentally append an argument after the last-value-wins tool/trust policy.
+# finish_pr_context already appended --no-skills --skill <path> (review mode
+# only) ahead of this suffix; the review startup prompt goes after it, as the
+# ONE final argv element — Pi parses "[options] [--] [messages...]", so the
+# prompt must be a message, never read as another option's value.
 launch_pr() {
-  local branch=$1 target=$2
+  local branch=$1 target=$2 no_review=$3 number=$4
   validate_pr_startup_paths "$target"
   # Cwd-sensitive Pi overrides can redirect configuration, migrations, or
   # session writes through tracked PR paths. Use only trusted locations here.
@@ -447,6 +501,7 @@ launch_pr() {
   PI_CODING_AGENT_SESSION_DIR="$primary_common/pwt/sessions/${target##*/}"
   export PI_CODING_AGENT_SESSION_DIR
   LAUNCH_ARGS+=(--no-extensions --tools read,grep,find,ls --no-approve)
+  ((no_review)) || LAUNCH_ARGS+=("/skill:pr-review $number $SESSION_FOLDER/pr-context.md")
   require_managed_worktree "$branch" "$target"
   launch "$target"
 }
@@ -1604,9 +1659,29 @@ write_pr_context() {
   PWT_PR_CONTEXT_TMP=''
 }
 
+# Decides what a `pwt pr` launch does with write_pr_context's outcome — shared
+# by the fresh-checkout and reused-worktree paths so the --no-review contract
+# lives in exactly one place. On success in review mode, pins Pi's skill
+# discovery to the already-resolved personal pr-review skill
+# (PERSONAL_PR_REVIEW_SKILL, set by resolve_personal_pr_review_skill before any
+# worktree work began) via --no-skills --skill, ahead of launch_pr's own
+# enforced tool/trust suffix. Symlink/containment/mkdir refusals never reach
+# this function — they `die` inside write_pr_context — so --no-review does not
+# soften them.
+finish_pr_context() {
+  local no_review=$1 number=$2 ctx_ok=$3
+  local msg="${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
+  if ((no_review)); then
+    ((ctx_ok)) || warn "$msg"
+    return 0
+  fi
+  ((ctx_ok)) || die "$msg; run 'pwt pr $number --no-review' to skip it"
+  LAUNCH_ARGS+=(--no-skills --skill "$PERSONAL_PR_REVIEW_SKILL")
+}
+
 reuse_pr_or_refuse() {
   local branch=$1 existing=$2 number=$3 pr_url=$4 head_oid=$5
-  local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9
+  local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9 no_review=${10}
   local marker_url marker_head legacy=0 current collision_rc final fetch_rc=0
 
   require_reusable_worktree "$branch" "$existing"
@@ -1688,14 +1763,15 @@ reuse_pr_or_refuse() {
   record_pr_markers "$branch" "$pr_url" "$head_oid" ||
     die "could not record the verified identity for pull request #$number"
 
-  write_pr_context "$number" "$pr_url" "$head_oid" "${existing##*/}" "$head_ref" "$cross" ||
-    die "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}; run 'pwt pr $number --no-review' to skip it"
+  local ctx_ok=1
+  write_pr_context "$number" "$pr_url" "$head_oid" "${existing##*/}" "$head_ref" "$cross" || ctx_ok=0
+  finish_pr_context "$no_review" "$number" "$ctx_ok"
 
   note "reusing existing worktree for $branch at pull request #$number head"
   if [[ $cross == true ]]; then
     warn "pull request #$number comes from a fork — this is code you did not write, and opening it here runs it on your machine"
   fi
-  launch_pr "$branch" "$existing"
+  launch_pr "$branch" "$existing" "$no_review" "$number"
 }
 
 # Removing the directory containing the caller leaves its shell in a path that
@@ -1955,7 +2031,14 @@ cmd_branch() {
 
 cmd_pr() {
   local -a rest=()
-  local force=0
+  local force=0 no_review=0
+  # `--force` and `--no-review` are pr-only — parse_launch_args must not learn
+  # them, or branch/new/open/root silently start accepting them too. Stripped
+  # here, before the remainder reaches the shared parser. Stops at the first
+  # `--`: from there on every argument belongs to Pi, and scanning the whole
+  # argv would misread `pwt pr 12 -- --no-review` as a request to skip the
+  # review prompt instead of forwarding the literal flag to Pi — Pi itself
+  # then refuses it as an unknown option (see validate_pr_launch_args).
   while [[ $# -gt 0 ]]; do
     case $1 in
       --)
@@ -1964,6 +2047,9 @@ cmd_pr() {
         ;;
       --force)
         force=1
+        ;;
+      --no-review)
+        no_review=1
         ;;
       *)
         rest+=("$1")
@@ -1989,8 +2075,12 @@ cmd_pr() {
   # directory name below — both describe the fork's own head branch, so a
   # hostile PR could otherwise choose its own session name.
   LAUNCH_NAME="PR-$number"
-  validate_pr_launch_args
+  validate_pr_launch_args "$no_review"
   validate_pr_path
+  if ((! no_review)); then
+    resolve_personal_pr_review_skill ||
+      die "pwt pr could not find ~/.agents/skills/pr-review with a SKILL.md; run 'pwt pr $number --no-review' to skip the review"
+  fi
 
   require_gh pr
   meta=$(gh pr view "$number" --repo "$origin_gh_repo" \
@@ -2025,7 +2115,7 @@ cmd_pr() {
 
   if existing=$(branch_worktree "$head_ref"); then
     reuse_pr_or_refuse "$head_ref" "$existing" "$number" "$pr_url" \
-      "$head_oid" "$head_ref" "$head_owner" "$head_repo" "$cross"
+      "$head_oid" "$head_ref" "$head_owner" "$head_repo" "$cross" "$no_review"
   else
     status=$?
     ((status == 1)) || die 'cannot list repository worktrees'
@@ -2106,13 +2196,14 @@ cmd_pr() {
   # A context-fetch failure here keeps the worktree rather than abandoning
   # it: markers are already recorded and preparation is finished, so a retry
   # takes the reuse path above instead of re-running the whole checkout.
-  write_pr_context "$number" "$pr_url" "$head_oid" "$name" "$head_ref" "$cross" ||
-    die "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}; run 'pwt pr $number --no-review' to skip it"
+  local ctx_ok=1
+  write_pr_context "$number" "$pr_url" "$head_oid" "$name" "$head_ref" "$cross" || ctx_ok=0
+  finish_pr_context "$no_review" "$number" "$ctx_ok"
 
   if [[ $cross == true ]]; then
     warn "pull request #$number comes from a fork — this is code you did not write, and opening it here runs it on your machine"
   fi
-  launch_pr "$head_ref" "$target"
+  launch_pr "$head_ref" "$target" "$no_review" "$number"
 }
 
 cmd_remove() {
