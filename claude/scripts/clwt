@@ -1255,20 +1255,18 @@ write_pr_context() {
 
 # Decides what a `clwt pr` launch does with write_pr_context's outcome — shared
 # by the fresh-checkout and reused-worktree paths so the --no-review contract
-# lives in exactly one place. --no-review always skips the prompt, success or
-# not; on a fetch failure it downgrades the fatal `die` to a `warn` that never
-# names --no-review (the flag is already in effect). Without --no-review, a
-# fetch failure stays fatal. This never runs after a symlink/containment/mkdir
-# refusal: those call `die` directly inside write_pr_context, before this
-# function is ever reached — --no-review does not soften them.
+# lives in exactly one place. The softened warn never names --no-review: the
+# flag is already in effect. Symlink/containment/mkdir refusals never reach
+# this function — they `die` inside write_pr_context — so --no-review does not
+# soften them.
 finish_pr_context() {
   local no_review=$1 number=$2 ctx_ok=$3
+  local msg="${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
   if ((no_review)); then
-    ((ctx_ok)) || warn "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
+    ((ctx_ok)) || warn "$msg"
     return 0
   fi
-  ((ctx_ok)) ||
-    die "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}; run 'clwt pr $number --no-review' to skip it"
+  ((ctx_ok)) || die "$msg; run 'clwt pr $number --no-review' to skip it"
   # `--` fences the prompt from any variadic option already sitting at the end
   # of LAUNCH_ARGS (a developer's own passthrough `--add-dir`, `--allowedTools`,
   # etc.) so it is never read as one more value for that option instead of its
