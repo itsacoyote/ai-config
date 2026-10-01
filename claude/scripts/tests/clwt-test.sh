@@ -3470,6 +3470,18 @@ check_fails 'pr fails when gh pr checks exits 1 with empty stdout and an error' 
 check 'pr leaves no pr-context.md when gh pr checks genuinely fails' \
   test ! -f "$(pr_context_path feat-ctx-checks-broken)"
 
+pr_meta 8869 feat/ctx-checks-exit4 false
+pr_checks 8869 4 "check1	pass	1s	url" 'gh: auth required'
+launch_reset
+checks_exit4_out=$(clwt pr 8869 2>&1)
+checks_exit4_rc=$?
+check 'pr fails when gh pr checks exits an unhandled code even with output' \
+  test "$checks_exit4_rc" -ne 0
+check_contains 'that failure names the unhandled exit code' \
+  '(exit 4)' "$checks_exit4_out"
+check 'pr leaves no pr-context.md when gh pr checks exits an unhandled code' \
+  test ! -f "$(pr_context_path feat-ctx-checks-exit4)"
+
 # --- review comments use --paginate against the exact repo, WITHOUT --slurp
 # (real gh rejects --slurp combined with --jq outright) ---------------------
 

@@ -863,14 +863,23 @@ new_commit_on() {
 # which interleave fetch_stale_tracking_ref with rewrite_pr_head) — a helper
 # arm judging against the live head would test a different, easier property.
 seed_leftover_branch() {
-  local branch=$1 relation=$2 base new_head local_sha
+  local branch=$1 relation=$2 base new_head local_sha wt_list
 
   # ENFORCED, not assumed: a branch already registered to a worktree elsewhere in
   # the suite would route a later `cwt pr` through reuse_or_refuse — exit 0, no
   # probe at all — and any test built on this helper would pass for the wrong
   # reason. Checked first, not left to `git branch -f`'s own worktree guard, so
   # this assertion is the one that actually fires and can be tested on its own.
-  if git -C "$PRIMARY" worktree list --porcelain | grep -qxF "branch refs/heads/$branch"; then
+  #
+  # Captured into a variable and matched via a here-string, not piped straight
+  # into `grep -q`: `-q` closes its input the instant it finds a match, and
+  # piping a large `git worktree list` (this suite accumulates 50+ by the time
+  # this runs) straight into that risks git getting SIGPIPE'd before it
+  # finishes writing — under `pipefail` that turns a REAL match into a
+  # false-negative failure here, non-deterministically. A here-string has no
+  # second process to SIGPIPE.
+  wt_list=$(git -C "$PRIMARY" worktree list --porcelain)
+  if grep -qxF "branch refs/heads/$branch" <<<"$wt_list"; then
     echo "seed_leftover_branch: $branch is already checked out somewhere" >&2
     return 1
   fi
@@ -2484,7 +2493,15 @@ printf 'dirty\n' >>"$MANAGED/feat-pr-reuse-dirty/README.md"
 force_advance_pr_head feat/pr-reuse-dirty >/dev/null
 assert_pr_oid_matches_remote 802
 launch_reset
+# Snapshotted before the refusal, not just asserted absent afterward: the
+# FIRST cwt pr 802 call above already made one real review-comments
+# request, so counting is what proves this SECOND, refused call made no
+# new one — a bare "does the log contain this" would trivially pass on the
+# first call's entry alone, whether or not this ordering guard exists.
+dirty_api_calls_before=$(grep -c 'pulls/802/comments' "$CWT_GH_API_LOG" || true)
 check_fails 'pr refuses a dirty reused worktree before refresh' cwt pr 802
+check_equals 'the dirty refusal never reached the review-comments fetch' \
+  "$dirty_api_calls_before" "$(grep -c 'pulls/802/comments' "$CWT_GH_API_LOG" || true)"
 check_equals 'dirty refusal preserves the worktree head' "$dirty_head" \
   "$(git -C "$MANAGED/feat-pr-reuse-dirty" rev-parse HEAD)"
 check_equals 'dirty refusal preserves the last verified head marker' "$dirty_head" \
@@ -3387,6 +3404,18 @@ check_fails 'pr fails when gh pr checks exits 1 with empty stdout and an error' 
   cwt pr 859
 check 'pr leaves no pr-context.md when gh pr checks genuinely fails' \
   test ! -f "$(pr_context_path feat-ctx-checks-broken)"
+
+pr_meta 8869 feat/ctx-checks-exit4 false
+pr_checks 8869 4 "check1	pass	1s	url" 'gh: auth required'
+launch_reset
+checks_exit4_out=$(cwt pr 8869 2>&1)
+checks_exit4_rc=$?
+check 'pr fails when gh pr checks exits an unhandled code even with output' \
+  test "$checks_exit4_rc" -ne 0
+check_contains 'that failure names the unhandled exit code' \
+  '(exit 4)' "$checks_exit4_out"
+check 'pr leaves no pr-context.md when gh pr checks exits an unhandled code' \
+  test ! -f "$(pr_context_path feat-ctx-checks-exit4)"
 
 # --- review comments use --paginate against the exact repo, WITHOUT --slurp
 # (real gh rejects --slurp combined with --jq outright) ---------------------
