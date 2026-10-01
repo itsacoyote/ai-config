@@ -42,7 +42,8 @@ Usage:
   cwt new <branch> [-- <args>]     branch from the origin default, then launch
   cwt branch <branch> [-- <args>]  check out an existing branch, then launch
   cwt open <branch> [-- <args>]    launch in an existing managed worktree
-  cwt pr <n> [--force] [-- <args>]  check out a pull request, then launch
+  cwt pr <n> [--force] [--no-review] [-- <args>]
+                                    check out a pull request, then launch
   cwt root [-- <args>]             launch in the primary checkout
   cwt remove <branch> [--delete-branch]
   cwt prune [--yes]                sweep worktrees whose branch has merged
@@ -75,6 +76,22 @@ Without the flag, `cwt pr` resets a leftover branch on its own only when the
 branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
+
+Unless `--no-review`, `cwt pr` fetches the pull request's review context into
+`pr-context.md`, in a session folder alongside the worktree (not inside it),
+then sends a one-line startup prompt telling codex to review that file. `cwt
+remove`/`cwt prune` delete the file with the worktree. `--no-review` skips the
+prompt but still writes the file; a context-fetch failure then only warns
+instead of refusing to launch. A symlink, containment, or mkdir refusal on the
+session folder itself stays fatal either way — that signals tampering, not a
+transient fetch failure.
+
+`cwt pr` also withholds the prompt (and warns instead) when the pull
+request's own checked-out diff touches a path under `.agents` or `.codex`
+relative to its merge base with the base branch: unlike Claude, Codex does
+not rank a personal skill above a project one on a name collision, so a pull
+request shipping `.agents/skills/pr-review` could otherwise replace the
+review the prompt is about to start. It still launches either way.
 
 Arguments after `--` are passed through to `codex`.
 EOF
@@ -1024,15 +1041,18 @@ mv_no_target_directory() {
 # under --no-review. Only a gh fetch failure returns a status here, via
 # abort_pr_context, for the caller to report and for --no-review to skip.
 #
-# The raw (unfenced) `gh pr diff` output is kept in CWT_PR_CONTEXT_RAW_DIFF
-# after a successful return, alongside the rendered file: a later guard that
-# must decide something from the diff's actual content (e.g. whether it
-# touches .agents) needs the real text, not pr-context.md's fenced rendering.
-CWT_PR_CONTEXT_RAW_DIFF=''
+# PR_CONTEXT_BASE_REF holds the validated base branch name (below) after a
+# successful return, for the Req 4b skill-shadowing guard: it computes its own
+# merge-base locally rather than trusting gh's diff text (gh is not pinned to
+# the commit this worktree has checked out), but it still needs to know WHICH
+# base branch to diff against — the same one this function already fetched
+# and validated, not a second gh call of its own.
+PR_CONTEXT_BASE_REF=''
 write_pr_context() {
   local number=$1 pr_url=$2 expected_oid=$3 name=$4 head_ref=$5 cross=$6
   local folder pr_host pr_owner pr_repo tmp meta
 
+  PR_CONTEXT_BASE_REF=''
   ensure_session_folder "$name"
   folder=$SESSION_FOLDER
   rm -f "$folder/pr-context.md"
@@ -1132,6 +1152,7 @@ write_pr_context() {
     abort_pr_context "pull request #$number returned an invalid author login" || return 1
   git check-ref-format --branch "$pr_base" >/dev/null 2>&1 ||
     abort_pr_context "pull request #$number returned an invalid base branch name" || return 1
+  PR_CONTEXT_BASE_REF=$pr_base
 
   local field
   for field in title_len body_len issues_len files_len changed_files comments_len reviews_len; do
@@ -1241,13 +1262,79 @@ write_pr_context() {
   [[ -f "$folder/pr-context.md" && ! -L "$folder/pr-context.md" ]] ||
     abort_pr_context "pull request #$number's context did not land as a regular file" || return 1
   CWT_PR_CONTEXT_TMP=''
-  CWT_PR_CONTEXT_RAW_DIFF=$diff_out
+}
+
+# Req 4b (security-sensitive). Decides whether the pull request's own checked-
+# out diff touches a path under .agents or .codex, relative to its merge base
+# with the base branch — Codex, unlike Claude, does not rank a personal skill
+# above a project one on a name collision, so a pull request shipping
+# .agents/skills/pr-review could otherwise replace the review the startup
+# prompt is about to launch.
+#
+# Decided from a LOCAL git diff against the worktree cwt already verified,
+# never from gh's diff text: gh is not pinned to the commit this worktree has
+# checked out, so a head that moved and moved back between calls (an
+# A->B->A race) could make gh describe a commit this worktree no longer
+# holds. `--no-renames` is an explicit guarantee, not a dependency on how a
+# given git version orders pathspec filtering against rename detection: with
+# it, a file moved OUT of .agents always reports as a plain delete at the old
+# path — its own independent line, which the pathspec matches on its own,
+# never bundled into a single `R` line whose old-side match this guard would
+# otherwise have to trust git to honor.
+#
+# Fails closed: a merge-base git cannot compute, or a diff git cannot run,
+# withholds exactly like a confirmed match — neither state is "proven safe".
+# Sets PR_SHADOW_REASON to describe why, for the caller's warning.
+PR_SHADOW_REASON=''
+pr_shadows_skills() {
+  local target=$1 base_ref=$2 merge_base out
+  PR_SHADOW_REASON=''
+  merge_base=$(git -C "$target" merge-base "origin/$base_ref" HEAD 2>/dev/null) || {
+    PR_SHADOW_REASON="has no merge base cwt could compute with origin/$base_ref"
+    return 0
+  }
+  out=$(git -C "$target" diff --name-status -z --no-renames \
+    "$merge_base" HEAD -- ':(icase).agents' ':(icase).codex' 2>/dev/null) || {
+    PR_SHADOW_REASON='could not be diffed against its merge base'
+    return 0
+  }
+  [[ -n $out ]]
+}
+
+# Decides what a `cwt pr` launch does with write_pr_context's outcome: whether
+# a fetch failure is fatal (per --no-review), and whether to send the startup
+# review prompt. Shared by the fresh-checkout and reused-worktree paths so
+# both pieces of the contract live in exactly one place. cwt has no --add-dir
+# equivalent — that is a Claude-only passthrough flag — and additionally runs
+# the Req 4b guard above before building the prompt; clwt needs no such guard
+# (Claude ranks personal skills above project ones).
+finish_pr_context() {
+  local no_review=$1 number=$2 ctx_ok=$3 target=$4 base_ref=$5
+  local msg="${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
+  if ((no_review)); then
+    ((ctx_ok)) || warn "$msg"
+    return 0
+  fi
+  ((ctx_ok)) || die "$msg; run 'cwt pr $number --no-review' to skip it"
+  if pr_shadows_skills "$target" "$base_ref"; then
+    warn "pull request #$number ${PR_SHADOW_REASON:-touches a path under .agents or .codex} — the review was not started automatically"
+    return 0
+  fi
+  # `--` fences the prompt from any variadic option already sitting at the
+  # end of LAUNCH_ARGS (a developer's own passthrough option) so it is never
+  # read as one more value for that option instead of its own argument. The
+  # literal `$` is built via a single-quoted value, never interpolated
+  # straight into a double-quoted string, so it can never be misread as the
+  # start of a (nonexistent) `$pr` shell variable.
+  local prompt
+  prompt=$(printf '%s %s %s' '$pr-review' "$number" "$SESSION_FOLDER/pr-context.md")
+  LAUNCH_ARGS+=(-- "$prompt")
 }
 
 reuse_pr_or_refuse() {
   local branch=$1 existing=$2 number=$3 pr_url=$4 head_oid=$5
-  local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9
-  local marker_url marker_head legacy=0 current collision_rc final
+  local head_ref=$6 head_owner=$7 head_repo=$8 cross=$9 no_review=${10}
+  local marker_url marker_head legacy=0 current collision_rc final ctx_ok
 
   require_reusable_worktree "$branch" "$existing"
 
@@ -1306,8 +1393,9 @@ reuse_pr_or_refuse() {
   record_pr_markers "$branch" "$pr_url" "$head_oid" ||
     die "could not record the verified identity for pull request #$number"
 
-  write_pr_context "$number" "$pr_url" "$head_oid" "${existing##*/}" "$head_ref" "$cross" ||
-    die "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}; run 'cwt pr $number --no-review' to skip it"
+  ctx_ok=1
+  write_pr_context "$number" "$pr_url" "$head_oid" "${existing##*/}" "$head_ref" "$cross" || ctx_ok=0
+  finish_pr_context "$no_review" "$number" "$ctx_ok" "$existing" "$PR_CONTEXT_BASE_REF"
 
   note "reusing existing worktree for $branch at pull request #$number head"
   if [[ $cross == true ]]; then
@@ -1507,15 +1595,16 @@ cmd_prune() {
 # into a disposable worktree, prove the real worktree is clean and belongs to
 # this PR, then fast-forward or reset from its last verified head.
 cmd_pr() {
-  # `--force` is pr-only — parse_launch_args must not learn it, or
-  # branch/new/open/root silently start accepting it too. Stripped here, before
-  # the remainder reaches the shared parser. Stops at the first `--`: from
-  # there on every argument belongs to codex (the `--` contract the shared
-  # parser itself implements), and scanning the whole argv would misread
-  # `cwt pr 12 -- --force` as a request to reset the branch instead of
-  # forwarding a literal --force to codex.
+  # `--force` and `--no-review` are pr-only — parse_launch_args must not learn
+  # them, or branch/new/open/root silently start accepting them too. Stripped
+  # here, before the remainder reaches the shared parser. Stops at the first
+  # `--`: from there on every argument belongs to codex (the `--` contract the
+  # shared parser itself implements), and scanning the whole argv would
+  # misread `cwt pr 12 -- --force` as a request to reset the branch (or
+  # `-- --no-review` as a request to skip the review prompt) instead of
+  # forwarding the literal flag to codex.
   local -a rest=()
-  local force=0
+  local force=0 no_review=0
   while [[ $# -gt 0 ]]; do
     case $1 in
       --)
@@ -1524,6 +1613,9 @@ cmd_pr() {
         ;;
       --force)
         force=1
+        ;;
+      --no-review)
+        no_review=1
         ;;
       *)
         rest+=("$1")
@@ -1581,7 +1673,7 @@ cmd_pr() {
   local existing
   if existing=$(branch_worktree "$head_ref"); then
     reuse_pr_or_refuse "$head_ref" "$existing" "$number" "$pr_url" "$head_oid" \
-      "$head_ref" "$head_owner" "$head_repo" "$cross"
+      "$head_ref" "$head_owner" "$head_repo" "$cross" "$no_review"
   fi
 
   # Captured UNCONDITIONALLY, outside the $cross gate below: only the
@@ -1692,8 +1784,9 @@ cmd_pr() {
   # A context-fetch failure here keeps the worktree rather than abandoning
   # it: markers are already recorded, so a retry takes the reuse path above
   # instead of re-running the whole checkout.
-  write_pr_context "$number" "$pr_url" "$head_oid" "$name" "$head_ref" "$cross" ||
-    die "${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}; run 'cwt pr $number --no-review' to skip it"
+  local ctx_ok=1
+  write_pr_context "$number" "$pr_url" "$head_oid" "$name" "$head_ref" "$cross" || ctx_ok=0
+  finish_pr_context "$no_review" "$number" "$ctx_ok" "$target" "$PR_CONTEXT_BASE_REF"
 
   if [[ $cross == true ]]; then
     printf '%s: WARNING: pull request #%s comes from a fork — this is code you did not write, and opening it here runs it on your machine\n' \

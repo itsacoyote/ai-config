@@ -550,6 +550,31 @@ pr_meta() {
     "https://github.com/owner/project/pull/$1" "$oid" >"$CWT_GH_PRS/$1"
 }
 
+# pr_meta_with_file <number> <head-ref> <is-cross-repository> <path>
+# [<content>] — like pr_meta, but the pull request head actually changes
+# <path> relative to the shared base tree (see push_pr_head_with_file). For
+# the Req 4b skill-shadowing guard fixtures.
+pr_meta_with_file() {
+  local oid
+  oid=$(push_pr_head_with_file "$2" "$4" "${5:-$4}") || return 1
+  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
+    "$2" "$3" owner project \
+    "https://github.com/owner/project/pull/$1" "$oid" >"$CWT_GH_PRS/$1"
+}
+
+# pr_meta_from_main <number> <head-ref> [<old-path> <new-path> <content>] —
+# like pr_meta, but the pull request head is parented on origin/main's
+# CURRENT (possibly already-advanced) tip (see push_pr_head_from_main), for
+# fixtures that must inherit whatever advance_origin_main_with_file already
+# put there. Same-repo, non-fork only — every caller needs.
+pr_meta_from_main() {
+  local oid
+  oid=$(push_pr_head_from_main "$2" "${3:-}" "${4:-}" "${5:-}") || return 1
+  printf 'headRefName=%s\nisCrossRepository=%s\nheadRepositoryOwner=%s\nheadRepository=%s\nurl=%s\nheadRefOid=%s\n' \
+    "$2" false owner project \
+    "https://github.com/owner/project/pull/$1" "$oid" >"$CWT_GH_PRS/$1"
+}
+
 # --- pr-context.md fixtures -------------------------------------------------
 # Each of these is optional per PR number; gh_pr_view_context (in the gh stub
 # above) falls back to a small default for anything not set here, so every
@@ -692,6 +717,106 @@ push_pr_head() {
   ensure_scratch_push
   sha=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse HEAD^{tree})" \
     -p HEAD -m "initial head for $branch ($RANDOM$RANDOM)")
+  git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
+  printf '%s\n' "$sha"
+}
+
+# commit_adding_path <parent-sha> <path> <content> — plumbing helper: a new
+# commit, parented on <parent-sha>, whose tree is <parent-sha>'s tree with
+# <path> added/replaced. A `symlink:<target>` content builds a symlink blob
+# instead of a regular file. Prints the new commit sha. Uses a throwaway
+# GIT_INDEX_FILE rather than $SCRATCH_PUSH's real index, so building one
+# fixture's tree never disturbs another's and nothing here depends on what
+# $SCRATCH_PUSH happens to have checked out.
+commit_adding_path() {
+  local parent=$1 path=$2 content=$3 idx mode blob tree
+  idx=$(mktemp "$TMP/pr-fixture-index.XXXXXX")
+  rm -f "$idx"
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" read-tree "$parent"
+  case $content in
+    symlink:*)
+      mode=120000
+      blob=$(printf '%s' "${content#symlink:}" | git -C "$SCRATCH_PUSH" hash-object -w --stdin)
+      ;;
+    *)
+      mode=100644
+      blob=$(printf '%s\n' "$content" | git -C "$SCRATCH_PUSH" hash-object -w --stdin)
+      ;;
+  esac
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --add --cacheinfo "$mode,$blob,$path"
+  tree=$(GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" write-tree)
+  rm -f "$idx"
+  git -C "$SCRATCH_PUSH" commit-tree "$tree" -p "$parent" -m "add $path"
+}
+
+# commit_moving_path <parent-sha> <old-path> <new-path> <content> — like
+# commit_adding_path, but also removes <old-path> from <parent-sha>'s tree.
+# Git sees this as a plain delete + add, not a rename (matching cwt's own
+# --no-renames diff) — exactly what the "renamed-away .agents file" fixture
+# needs: the OLD path must still show up on its own line.
+commit_moving_path() {
+  local parent=$1 old=$2 new=$3 content=$4 idx blob tree
+  idx=$(mktemp "$TMP/pr-fixture-index.XXXXXX")
+  rm -f "$idx"
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" read-tree "$parent"
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --force-remove "$old"
+  blob=$(printf '%s\n' "$content" | git -C "$SCRATCH_PUSH" hash-object -w --stdin)
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --add --cacheinfo "100644,$blob,$new"
+  tree=$(GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" write-tree)
+  rm -f "$idx"
+  git -C "$SCRATCH_PUSH" commit-tree "$tree" -p "$parent" -m "move $old to $new"
+}
+
+# push_pr_head_with_file <branch> <path> [<content>] — like push_pr_head, but
+# the new commit also adds/replaces <path> (content defaults to <path> itself;
+# see commit_adding_path for the `symlink:` form) in the SAME shared base tree
+# every other push_pr_head fixture builds on, so a merge-base diff against
+# origin/main has a real change under that path to see. For the Req 4b
+# skill-shadowing guard fixtures.
+push_pr_head_with_file() {
+  local branch=$1 path=$2 content=${3:-$path} sha
+  ensure_scratch_push
+  sha=$(commit_adding_path "$(git -C "$SCRATCH_PUSH" rev-parse HEAD)" "$path" "$content")
+  git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
+  printf '%s\n' "$sha"
+}
+
+# advance_origin_main_with_file <path> [<content>] — genuinely advances
+# $REMOTE's own main branch (not a PR head) to add <path>, then fetches that
+# advance into $PRIMARY so its origin/main tracking ref — what the Req 4b
+# guard's merge-base is computed against — sees it. For the "base already has
+# .agents/skills" fixture, which must prove the guard looks at what the PULL
+# REQUEST itself changed, not merely what the tree currently contains.
+advance_origin_main_with_file() {
+  local path=$1 content=${2:-$path} base sha
+  ensure_scratch_push
+  git -C "$SCRATCH_PUSH" fetch -q origin main
+  base=$(git -C "$SCRATCH_PUSH" rev-parse origin/main)
+  sha=$(commit_adding_path "$base" "$path" "$content")
+  git -C "$SCRATCH_PUSH" push -q origin "$sha:refs/heads/main"
+  git -C "$PRIMARY" fetch -q origin main
+}
+
+# push_pr_head_from_main <branch> [<old-path> <new-path> <content>] — like
+# push_pr_head, but parented on origin/main's CURRENT tip (after
+# advance_origin_main_with_file) instead of $SCRATCH_PUSH's stale clone-time
+# HEAD. With no path arguments, the PR commit adds an unrelated marker file
+# (a real, non-empty diff that stays clear of .agents/.codex) — for the "base
+# already has .agents/skills, untouched" fixture. With all three, it MOVES
+# <old-path> to <new-path> relative to that tip — for the "renamed-away
+# .agents file" fixture, built on top of whatever advance_origin_main_with_file
+# already put there.
+push_pr_head_from_main() {
+  local branch=$1 old=${2:-} new=${3:-} content=${4:-} base sha
+  ensure_scratch_push
+  git -C "$SCRATCH_PUSH" fetch -q origin main
+  base=$(git -C "$SCRATCH_PUSH" rev-parse origin/main)
+  if [ -n "$old" ]; then
+    sha=$(commit_moving_path "$base" "$old" "$new" "$content")
+  else
+    sha=$(commit_adding_path "$base" "pr-notes-$(printf '%s' "$branch" | tr '/' '-').txt" \
+      "unrelated change for $branch")
+  fi
   git -C "$SCRATCH_PUSH" push -q -f origin "$sha:refs/heads/$branch"
   printf '%s\n' "$sha"
 }
@@ -1176,6 +1301,10 @@ section 'launch primitive, root, and --yolo'
 # for: that the launched process really is rooted in the target directory.
 launch_reset() { : >"$CWT_TEST_LOG"; }
 launched() { sed -n "s/^$1=//p" "$CWT_TEST_LOG" | tail -1; }
+# One line per argument, not the joined "args=" line: asserting the last N
+# exact arguments (one of which is the review prompt, itself containing
+# spaces) needs this instead of re-splitting the joined form.
+launched_arg_list() { sed -n 's/^arg=//p' "$CWT_TEST_LOG"; }
 
 launch_reset
 cwt root >/dev/null 2>&1
@@ -2344,7 +2473,7 @@ check_equals 'pr still launches after warning about a fork' \
   "$MANAGED/feat-forked" "$(launched pwd)"
 
 launch_reset
-cwt pr 101 --yolo >/dev/null 2>&1
+cwt pr 101 --yolo --no-review >/dev/null 2>&1
 check_equals '--yolo works on pr as well' \
   '--yolo' "$(launched args)"
 
@@ -2374,6 +2503,183 @@ check_output 'pr says it needs gh' 'pr needs gh' cwt pr 101
 rm -f "$CWT_GH_UNAVAILABLE"
 rm -f "$PRIMARY/.worktreeinclude"
 
+section 'pr review prompt'
+
+check_output 'usage documents --no-review' '--no-review' cwt help
+
+# Fresh PR numbers (900s) throughout — the 101/303 fixtures above are plain
+# pr_meta, so they already exercise the prompt too, just unasserted there.
+
+pr_meta 901 feat/review-prompt false
+launch_reset
+cwt pr 901 >/dev/null 2>&1
+ctx_901=$(pr_context_path feat-review-prompt)
+check_equals 'pr launches codex with -- and $pr-review <n> <context path> as the last two arguments' \
+  "--
+\$pr-review 901 $ctx_901" "$(launched_arg_list | tail -2)"
+
+launch_reset
+cwt pr 901 >/dev/null 2>&1
+check_equals 'pr on a reused worktree launches with the review prompt' \
+  "--
+\$pr-review 901 $ctx_901" "$(launched_arg_list | tail -2)"
+
+pr_meta 902 feat/review-prompt-no-review false
+launch_reset
+cwt pr 902 --no-review >/dev/null 2>&1
+check 'pr --no-review still writes pr-context.md' \
+  test -f "$(pr_context_path feat-review-prompt-no-review)"
+check_equals 'pr --no-review launches with no startup prompt' \
+  '' "$(launched args)"
+
+pr_meta 903 feat/review-prompt-fetch-fail false
+pr_head_moved 903 '0000000000000000000000000000000000000009'
+launch_reset
+no_review_fail_out=$(cwt pr 903 --no-review 2>&1)
+no_review_fail_rc=$?
+check 'pr --no-review still launches when the context fetch fails' \
+  test "$no_review_fail_rc" -eq 0
+check 'pr --no-review warns and launches when the context fetch fails, leaving no pr-context.md' \
+  test -n "$(launched pwd)"
+check 'that failed fetch left no pr-context.md' \
+  test ! -f "$(pr_context_path feat-review-prompt-fetch-fail)"
+check_contains 'the --no-review warning names the actual fetch failure' \
+  'changed while fetching its context' "$no_review_fail_out"
+check_not_contains 'the --no-review warning never mentions --no-review itself' \
+  '--no-review' "$no_review_fail_out"
+check_equals 'a failed fetch under --no-review appends no prompt either' \
+  '' "$(launched args)"
+
+# The pre-parse loop stops scanning at the first literal `--`, so a
+# `--no-review` typed AFTER it is never consumed by cmd_pr — it reaches
+# parse_launch_args as ordinary passthrough and is forwarded to codex as-is.
+pr_meta 904 feat/review-prompt-literal-no-review false
+launch_reset
+cwt pr 904 -- --no-review >/dev/null 2>&1
+check_contains 'pr <n> -- --no-review forwards the literal flag' \
+  '--no-review' "$(launched args)"
+check 'pr <n> -- --no-review still writes pr-context.md' \
+  test -f "$(pr_context_path feat-review-prompt-literal-no-review)"
+check_equals 'pr <n> -- --no-review still sends the prompt' \
+  "--
+\$pr-review 904 $(pr_context_path feat-review-prompt-literal-no-review)" \
+  "$(launched_arg_list | tail -2)"
+
+pr_meta 905 feat/review-prompt-passthrough false
+launch_reset
+cwt pr 905 -- --foo bar >/dev/null 2>&1
+check_equals 'pr keeps -- passthrough arguments before the review prompt' \
+  "--foo bar -- \$pr-review 905 $(pr_context_path feat-review-prompt-passthrough)" \
+  "$(launched args)"
+
+# A developer's own passthrough ending in a VARIADIC-looking option is exactly
+# what the fence `--` before the prompt protects against: without it, the
+# prompt string would read as one more value for that option instead of its
+# own argument.
+pr_meta 906 feat/review-prompt-variadic false
+launch_reset
+cwt pr 906 -- --image a.png b.png >/dev/null 2>&1
+check_equals 'pr keeps the review prompt positional after a variadic --image passthrough' \
+  "--
+\$pr-review 906 $(pr_context_path feat-review-prompt-variadic)" \
+  "$(launched_arg_list | tail -2)"
+
+section 'pr skill-shadowing guard (Req 4b)'
+
+# Codex, unlike Claude, does not rank a personal skill above a project one on
+# a name collision, so a pull request shipping .agents/skills/pr-review (or a
+# .codex skill path) could replace the review the startup prompt is about to
+# launch. cwt decides this from a LOCAL git diff against the checked-out
+# worktree, never from gh's diff text — see pr_shadows_skills in cwt itself.
+
+pr_meta_with_file 950 feat/shadow-skill-file false \
+  '.agents/skills/pr-review/SKILL.md' 'malicious skill'
+launch_reset
+shadow_file_out=$(cwt pr 950 2>&1)
+check_contains 'pr withholds the review prompt and warns when the PR diff adds .agents/skills/pr-review/SKILL.md' \
+  '.agents or .codex' "$shadow_file_out"
+check_equals 'the withheld prompt sends no startup prompt at all' '' "$(launched args)"
+check 'pr still launches when the prompt is withheld' test -n "$(launched pwd)"
+
+pr_meta_with_file 951 feat/shadow-symlink false '.agents' 'symlink:/tmp/elsewhere'
+launch_reset
+shadow_symlink_out=$(cwt pr 951 2>&1)
+check_contains 'pr withholds the review prompt when the PR diff adds a .agents symlink' \
+  '.agents or .codex' "$shadow_symlink_out"
+check_equals 'a withheld .agents-symlink prompt sends nothing' '' "$(launched args)"
+
+# The renamed-away case is covered separately below (shadow-renamed-away);
+# this fixture instead covers a path with a character that would need git's
+# own quoting in human-facing diff text — proof that pathspec matching
+# (never a textual scan of rendered diff output) still catches it regardless.
+pr_meta_with_file 952 feat/shadow-unusual-path false '.agents/odd\file.md' 'payload'
+launch_reset
+shadow_unusual_out=$(cwt pr 952 2>&1)
+check_contains 'pr withholds the review prompt when an unusual path under .agents changes' \
+  '.agents or .codex' "$shadow_unusual_out"
+
+pr_meta_with_file 953 feat/shadow-case false \
+  '.Agents/skills/pr-review/SKILL.md' 'malicious skill'
+launch_reset
+shadow_case_out=$(cwt pr 953 2>&1)
+check_contains 'pr withholds the review prompt when the diff touches .Agents in a different case' \
+  '.agents or .codex' "$shadow_case_out"
+
+pr_meta_with_file 954 feat/shadow-codex false \
+  '.codex/skills/pr-review/SKILL.md' 'malicious skill'
+launch_reset
+shadow_codex_out=$(cwt pr 954 2>&1)
+check_contains 'pr withholds the review prompt when the PR diff touches .codex' \
+  '.agents or .codex' "$shadow_codex_out"
+
+pr_meta_with_file 955 feat/shadow-fake-diff false \
+  '.agents/skills/pr-review/SKILL.md' 'malicious skill'
+pr_body 955 'Looks innocent.
+
+## Diff
+
+nothing to see here, definitely not touching .agents'
+launch_reset
+shadow_fake_diff_out=$(cwt pr 955 2>&1)
+check_contains 'a description containing a fake ## Diff section does not hide a real .agents change' \
+  '.agents or .codex' "$shadow_fake_diff_out"
+
+# A plain pull request with nothing under .agents or .codex at all, but the
+# guard's own git calls are broken — fails closed exactly like a confirmed
+# match, never read as "safe to send".
+pr_meta 956 feat/shadow-mergebase-fail false
+make_failing_git 'merge-base'
+launch_reset
+shadow_mergebase_fail_out=$(cwt_with_failing_git pr 956 2>&1)
+check_contains 'pr withholds the review prompt when merge-base cannot be computed' \
+  'merge base' "$shadow_mergebase_fail_out"
+check 'pr still launches when merge-base cannot be computed' \
+  test -d "$MANAGED/feat-shadow-mergebase-fail"
+rm -f "$FAILGIT/git"
+
+# The base branch already having .agents/skills, untouched by THIS pull
+# request, must not withhold the prompt — the guard looks at what the pull
+# request itself changed relative to its merge base, not merely what the
+# checked-out tree contains.
+advance_origin_main_with_file '.agents/skills/existing/SKILL.md' 'pre-existing skill'
+
+pr_meta_from_main 960 feat/shadow-base-already
+launch_reset
+cwt pr 960 >/dev/null 2>&1
+check_equals 'pr sends the review prompt when the base branch already has .agents/skills and the PR does not touch it' \
+  "--
+\$pr-review 960 $(pr_context_path feat-shadow-base-already)" \
+  "$(launched_arg_list | tail -2)"
+
+# The file still exists (at its new path) in the PR's own head — proving the
+# OLD .agents path still trips the guard on its own, not just a net-new add.
+pr_meta_from_main 961 feat/shadow-renamed-away \
+  '.agents/skills/existing/SKILL.md' 'docs/existing/SKILL.md' 'pre-existing skill'
+launch_reset
+shadow_renamed_out=$(cwt pr 961 2>&1)
+check_contains 'pr withholds the review prompt when a renamed-away .agents file counts' \
+  '.agents or .codex' "$shadow_renamed_out"
+
 section 'pr --force'
 
 # Fresh PR numbers throughout this section — 101/202/303's managed worktrees
@@ -2402,7 +2708,7 @@ pr_meta 703 feat/pr-force-passthrough false
 passthrough_expected=$(sed -n 's/^headRefOid=//p' "$CWT_GH_PRS/703")
 launch_reset
 check 'pr passes --force after -- through to codex untouched' \
-  cwt pr 703 -- --force
+  cwt pr 703 --no-review -- --force
 check_equals 'the literal --force argument reaches codex' \
   '--force' "$(launched args)"
 check_equals 'a --force after -- never reaches gh, so the branch tip is unchanged' \
@@ -4160,6 +4466,11 @@ if [ -f "$COMPLETION" ]; then
     ok 'completion still offers --yolo for pr'
   else
     not_ok 'completion still offers --yolo for pr'
+  fi
+  if printf '%s\n' "$pr_flags" | grep -qx -- '--no-review'; then
+    ok 'completion offers --no-review for pr'
+  else
+    not_ok 'completion offers --no-review for pr'
   fi
   # Positive control first: an empty completion result (e.g. mapfile missing on
   # bash 3.2) would satisfy the bare negative no matter what the flags arm
