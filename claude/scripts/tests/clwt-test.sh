@@ -224,6 +224,12 @@ gh_pr_view_context() {
   if [ -f "$CLWT_GH_PRS/$number.context-author-underscore" ]; then
     author='octo_cat'
   fi
+  if [ -f "$CLWT_GH_PRS/$number.context-author-app" ]; then
+    author='app/dependabot'
+  fi
+  if [ -f "$CLWT_GH_PRS/$number.context-author-app-malformed" ]; then
+    author='foo/bar'
+  fi
   if [ -f "$CLWT_GH_PRS/$number.context-base-invalid" ]; then
     base='-bad..base'
   fi
@@ -655,6 +661,15 @@ pr_context_author_invalid() { : >"$CLWT_GH_PRS/$1.context-author-invalid"; }
 # pr_context_author_underscore <number> — the combined view call reports a
 # GitHub Enterprise managed-user-style login containing an underscore.
 pr_context_author_underscore() { : >"$CLWT_GH_PRS/$1.context-author-underscore"; }
+# pr_context_author_app <number> — the combined view call reports a GitHub
+# App's bot login as `app/<name>`, gh's real shape for a bot-authored PR's
+# author (https://github.com/cli/cli/pull/14543), which the author check
+# must accept.
+pr_context_author_app() { : >"$CLWT_GH_PRS/$1.context-author-app"; }
+# pr_context_author_app_malformed <number> — a slash-bearing login that is
+# NOT the `app/<name>` shape, proving the author check isn't loosened to
+# accept any slash.
+pr_context_author_app_malformed() { : >"$CLWT_GH_PRS/$1.context-author-app-malformed"; }
 # pr_context_base_invalid <number> — the combined view call reports a base
 # branch name that fails git check-ref-format --branch.
 pr_context_base_invalid() { : >"$CLWT_GH_PRS/$1.context-base-invalid"; }
@@ -2682,6 +2697,20 @@ check_equals 'pr keeps the review prompt positional after a variadic --add-dir p
 /pr-review 906 $(pr_context_path feat-review-prompt-variadic)" \
   "$(launched_arg_list | tail -2)"
 
+# gh's real shape for a bot-authored PR's `.author.login` is `app/<name>`
+# (e.g. `app/dependabot`), not a bare login —
+# https://github.com/cli/cli/pull/14543 — and the review prompt must still
+# fire for one. Run here, before the shadowing-guard section below
+# permanently corrupts origin/main's top-level tree for the rest of the file.
+pr_meta 907 feat/review-prompt-bot-author false
+pr_context_author_app 907
+launch_reset
+clwt pr 907 >/dev/null 2>&1
+check_equals 'pr sends the review prompt for a bot-authored PR (app/<name> author)' \
+  "--
+/pr-review 907 $(pr_context_path feat-review-prompt-bot-author)" \
+  "$(launched_arg_list | tail -2)"
+
 section 'pr .claude shadowing guard'
 
 # Claude ranks a project subagent (.claude/agents/<name>.md) ABOVE a personal
@@ -2984,6 +3013,11 @@ check_fails 'root rejects --force as an unknown option' clwt root --force
 # alone would keep this green with the whole paragraph deleted.
 check_output 'help documents --force' 'resetting a leftover' clwt help
 check_output 'help documents the no-flag auto-reset' 'provably contained' clwt help
+
+# The full synopsis fragment, not the bare flag: --no-review also appears in
+# the explanatory paragraphs below the synopsis, so the bare flag alone would
+# keep this green even if the synopsis line itself dropped it.
+check_output 'usage documents --no-review' 'pr <n> [--force] [--no-review]' clwt help
 
 # A phrase from the naming paragraph, not the bare --name flag: the synopsis
 # lines alone would keep this green with the whole paragraph deleted.
@@ -3725,6 +3759,37 @@ check 'pr succeeds when the author login contains an underscore (GHE managed use
   clwt pr 8866
 check 'pr-context.md exists for an underscore author login' \
   test -f "$(pr_context_path feat-ctx-author-underscore)"
+
+# gh's real shape for a bot-authored PR's `.author.login` is `app/<name>`
+# (e.g. `app/dependabot`), not a bare login —
+# https://github.com/cli/cli/pull/14543. The author check must accept it.
+# (The review prompt firing for a bot-authored PR is asserted in the 'pr
+# review prompt' section above, before the shadowing-guard fixtures below
+# permanently corrupt origin/main's top-level tree for the rest of the file.)
+pr_meta 8874 feat/ctx-author-app false
+pr_context_author_app 8874
+launch_reset
+check 'pr succeeds when the author login is a GitHub App bot (app/<name>)' \
+  clwt pr 8874
+ctx_8874=$(pr_context_path feat-ctx-author-app)
+check 'pr-context.md exists for a GitHub App bot author login' \
+  test -f "$ctx_8874"
+check_contains 'pr-context.md records the GitHub App bot author login' \
+  '- Author: app/dependabot' "$(cat "$ctx_8874")"
+
+# A malformed slash-bearing login that is NOT the `app/<name>` shape must
+# still be rejected — proving the fix doesn't loosen the regex to any slash.
+pr_meta 8875 feat/ctx-author-app-malformed false
+pr_context_author_app_malformed 8875
+launch_reset
+app_malformed_out=$(clwt pr 8875 2>&1)
+app_malformed_rc=$?
+check 'pr fails when the author login has a malformed slash-bearing prefix' \
+  test "$app_malformed_rc" -ne 0
+check_contains 'that failure names the invalid author login' \
+  'invalid author login' "$app_malformed_out"
+check 'pr leaves no pr-context.md for a malformed slash-bearing author login' \
+  test ! -f "$(pr_context_path feat-ctx-author-app-malformed)"
 
 pr_meta 8867 feat/ctx-base-invalid false
 pr_context_base_invalid 8867

@@ -668,6 +668,13 @@ valid_head_oid() {
   [[ ${#oid} == 40 || ${#oid} == 64 ]]
 }
 
+# gh's `.author.login` returns a bot PR's author as `app/<name>` (e.g.
+# `app/dependabot`), not a bare login — https://github.com/cli/cli/pull/14543.
+valid_pr_author() {
+  local LC_ALL=C
+  [[ $1 =~ ^(app/)?[A-Za-z0-9_-]+(\[bot\])?$ ]]
+}
+
 remote_matches_identity() {
   local remote=$1 wanted_owner=$2 wanted_repo=$3 url rest found_owner found_repo
   if ! url=$(git remote get-url "$remote" 2>/dev/null); then
@@ -1167,7 +1174,7 @@ write_pr_context() {
     abort_pr_context "pull request #$number changed while fetching its context; run clwt pr $number again" || return 1
   [[ $pr_cross == true || $pr_cross == false ]] ||
     abort_pr_context "pull request #$number returned an invalid fork flag" || return 1
-  [[ $pr_author =~ ^[A-Za-z0-9_-]+(\[bot\])?$ ]] ||
+  valid_pr_author "$pr_author" ||
     abort_pr_context "pull request #$number returned an invalid author login" || return 1
   git check-ref-format --branch "$pr_base" >/dev/null 2>&1 ||
     abort_pr_context "pull request #$number returned an invalid base branch name" || return 1
