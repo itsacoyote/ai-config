@@ -2860,7 +2860,7 @@ pr_meta_from_sha 970 feat/shadow-stale-restore "$stale_base_sha"
 launch_reset
 shadow_stale_out=$(cwt pr 970 2>&1)
 check_contains 'pr withholds the review prompt when the PR still carries a .agents file the base has since changed' \
-  '.agents or .codex' "$shadow_stale_out"
+  'carries a .agents/.codex tree that differs from origin/main; rebase onto the current base to get the review prompt' "$shadow_stale_out"
 
 # A base branch name cwt cannot resolve to a local refs/remotes/origin/<name>
 # at all (a stale clone, or a base branch renamed/deleted upstream since the

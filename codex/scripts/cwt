@@ -77,12 +77,12 @@ branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
 
-Unless `--no-review`, `cwt pr` fetches the pull request's review context into
-`pr-context.md`, in a session folder alongside the worktree (not inside it),
-then sends a one-line startup prompt telling codex to review that file. `cwt
-remove`/`cwt prune` delete the file with the worktree. `--no-review` skips the
-prompt but still writes the file; a context-fetch failure then only warns
-instead of refusing to launch. A symlink, containment, or mkdir refusal on the
+`cwt pr` always fetches the pull request's review context into
+`pr-context.md`, in a session folder alongside the worktree (not inside it);
+unless `--no-review`, it also sends a one-line startup prompt telling codex
+to review that file. `cwt remove`/`cwt prune` delete the file with the
+worktree. `--no-review` skips the prompt but still writes the file; a
+context-fetch failure then only warns instead of refusing to launch. A symlink, containment, or mkdir refusal on the
 session folder itself stays fatal either way — that signals tampering, not a
 transient fetch failure.
 
@@ -92,6 +92,10 @@ relative to its merge base with the base branch: unlike Claude, Codex does
 not rank a personal skill above a project one on a name collision, so a pull
 request shipping `.agents/skills/pr-review` could otherwise replace the
 review the prompt is about to start. It still launches either way.
+
+It also withholds the prompt when the PR's checked-out `.agents`/`.codex` tree is
+unchanged from its own merge base but has since diverged from the base branch's current
+tip, naming the real base branch and telling you to rebase to get the prompt back.
 
 Arguments after `--` are passed through to `codex`.
 EOF
@@ -199,7 +203,8 @@ valid_identity_part() {
 # Splits a launching subcommand's arguments into three parts:
 #   LAUNCH_POSITIONAL — the subcommand's own operands (a branch, a PR number)
 #   LAUNCH_YOLO       — 1 when --yolo was given
-#   LAUNCH_ARGS       — everything after `--`, handed to codex untouched
+#   LAUNCH_ARGS       — everything after `--` (pr may append the review prompt after it),
+#                       handed to codex untouched
 #
 # Everything before `--` belongs to cwt. An unrecognized cwt-side flag is an
 # error rather than being forwarded, so a typo like `--yolol` fails loudly
@@ -959,7 +964,7 @@ fence_for() {
       if (RLENGTH > m) m = RLENGTH
       s = substr(s, RSTART + RLENGTH)
     }
-  } END { print m + 0 }') || return 1
+  } END { print m + 0 }')
   [[ $longest =~ ^[0-9]+$ ]] || return 1
   len=$((longest + 1))
   ((len >= 3)) || len=3
@@ -1325,13 +1330,12 @@ shadow_component_matches() {
 
 # shadow_toplevel_ids <target> <commit-ish> — prints "<lowercased-name>
 # <mode> <object> <name>" for every top-level tree entry whose ASCII-case-
-# folded name is .agents or .codex. The trailing <name> is the entry's own
-# on-disk case (never folded) so a caller can pathspec it back exactly — git
-# ls-tree has no case-insensitive pathspec magic, so the fold only ever
-# happens in this shell. -z is still required to read ls-tree safely (an
-# adversarial top-level name could carry a literal newline), but once
-# filtered down to exactly those two literals the printed output is plain
-# ASCII, so the caller can compare it with ordinary string equality.
+# folded name is .agents or .codex. The trailing <name> keeps the on-disk
+# case so shadow_base_diverged treats a case-only rename as a divergence.
+# -z is still required to read ls-tree safely (an adversarial top-level name
+# could carry a literal newline), but once filtered down to exactly those
+# two literals the printed output is plain ASCII, so the caller can compare
+# it with ordinary string equality.
 #
 # Fails closed (returns 1) if ANY top-level entry's name carries a byte
 # outside printable ASCII — same *[!\ -~]* test as shadow_component_matches —
@@ -1485,7 +1489,11 @@ pr_shadows_skills() {
     return 0
   fi
 
-  shadow_base_diverged "$target" "$head_oid" "$base_oid"
+  if shadow_base_diverged "$target" "$head_oid" "$base_oid"; then
+    PR_SHADOW_REASON=${PR_SHADOW_REASON:-"carries a .agents/.codex tree that differs from origin/$base_ref; rebase onto the current base to get the review prompt"}
+    return 0
+  fi
+  return 1
 }
 
 # Decides what a `cwt pr` launch does with write_pr_context's outcome: whether
