@@ -83,7 +83,7 @@ the diff — unchanged from today:
 
 ```bash
 # description, files, existing comments, existing reviews, linked-issue linkage
-gh pr view <n> --json number,title,body,headRefName,headRefOid,baseRefName,files,comments,reviews,closingIssuesReferences
+gh pr view <n> --json number,title,url,isCrossRepository,body,headRefName,headRefOid,baseRefName,files,comments,reviews,closingIssuesReferences
 gh pr view <n> --comments      # conversation + review-thread comments
 gh pr diff <n>                 # the diff reviewers anchor against
 ```
