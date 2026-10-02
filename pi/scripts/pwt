@@ -90,7 +90,7 @@ review — Pi keeps the first-discovered skill on a name collision), and sends a
 one-line startup prompt telling Pi to run that skill against the fetched file.
 If the personal skill, or its `SKILL.md`, is missing, `pwt pr` exits non-zero
 naming `--no-review`. In review mode, a passthrough `--skill`, `--no-skills`,
-or `-ns` is refused for the same reason. `pwt remove`/`pwt prune` delete the
+`-ns`, or `--prompt-template` is refused for the same reason. `pwt remove`/`pwt prune` delete the
 file with the worktree. `--no-review` skips the skill pin and the prompt but
 still writes the file; a context-fetch failure then only warns instead of
 refusing to launch. A symlink, containment, or mkdir refusal on the session
@@ -304,12 +304,13 @@ is_pi_command() {
 # a session whose stored cwd escapes the selected worktree. Validate first so
 # a dangling value-taking option cannot consume an enforcement token.
 #
-# In review mode (not --no-review), a passthrough --skill, --no-skills, or -ns
-# is refused outright: launch_pr itself adds --no-skills --skill <personal
-# path> so Pi's skill discovery resolves to exactly one skill named
-# pr-review, and a developer-forwarded flag of the same shape could otherwise
-# override which skill path wins or re-enable discovery of a PR-shipped
-# .agents/skills that shadows it.
+# In review mode (not --no-review), a passthrough --skill, --no-skills, -ns,
+# or --prompt-template is refused outright: launch_pr itself adds --no-skills
+# --skill <personal path> so Pi's skill discovery resolves to exactly one
+# skill named pr-review, and a developer-forwarded flag of the same shape
+# could otherwise override which skill path wins, re-enable discovery of a
+# PR-shipped .agents/skills that shadows it, or substitute Pi's own prompt
+# template for the review session.
 validate_pr_launch_args() {
   local no_review=$1
   local index=0 arg next count=${#LAUNCH_ARGS[@]}
@@ -323,7 +324,7 @@ validate_pr_launch_args() {
   while ((index < count)); do
     arg=${LAUNCH_ARGS[$index]}
     case $arg in
-      --skill)
+      --skill | --prompt-template)
         ((no_review)) ||
           die "pwt pr does not allow passthrough $arg in review mode; run with --no-review to allow it"
         index=$((index + 1))
@@ -336,7 +337,7 @@ validate_pr_launch_args() {
         ;;
       --provider | --model | --api-key | --system-prompt | \
         --append-system-prompt | --name | \
-        --models | --thinking | --prompt-template | --theme | -n)
+        --models | --thinking | --theme | -n)
         index=$((index + 1))
         ((index < count)) ||
           die "pwt pr needs a value after Pi option: $arg"
@@ -486,12 +487,16 @@ validate_pr_path() {
   validate_absolute_path_entries 'pwt pr'
 }
 
-# Keep the enforced suffix adjacent to exec so no later PR preparation can
-# accidentally append an argument after the last-value-wins tool/trust policy.
-# finish_pr_context already appended --no-skills --skill <path> (review mode
-# only) ahead of this suffix; the review startup prompt goes after it, as the
-# ONE final argv element — Pi parses "[options] [--] [messages...]", so the
-# prompt must be a message, never read as another option's value.
+# Builds every review-mode-only argv element in one place. The skill pin
+# comes first, ahead of the enforced tool/trust suffix, which stays adjacent
+# to exec so no later PR preparation can accidentally append an argument
+# after it; the review startup prompt goes after that suffix, as the ONE
+# final argv element — Pi parses "[options] [--] [messages...]", so the
+# prompt must be a message, never read as another option's value. The guard
+# on PERSONAL_PR_REVIEW_SKILL is defense in depth: cmd_pr already died via
+# resolve_personal_pr_review_skill when it is unset, but launch_pr must never
+# itself be the one to turn an empty value into a --skill "" argument Pi
+# would resolve against the PR worktree.
 launch_pr() {
   local branch=$1 target=$2 no_review=$3 number=$4
   validate_pr_startup_paths "$target"
@@ -500,6 +505,11 @@ launch_pr() {
   unset PI_CODING_AGENT_DIR PI_PACKAGE_DIR
   PI_CODING_AGENT_SESSION_DIR="$primary_common/pwt/sessions/${target##*/}"
   export PI_CODING_AGENT_SESSION_DIR
+  if ((! no_review)); then
+    [[ -n $PERSONAL_PR_REVIEW_SKILL && -f "$PERSONAL_PR_REVIEW_SKILL/SKILL.md" ]] ||
+      die "pwt pr could not find ~/.agents/skills/pr-review with a SKILL.md; run 'pwt pr $number --no-review' to skip the review"
+    LAUNCH_ARGS+=(--no-skills --skill "$PERSONAL_PR_REVIEW_SKILL")
+  fi
   LAUNCH_ARGS+=(--no-extensions --tools read,grep,find,ls --no-approve)
   ((no_review)) || LAUNCH_ARGS+=("/skill:pr-review $number $SESSION_FOLDER/pr-context.md")
   require_managed_worktree "$branch" "$target"
@@ -1661,13 +1671,7 @@ write_pr_context() {
 
 # Decides what a `pwt pr` launch does with write_pr_context's outcome — shared
 # by the fresh-checkout and reused-worktree paths so the --no-review contract
-# lives in exactly one place. On success in review mode, pins Pi's skill
-# discovery to the already-resolved personal pr-review skill
-# (PERSONAL_PR_REVIEW_SKILL, set by resolve_personal_pr_review_skill before any
-# worktree work began) via --no-skills --skill, ahead of launch_pr's own
-# enforced tool/trust suffix. Symlink/containment/mkdir refusals never reach
-# this function — they `die` inside write_pr_context — so --no-review does not
-# soften them.
+# lives in exactly one place.
 finish_pr_context() {
   local no_review=$1 number=$2 ctx_ok=$3
   local msg="${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
@@ -1676,7 +1680,6 @@ finish_pr_context() {
     return 0
   fi
   ((ctx_ok)) || die "$msg; run 'pwt pr $number --no-review' to skip it"
-  LAUNCH_ARGS+=(--no-skills --skill "$PERSONAL_PR_REVIEW_SKILL")
 }
 
 reuse_pr_or_refuse() {
@@ -2077,6 +2080,7 @@ cmd_pr() {
   LAUNCH_NAME="PR-$number"
   validate_pr_launch_args "$no_review"
   validate_pr_path
+  # Resolved here, before any gh call, so a missing personal skill fails fast.
   if ((! no_review)); then
     resolve_personal_pr_review_skill ||
       die "pwt pr could not find ~/.agents/skills/pr-review with a SKILL.md; run 'pwt pr $number --no-review' to skip the review"

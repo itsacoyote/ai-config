@@ -135,7 +135,7 @@ first-discovered skill on a name collision, review mode also pins skill discover
 personal `~/.agents/skills/pr-review` with `--no-skills --skill <path>` (above), so a PR
 shipping its own `.agents/skills/pr-review` cannot replace the review; if that personal
 skill is missing, `pwt pr` exits non-zero naming `--no-review`, and a passthrough
-`--skill`/`--no-skills`/`-ns` is refused in review mode for the same reason.
+`--skill`/`--no-skills`/`-ns`/`--prompt-template` is refused in review mode for the same reason.
 `pwt remove`/`pwt prune` delete the session folder with the worktree, including Pi's own
 conversation history for it. Even with the skill pinned, a PR can still change a root
 `AGENTS.md` that the launched session loads; the fork warning is the only signal of that,

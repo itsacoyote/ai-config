@@ -2666,7 +2666,7 @@ check_equals 'pr still launches after the fork warning' \
 pr_meta 103 feat/pr-passthrough false
 launch_reset
 pwt pr 103 --no-review -- --no-session --model 'space value' '' >/dev/null 2>&1
-check_equals 'permitted PR arguments stay unchanged before policy' \
+check_equals 'permitted PR arguments stay unchanged before policy (--no-review)' \
   '10' "$(launched argc)"
 check_arg_equals 'PR launch names the session before permitted arguments' 0 '--name'
 check_arg_equals 'PR launch names the session PR-103 before permitted arguments' \
@@ -2847,9 +2847,9 @@ section 'pr-policy'
 
 pr_meta 121 feat/pr-policy false
 launch_reset
-check 'PR launch accepts ordinary model, thinking, and prompt arguments' \
+check 'PR launch accepts ordinary model, thinking, and prompt arguments (--no-review)' \
   pwt pr 121 --no-review -- --model 'model value' --thinking high 'prompt value'
-check_equals 'PR launch adds the session name and exactly four enforcement tokens' \
+check_equals 'PR launch adds the session name and exactly four enforcement tokens (--no-review)' \
   '11' "$(launched argc)"
 check_arg_equals 'PR launch names the session before forwarded arguments' 0 '--name'
 check_arg_equals 'PR launch names the session PR-121 before forwarded arguments' \
@@ -2870,7 +2870,7 @@ check_fails 'PR policy does not append the short context-disable alias' \
   launched_has_arg '-nc'
 
 launch_reset
-check 'reused PR worktrees receive the same launch policy' \
+check 'reused PR worktrees receive the same launch policy (--no-review)' \
   pwt pr 121 --no-review -- --provider google
 check_equals 'reused PR launch keeps permitted arguments before policy' \
   '8' "$(launched argc)"
@@ -2889,9 +2889,9 @@ dash_value_status=0
 dash_value_out=$(pwt pr 121 --no-review -- --name -review \
   --system-prompt --approve 2>&1) || dash_value_status=$?
 if [ "$dash_value_status" -eq 0 ]; then
-  ok 'PR policy preserves dash-leading values using Pi parser semantics'
+  ok 'PR policy preserves dash-leading values using Pi parser semantics (--no-review)'
 else
-  not_ok "PR policy preserves dash-leading values using Pi parser semantics ($dash_value_out)"
+  not_ok "PR policy preserves dash-leading values using Pi parser semantics (--no-review) ($dash_value_out)"
 fi
 check_equals 'dash-leading values remain before the enforced suffix' \
   '10' "$(launched argc)"
@@ -2912,7 +2912,7 @@ check_arg_equals 'dash-leading value launch still appends no-approve last' \
   9 '--no-approve'
 
 launch_reset
-check 'PR policy permits audited policy-neutral Pi flags' \
+check 'PR policy permits audited policy-neutral Pi flags (--no-review)' \
   pwt pr 121 --no-review -- --no-session --offline -p 'review prompt'
 check_equals 'audited flags remain before the policy suffix' \
   '10' "$(launched argc)"
@@ -2928,7 +2928,7 @@ check_arg_equals 'audited flag launch still appends policy last' \
 launch_reset
 # Pi treats a three-dash token after --print as its prompt, not as an option.
 # This catches a validator that scans the prompt as an unknown flag instead.
-check 'PR policy preserves Pi print prompts beginning with three dashes' \
+check 'PR policy preserves Pi print prompts beginning with three dashes (--no-review)' \
   pwt pr 121 --no-review -- -p '--- review this change'
 check_equals 'three-dash print prompts remain before the policy suffix' \
   '8' "$(launched argc)"
@@ -2943,7 +2943,7 @@ check_arg_equals 'three-dash print launch still appends policy last' \
 launch_reset
 # Pi leaves a dash-leading invalid TUI value for its next parser iteration.
 # This catches a validator that skips a hidden policy override as that value.
-check 'PR policy accepts a valid TUI mode' \
+check 'PR policy accepts a valid TUI mode (--no-review)' \
   pwt pr 121 --no-review -- --tui-mode fullscreen
 check_equals 'valid TUI mode remains before the policy suffix' \
   '8' "$(launched argc)"
@@ -2955,7 +2955,7 @@ check_arg_equals 'valid TUI mode launch still appends policy last' \
   7 '--no-approve'
 
 launch_reset
-check 'PR policy accepts a non-RPC output mode' \
+check 'PR policy accepts a non-RPC output mode (--no-review)' \
   pwt pr 121 --no-review -- --mode json
 check_equals 'non-RPC output mode remains before the policy suffix' \
   '8' "$(launched argc)"
@@ -3036,6 +3036,11 @@ for reserved_command in auth install remove uninstall update list config; do
     "$reserved_command"
 done
 check_pr_policy_rejects 'PR policy rejects dangling value-taking options' --model
+# check_pr_policy_rejects runs in review mode (no --no-review), so --skill and
+# --prompt-template below pass this loop via validate_pr_launch_args's
+# review-mode refusal, not via the dangling-value check this loop otherwise
+# exercises for every other option — confirmed separately under --no-review
+# below, where that refusal no longer applies and the real dangling check runs.
 for value_option in \
   --provider --api-key --system-prompt --append-system-prompt \
   --name -n --models --thinking --skill \
@@ -3044,6 +3049,14 @@ for value_option in \
     "PR policy rejects dangling value-taking option $value_option" \
     "$value_option"
 done
+
+launch_reset
+check_fails 'pr --no-review refuses a dangling --skill value' \
+  pwt pr 121 --no-review -- --skill
+check_equals 'a dangling --skill under --no-review never launches pi' '' "$(launched pwd)"
+check_output 'the dangling --skill refusal under --no-review names the real diagnostic' \
+  'needs a value after Pi option: --skill' \
+  pwt pr 121 --no-review -- --skill
 
 # Pi migrates a project .pi/commands directory before it creates the agent
 # session. PR launch must refuse that write even when the directory is tracked.
@@ -5002,6 +5015,18 @@ check_arg_equals 'pr keeps the enforced tool suffix as the last options before t
 
 launch_reset
 pwt pr 950 >/dev/null 2>&1
+check_equals 'pr on a reused worktree launches with exactly ten argv elements' \
+  '10' "$(launched argc)"
+check_arg_equals 'pr on a reused worktree names the session first' 0 '--name'
+check_arg_equals 'pr on a reused worktree names the session PR-950' 1 'PR-950'
+check_arg_equals 'pr on a reused worktree passes --no-skills before --skill in review mode' \
+  2 '--no-skills'
+check_arg_equals \
+  'pr on a reused worktree passes --skill before the physical personal pr-review path' \
+  3 '--skill'
+check_arg_equals \
+  'pr on a reused worktree passes the physical personal pr-review skill path before the enforced suffix' \
+  4 "$PR_REVIEW_SKILL_PHYSICAL"
 reused_prompt_index=$(($(launched argc) - 1))
 check_arg_equals 'pr on a reused worktree launches with the review prompt' \
   "$reused_prompt_index" "/skill:pr-review 950 $review_ctx_950"
@@ -5024,6 +5049,8 @@ check 'pr exits non-zero naming --no-review when ~/.agents/skills/pr-review is m
 check_contains 'the missing personal skill failure names --no-review' \
   '--no-review' "$missing_skill_out"
 check_equals 'a missing personal skill never launches pi' '' "$(launched pwd)"
+check 'a missing personal skill creates no worktree' \
+  test ! -d "$MANAGED/feat-review-prompt-missing-skill"
 
 # A present directory with no SKILL.md inside is refused the same way — the
 # requirement is the file, not merely the resolved path existing.
@@ -5063,13 +5090,57 @@ check_fails 'pr refuses a passthrough -ns in review mode' \
   pwt pr 958 -- -ns
 check_equals 'a refused passthrough -ns never launches pi' '' "$(launched pwd)"
 
+pr_meta 962 feat/review-prompt-refuse-prompt-template false
+launch_reset
+check_fails 'pr refuses a passthrough --prompt-template in review mode' \
+  pwt pr 962 -- --prompt-template ./evil-template
+check_equals 'a refused passthrough --prompt-template never launches pi' '' "$(launched pwd)"
+
 # The refusal is specific to review mode, not a blanket ban on these flags —
-# --no-review (not its own named test, but what would silently break if the
-# refusal stopped checking no_review) must still accept them.
+# --no-review must still accept them.
 pr_meta 957 feat/review-prompt-skill-override-no-review false
 launch_reset
 check 'a passthrough --skill is allowed under --no-review' \
   pwt pr 957 --no-review -- --skill ./some-skill
+
+pr_meta 960 feat/review-prompt-no-skills-override-no-review false
+launch_reset
+check 'a passthrough --no-skills is allowed under --no-review' \
+  pwt pr 960 --no-review -- --no-skills
+
+pr_meta 961 feat/review-prompt-ns-override-no-review false
+launch_reset
+check 'a passthrough -ns is allowed under --no-review' \
+  pwt pr 961 --no-review -- -ns
+
+pr_meta 963 feat/review-prompt-template-override-no-review false
+launch_reset
+check 'a passthrough --prompt-template is allowed under --no-review' \
+  pwt pr 963 --no-review -- --prompt-template ./some-template
+
+# --- --no-review still refuses a symlinked session folder -------------------
+#
+# The symlink refusal happens inside ensure_session_folder via `die`, which
+# exits the whole process rather than returning a status finish_pr_context
+# could soften — this proves --no-review does not weaken it either. Modeled
+# on the remove-path symlink guard above (~4940).
+
+pr_meta 959 feat/review-prompt-no-review-symlink-name false
+evil_no_review_name=$TMP/evil-no-review-name-target
+mkdir -p "$evil_no_review_name"
+ln -s "$evil_no_review_name" "$(pr_session_dir feat-review-prompt-no-review-symlink-name)"
+launch_reset
+no_review_symlink_out=$(pwt pr 959 --no-review 2>&1)
+no_review_symlink_rc=$?
+check 'pr --no-review refuses a symlinked session folder' \
+  test "$no_review_symlink_rc" -ne 0
+check_contains 'the --no-review symlinked-session refusal names it specifically' \
+  'refusing a symlinked session folder' "$no_review_symlink_out"
+check_equals 'a refused symlinked session folder under --no-review never launches pi' \
+  '' "$(launched pwd)"
+check 'a symlinked session folder under --no-review leaves its target untouched' \
+  test -z "$(ls -A "$evil_no_review_name" 2>/dev/null)"
+rm -f "$(pr_session_dir feat-review-prompt-no-review-symlink-name)"
 
 # --- --no-review: no skill flags, no prompt, context still written ---------
 
