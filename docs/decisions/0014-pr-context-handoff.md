@@ -44,8 +44,12 @@ cannot move into the shared `agents/skills/` library as-is (ADR 0010).
   branch's current tip. `pwt pr` instead pins
   Pi's skill discovery to the personal `~/.agents/skills/pr-review` with `--no-skills
   --skill <path>`, ahead of its existing tool/trust suffix, and refuses a passthrough
-  `--skill`/`--no-skills` in review mode. Claude needs neither guard: it ranks personal
-  skills above project ones.
+  `--skill`/`--no-skills` in review mode. Claude ranks subagents the OPPOSITE way from
+  skills — a project `.claude/agents/<name>.md` outranks a personal one of the same name —
+  so a pull request shipping `.claude/agents/pr-security.md` (or `qa-review`,
+  `senior-review`, `pr-context`, `pr-tests`, `design-review`) could replace that pass of the
+  auto-started review the same way. `clwt pr` runs the matching guard, scoped to the
+  top-level `.claude` directory instead of `.agents`/`.codex`.
 - The portable skill's Codex and Pi paths differ at intake, QA, and posting. This fits
   ADR 0010's allowance for small capability differences: both paths are supported, and
   the method (intake → passes → severity table → curation gate → one review) is the same.
@@ -96,11 +100,11 @@ this order; readers find sections by these exact headings.
   contract between the CLIs and the skills; changing it means changing every producer and
   consumer.
 - Removing a PR worktree now also deletes its Pi conversation history.
-- The `.agents`/`.codex` guard and the skill pin stop a pull request from *replacing* the
-  review skill, but not from changing a root `AGENTS.md` (or `CLAUDE.md` for Claude) that
-  the harness loads into the auto-started session — that was already true when the review
-  was typed by hand. The fork warning on the launch is the only signal of that; it is not a
-  new risk this feature introduces.
+- The `.agents`/`.codex` guard, the `.claude` guard, and the skill pin stop a pull request
+  from *replacing* the review skill or subagent, but not from changing a root `AGENTS.md`
+  (or `CLAUDE.md` for Claude) that the harness loads into the auto-started session — that
+  was already true when the review was typed by hand. The fork warning on the launch is the
+  only signal of that; it is not a new risk this feature introduces.
 
 ## Alternatives considered
 

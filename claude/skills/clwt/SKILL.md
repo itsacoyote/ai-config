@@ -83,9 +83,15 @@ Claude read access to that folder with `--add-dir`; unless `--no-review`, it als
 one-line `/pr-review <n> <path>` startup prompt — the review is already running when the
 session opens, no typing needed. `clwt remove`/`clwt prune` delete the session folder with
 the worktree. `--no-review` skips the prompt but still writes the file; a context-fetch
-failure then only warns instead of refusing to launch. Claude ranks personal skills above project
-ones, so a PR shipping its own `.claude/skills/pr-review` cannot replace the review — but it
-can still change a root `CLAUDE.md` the session loads at startup; the fork warning `clwt`
+failure then only warns instead of refusing to launch. Claude ranks a project subagent
+(`.claude/agents/<name>.md`) ABOVE a personal one of the same name — the opposite of its
+skill precedence — so a PR shipping its own `.claude/agents/pr-security.md` (or any other
+pass's subagent) could otherwise replace that pass of the review silently. `clwt pr`
+withholds the startup prompt (warning, not refusing to launch) when the PR's diff touches
+the top-level `.claude` directory, failing closed on a symlinked entry, a non-ASCII
+top-level name it cannot safely fold, or a base branch it cannot resolve; `--no-review`
+skips this guard entirely, since no prompt is sent either way. The guard cannot stop a PR
+from changing a root `CLAUDE.md` the session loads at startup; the fork warning `clwt`
 prints at launch is the only signal of that, so treat a fork PR's own `pr <n>` launch with
 the same caution as running any of its code.
 
