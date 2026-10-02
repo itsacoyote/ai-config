@@ -160,16 +160,17 @@ explicitly grants it this review.** Silence is not a grant; default to `COMMENT`
 
 ### 5. Post — one batched review
 
-**Re-check the head first, with a context file.** It's a snapshot taken at launch, and the PR's
-head may have moved since. Compare the live head against the file's `Head commit:`:
+**Re-check the head first.** The `headRefOid` captured at intake — the context file's `Head
+commit:` field, or intake's own `headRefOid` without one — is a snapshot, and the PR's head may
+have moved since. Compare it against the live head:
 
 ```bash
-gh pr view <PR URL from the file> --json headRefOid -q .headRefOid
+gh pr view <PR URL> --json headRefOid -q .headRefOid
 ```
 
 If they differ, **stop** — anchors may be stale — and hand the developer the mismatch as a
 decision (re-fetch and re-review, or post anyway knowing the risk) instead of posting against a
-moved target. Without a context file, the `headRefOid` captured at intake is already current.
+moved target.
 
 Post exactly one review. `event` is `COMMENT` (default) or `REQUEST_CHANGES` (only if granted in
 the gate). Build the endpoint explicitly from the PR's owner and repo (parsed from the PR
@@ -200,6 +201,9 @@ gh api --hostname <host> --method POST repos/<owner>/<repo>/pulls/<n>/reviews --
 - **Body second.** The summary and any item that can't be anchored go in the review `body`. An
   unanchorable item **folds into the body — never dropped, never fails the post.**
 - The post is permission-prompted (not in `allowed-tools`) — the developer approves the send.
+  **The moment they approve, re-check the head once more** (same command as above) immediately
+  before the post runs. Time spent waiting for approval could have moved the head again; if it
+  differs now, stop and surface the mismatch instead of posting against a moved target.
 
 ## The QA pass
 
