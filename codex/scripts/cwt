@@ -192,6 +192,7 @@ parse_remote_identity() {
 }
 
 valid_identity_part() {
+  local LC_ALL=C
   case $1 in
     '' | . | .. | *[!A-Za-z0-9._-]*) return 1 ;;
   esac
@@ -934,7 +935,7 @@ remove_session_folder() {
 }
 
 valid_host() {
-  local host=$1
+  local LC_ALL=C host=$1
   case $host in
     '' | .* | *[!A-Za-z0-9.-]*) return 1 ;;
   esac
@@ -1501,8 +1502,11 @@ pr_shadows_skills() {
 # review prompt. Shared by the fresh-checkout and reused-worktree paths so
 # both pieces of the contract live in exactly one place. cwt has no --add-dir
 # equivalent — that is a Claude-only passthrough flag — and additionally runs
-# the Req 4b guard above before building the prompt; clwt needs no such guard
-# (Claude ranks personal skills above project ones).
+# the Req 4b guard above before building the prompt. clwt runs the matching
+# guard too, scoped to the top-level .claude directory: Claude ranks a
+# project subagent above a personal one (the opposite of its skill
+# precedence), so a pull request shipping .claude/agents/pr-security.md could
+# otherwise replace that pass of the auto-started /pr-review.
 finish_pr_context() {
   local no_review=$1 number=$2 ctx_ok=$3 target=$4 base_ref=$5 head_oid=$6
   local msg="${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
