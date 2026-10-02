@@ -107,8 +107,9 @@ merged pull request and remains a dry run unless `--yes` is present.
 
 Use `pwt pr` only for trusted pull requests under the local-user threat model. The model
 gets context files but only the `read`, `grep`, `find`, and `ls` tools. After validating
-forwarded arguments, `pwt` appends this policy as the final Pi arguments — in review mode
-(not `--no-review`), the skill pin comes first, so the full enforced tail is:
+forwarded arguments, `pwt` appends this policy as the final Pi options (in review mode,
+only the startup prompt follows it); in review mode (not `--no-review`) the skill pin
+comes first, so the full enforced tail is:
 
 ```text
 --no-skills --skill <personal pr-review skill path> --no-extensions --tools read,grep,find,ls --no-approve
@@ -126,11 +127,11 @@ and local Git configuration before launching it.
 
 ### Review startup and `pr-context.md`
 
-Unless `--no-review`, `pwt pr <n>` fetches the PR's context into `pr-context.md`, in a
-session folder alongside the worktree, and sends a one-line `/skill:pr-review <n> <path>`
-startup prompt as the final argument, so the session opens already reviewing.
-`--no-review` skips the skill pin and the prompt but still writes the file; a
-context-fetch failure then only warns instead of refusing to launch. Because Pi keeps the
+`pwt pr <n>` always fetches the PR's context into `pr-context.md`, in a session folder
+alongside the worktree; unless `--no-review`, it also sends a one-line
+`/skill:pr-review <n> <path>` startup prompt as the final argument, so the session opens
+already reviewing. `--no-review` skips the skill pin and the prompt but still writes the
+file; a context-fetch failure then only warns instead of refusing to launch. Because Pi keeps the
 first-discovered skill on a name collision, review mode also pins skill discovery to the
 personal `~/.agents/skills/pr-review` with `--no-skills --skill <path>` (above), so a PR
 shipping its own `.agents/skills/pr-review` cannot replace the review; if that personal

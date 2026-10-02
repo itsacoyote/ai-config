@@ -82,14 +82,15 @@ branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
 
-Unless `--no-review`, `pwt pr` fetches the pull request's review context into
-`pr-context.md` in a session folder alongside the worktree (not inside it), pins
-Pi's skill discovery to the personal `~/.agents/skills/pr-review` skill (so a
-pull request shipping its own `.agents/skills/pr-review` cannot replace the
-review — Pi keeps the first-discovered skill on a name collision), and sends a
-one-line startup prompt telling Pi to run that skill against the fetched file.
-If the personal skill, or its `SKILL.md`, is missing, `pwt pr` exits non-zero
-naming `--no-review`. In review mode, a passthrough `--skill`, `--no-skills`,
+`pwt pr` always fetches the pull request's review context into
+`pr-context.md` in a session folder alongside the worktree (not inside it);
+unless `--no-review`, it also pins Pi's skill discovery to the personal
+`~/.agents/skills/pr-review` skill (so a pull request shipping its own
+`.agents/skills/pr-review` cannot replace the review — Pi keeps the
+first-discovered skill on a name collision), and sends a one-line startup
+prompt telling Pi to run that skill against the fetched file. If the personal
+skill, or its `SKILL.md`, is missing, `pwt pr` exits non-zero naming
+`--no-review`. In review mode, a passthrough `--skill`, `--no-skills`,
 `-ns`, or `--prompt-template` is refused for the same reason. `pwt remove`/`pwt prune` delete the
 file with the worktree. `--no-review` skips the skill pin and the prompt but
 still writes the file; a context-fetch failure then only warns instead of
@@ -1374,7 +1375,7 @@ fence_for() {
       if (RLENGTH > m) m = RLENGTH
       s = substr(s, RSTART + RLENGTH)
     }
-  } END { print m + 0 }') || return 1
+  } END { print m + 0 }')
   [[ $longest =~ ^[0-9]+$ ]] || return 1
   len=$((longest + 1))
   ((len >= 3)) || len=3
@@ -2040,8 +2041,8 @@ cmd_pr() {
   # here, before the remainder reaches the shared parser. Stops at the first
   # `--`: from there on every argument belongs to Pi, and scanning the whole
   # argv would misread `pwt pr 12 -- --no-review` as a request to skip the
-  # review prompt instead of forwarding the literal flag to Pi — Pi itself
-  # then refuses it as an unknown option (see validate_pr_launch_args).
+  # review prompt instead of forwarding the literal flag to Pi — pwt's own
+  # validate_pr_launch_args then refuses it as a disallowed Pi option.
   while [[ $# -gt 0 ]]; do
     case $1 in
       --)

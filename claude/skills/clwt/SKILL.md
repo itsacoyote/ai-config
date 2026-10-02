@@ -77,17 +77,17 @@ files such as `.env` survive; if the new PR tree would replace one, `clwt` refus
 For an older markerless PR worktree, verified native Git tracking permits only a fast-forward;
 rewritten history is refused because there is no last-verified head to trust yet.
 
-Unless `--no-review`, `clwt pr <n>` fetches the pull request's context into `pr-context.md`
-in a session folder alongside the worktree (not inside it, so it never shows in `git
-status`), grants Claude read access to that folder with `--add-dir`, and sends a one-line
-`/pr-review <n> <path>` startup prompt — the review is already running when the session
-opens, no typing needed. `clwt remove`/`clwt prune` delete the session folder with the
-worktree. `--no-review` skips the prompt but still writes the file; a context-fetch failure
-then only warns instead of refusing to launch. Claude ranks personal skills above project
+`clwt pr <n>` always fetches the pull request's context into `pr-context.md` in a session
+folder alongside the worktree (not inside it, so it never shows in `git status`), granting
+Claude read access to that folder with `--add-dir`; unless `--no-review`, it also sends a
+one-line `/pr-review <n> <path>` startup prompt — the review is already running when the
+session opens, no typing needed. `clwt remove`/`clwt prune` delete the session folder with
+the worktree. `--no-review` skips the prompt but still writes the file; a context-fetch
+failure then only warns instead of refusing to launch. Claude ranks personal skills above project
 ones, so a PR shipping its own `.claude/skills/pr-review` cannot replace the review — but it
-can still change a root `CLAUDE.md` the session loads at startup; the fork warning in the
-prompt is the only signal of that, so treat a fork PR's own `pr <n>` launch with the same
-caution as running any of its code.
+can still change a root `CLAUDE.md` the session loads at startup; the fork warning `clwt`
+prints at launch is the only signal of that, so treat a fork PR's own `pr <n>` launch with
+the same caution as running any of its code.
 
 Tab completion autoloads in bash but not in zsh. If a zsh developer reports that `clwt <Tab>`
 does nothing, the fix is two lines in their `~/.zshrc` (see the README) — `~/.zshrc` is

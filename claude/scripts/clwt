@@ -78,14 +78,15 @@ branch is provably contained in `origin/<branch>` (no local-only commits);
 otherwise the checkout runs plain, and if it then fails, the error names this
 flag.
 
-Unless `--no-review`, `clwt pr` fetches the pull request's review context into
+`clwt pr` always fetches the pull request's review context into
 `pr-context.md`, in a session folder alongside the worktree (not inside it) —
-granted to claude via `--add-dir` — then sends a one-line startup prompt
-telling it to review that file. `clwt remove`/`clwt prune` delete the file
-with the worktree. `--no-review` skips the prompt but still writes the file;
-a context-fetch failure then only warns instead of refusing to launch. A
-symlink, containment, or mkdir refusal on the session folder itself stays
-fatal either way — that signals tampering, not a transient fetch failure.
+granted to claude via `--add-dir`; unless `--no-review`, it also sends a
+one-line startup prompt telling it to review that file. `clwt remove`/`clwt
+prune` delete the file with the worktree. `--no-review` skips the prompt but
+still writes the file; a context-fetch failure then only warns instead of
+refusing to launch. A symlink, containment, or mkdir refusal on the session
+folder itself stays fatal either way — that signals tampering, not a
+transient fetch failure.
 
 Every launching subcommand passes --name to claude, naming the session: `pr <n>` becomes
 `PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the
@@ -198,7 +199,8 @@ valid_identity_part() {
 # Splits a launching subcommand's arguments into three parts:
 #   LAUNCH_POSITIONAL — the subcommand's own operands (a branch, a PR number)
 #   LAUNCH_YOLO       — 1 when --yolo was given
-#   LAUNCH_ARGS       — everything after `--`, handed to claude untouched
+#   LAUNCH_ARGS       — everything after `--` (pr may append the review prompt after it),
+#                       handed to claude untouched
 #
 # Everything before `--` belongs to clwt. An unrecognized clwt-side flag is an
 # error rather than being forwarded, so a typo like `--yolol` fails loudly

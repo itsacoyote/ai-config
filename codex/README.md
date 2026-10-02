@@ -126,19 +126,22 @@ An older markerless PR worktree can migrate only when its native Git tracking ma
 and the update is a fast-forward; rewritten history is refused because no last-verified head
 exists yet.
 
-Unless `--no-review`, `cwt pr <n>` also fetches the PR's context into `pr-context.md`, in a
-session folder alongside the worktree (never inside it, so it never shows in `git status`),
-and sends a one-line `$pr-review <n> <path>` startup prompt, so the session opens already
-reviewing. `--no-review` skips the prompt but still writes the file; a context-fetch failure
-then only warns instead of refusing to launch. `cwt remove`/`cwt prune` delete the session
-folder with the worktree. Unlike Claude, Codex does not rank a personal skill above a
+`cwt pr <n>` always fetches the PR's context into `pr-context.md`, in a session folder
+alongside the worktree (never inside it, so it never shows in `git status`); unless
+`--no-review`, it also sends a one-line `$pr-review <n> <path>` startup prompt, so the
+session opens already reviewing. `--no-review` skips the prompt but still writes the file;
+a context-fetch failure then only warns instead of refusing to launch. `cwt remove`/`cwt
+prune` delete the session folder with the worktree. Unlike Claude, Codex does not rank a personal skill above a
 project one on a name collision, so `cwt pr` additionally withholds the prompt (warning
 instead, still launching) when the checked-out PR's diff against its merge base touches a
 path under `.agents` or `.codex` — a pull request could otherwise ship its own
 `.agents/skills/pr-review` and replace the review the prompt is about to start. That guard
 runs entirely from a local `git diff` against the verified checkout, never from `gh`'s diff
 text, and also withholds on a symlinked `.agents`/`.codex` entry or a non-ASCII top-level
-name it cannot safely fold. Even with the guard holding, a PR can still change a root
+name it cannot safely fold. It also withholds when the PR's own `.agents`/`.codex` tree is
+unchanged from its merge base but has since diverged from origin's current base tip — an old
+tree the diff scan alone would miss — naming the real base branch and telling you to rebase
+to get the prompt back. Even with the guard holding, a PR can still change a root
 `AGENTS.md` that the launched session loads; the fork warning is the only signal of that, so
 treat a fork PR's own `pr <n>` launch with the same caution as running any of its code.
 

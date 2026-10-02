@@ -261,12 +261,12 @@ number (`PR-<n>`), the branch, or the primary checkout's current branch for `roo
 names with slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it,
 since `claude` takes the last value it sees.
 
-Unless `--no-review`, `clwt pr <n>` also fetches the PR's context into `pr-context.md`, in a
-session folder alongside the worktree, and sends a one-line `/pr-review <n> <path>` startup
-prompt, so the session opens already reviewing. `--no-review` skips the prompt but still
-writes the file (a fetch failure then only warns instead of refusing to launch). `clwt
-remove`/`clwt prune` delete the session folder with the worktree. Details, including the
-residual AGENTS.md/CLAUDE.md risk, are in the
+`clwt pr <n>` always fetches the PR's context into `pr-context.md`, in a session folder
+alongside the worktree; unless `--no-review`, it also sends a one-line
+`/pr-review <n> <path>` startup prompt, so the session opens already reviewing.
+`--no-review` skips the prompt but still writes the file (a fetch failure then only warns
+instead of refusing to launch). `clwt remove`/`clwt prune` delete the session folder with
+the worktree. Details, including the residual AGENTS.md/CLAUDE.md risk, are in the
 [`clwt` skill](claude/skills/clwt/SKILL.md) and [ADR 0014](docs/decisions/0014-pr-context-handoff.md).
 
 ### Why it's a CLI and not a skill

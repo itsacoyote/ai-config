@@ -39,7 +39,9 @@ cannot move into the shared `agents/skills/` library as-is (ADR 0010).
   name collision; Pi keeps the first-discovered skill). `cwt pr` withholds the startup
   prompt — warning, not refusing to launch — when a local `git diff` of the checked-out PR
   against its merge base touches a path under `.agents` or `.codex`, failing closed on a
-  symlinked entry or a non-ASCII top-level name it cannot safely fold. `pwt pr` instead pins
+  symlinked entry or a non-ASCII top-level name it cannot safely fold, and also when that
+  tree is unchanged from the PR's own merge base but has since diverged from the base
+  branch's current tip. `pwt pr` instead pins
   Pi's skill discovery to the personal `~/.agents/skills/pr-review` with `--no-skills
   --skill <path>`, ahead of its existing tool/trust suffix, and refuses a passthrough
   `--skill`/`--no-skills` in review mode. Claude needs neither guard: it ranks personal
