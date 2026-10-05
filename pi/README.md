@@ -69,6 +69,8 @@ source ~/.local/share/bash-completion/completions/pwt
 
 Running `pwt` without a command is the same as `pwt list`.
 
+`remove <branch> --delete-branch` deletes the branch with `git branch -d` when git sees it as merged (no `gh` needed). Otherwise, if GitHub reports a MERGED pull request for the branch whose head commit equals the local branch tip (a squash merge), it deletes with `git branch -D` and names the PR; this needs an authenticated `gh`. Any other case refuses and removes nothing; drop `--delete-branch` to remove only the worktree. A pull request merged into a non-default base branch also counts as merged. `pwt` asks the origin host. It accepts a merged fork pull request only for a branch `pwt pr` checked out (through its recorded PR URL). A newer open or closed pull request on a reused branch name hides an older merged one, so the branch is refused.
+
 ### Launch and repository behavior
 
 Launching commands physically enter the selected checkout with `cd -P`, then execute the

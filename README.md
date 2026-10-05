@@ -230,6 +230,8 @@ defect.
 | `clwt install` | symlink onto `PATH` (+ completion) |
 | `clwt help` | usage |
 
+`remove <branch> --delete-branch` deletes the branch with `git branch -d` when git sees it as merged (no `gh` needed). Otherwise, if GitHub reports a MERGED pull request for the branch whose head commit equals the local branch tip (a squash merge), it deletes with `git branch -D` and names the PR; this needs an authenticated `gh`. Any other case refuses and removes nothing; drop `--delete-branch` to remove only the worktree. A pull request merged into a non-default base branch also counts as merged. `clwt` looks pull requests up with `--repo owner/repo`, so it asks github.com, or the host in `GH_HOST`, not the origin host; same-named pull requests from forks are never accepted.
+
 Worktrees live at `~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/`.
 `clwt` refuses to create, move, or remove anything outside that root — worktrees made
 by other means show up in `list` marked `(unmanaged)`.

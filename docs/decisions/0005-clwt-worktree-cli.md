@@ -109,7 +109,7 @@ developer into creating exactly the unmanaged worktrees `clwt` declines to manag
 - **`.worktreeinclude` copies drift.** A `.env` copied at creation does not track later edits
   to the original. Accepted, because it matches the built-in feature's semantics and because
   per-worktree divergence is sometimes wanted.
-- **`gh` becomes a dependency** for `pr` and `prune`.
+- **`gh` becomes a dependency** for `pr` and `prune`. Later addendum: `remove --delete-branch` also uses it, to verify a squash-merged branch before deleting it.
 - **The `Bash(git -C *)` deny is repo-wide.** A future legitimate cross-worktree read from a
   Bash tool call would be blocked and need the rule revisited. Scripts are unaffected, since
   `bash .claude/scripts/foo.sh` is a single tool call whose contents the matcher never sees.
