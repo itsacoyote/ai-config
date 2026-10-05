@@ -1639,11 +1639,34 @@ resolve_removable() {
   resolved_worktree=$target
 }
 
+# Predicts `git branch -d`'s verdict BEFORE anything is removed, so a branch
+# it would refuse never leaves the worktree already gone. git merges against
+# the upstream when its ref exists and against HEAD otherwise — never both —
+# and HEAD here is the caller's, the same one the later `git branch -d` sees.
+#
+# Fail closed, each step in its own `if` (set -e): a missing branch or a
+# merge-base error (exit >1) must read as "not accepted", never as merged.
+refuse_branch_delete_if_unmerged() {
+  local branch=$1 upstream ref=HEAD
+  upstream=$(git for-each-ref --format='%(upstream)' "refs/heads/$branch") ||
+    die "cannot read the upstream of branch $branch; nothing was removed (drop --delete-branch to remove only the worktree)"
+  if [[ -n $upstream ]] && git show-ref --verify --quiet "$upstream"; then
+    ref=$upstream
+  fi
+  if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null &&
+    git merge-base --is-ancestor "refs/heads/$branch" "$ref"; then
+    return 0
+  fi
+  die "refusing to delete branch $branch: not merged into $ref; nothing was removed (drop --delete-branch to remove only the worktree)"
+}
+
 # Reports what removal will destroy, then removes. Shared by remove and prune.
 remove_worktree() {
   local target=$1 branch=$2 delete_branch=$3
   local -a doomed=()
   local f
+
+  if ((delete_branch)); then refuse_branch_delete_if_unmerged "$branch"; fi
 
   # Checked before the worktree is touched, not just before the session
   # folder's own delete below: refusing only afterward would leave the
@@ -1671,7 +1694,8 @@ remove_worktree() {
   remove_session_folder "${target##*/}"
 
   if ((delete_branch)); then
-    # -d, not -D: an unmerged branch should fail loudly rather than vanish.
+    # -d, not -D: the refusal above is only a prediction, and -d is the
+    # backstop if it was wrong.
     git branch -d "$branch"
     note "deleted branch $branch"
   fi

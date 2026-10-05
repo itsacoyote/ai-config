@@ -2391,6 +2391,150 @@ check_output 'prune distinguishes gh missing from gh unauthenticated' \
 check_output 'pr also reports gh missing from PATH' \
   'not on PATH' clwt_without_gh pr 101
 
+# remove --delete-branch decides whether `git branch -d` would accept the branch
+# BEFORE removing anything. Every refusal test asserts the hint tail rather than
+# git's own "not merged" wording: the tail is what proves clwt (and not an early
+# missing-binary failure under the stripped PATH) refused.
+section 'remove --delete-branch decision'
+
+REAL_GIT=$(command -v git)
+LOGGIT="$TMP/loggit"
+BRANCH_LOG="$TMP/branch.log"
+mkdir -p "$LOGGIT"
+cat >"$LOGGIT/git" <<STUB
+#!/usr/bin/env bash
+if [ "\${1:-}" = branch ]; then
+  printf '%s\n' "\$*" >>"$BRANCH_LOG"
+fi
+exec $REAL_GIT "\$@"
+STUB
+chmod +x "$LOGGIT/git"
+
+clwt_logged_without_gh() { PATH="$LOGGIT:$NOGH" clwt_in "$PRIMARY" "$@"; }
+check_equals 'git resolves to the branch-log wrapper on the no-gh PATH' \
+  "$LOGGIT/git" "$(hash -r; PATH="$LOGGIT:$NOGH" command -v git)"
+
+REFUSAL_TAIL='drop --delete-branch to remove only the worktree'
+
+# Worktree on a new local branch at HEAD: no upstream, no origin ref.
+dd_worktree() { git -C "$PRIMARY" worktree add -q -b "$1" "$MANAGED/${1//\//-}" HEAD; }
+dd_commit() {
+  (cd "$MANAGED/${1//\//-}" && printf '%s\n' "$1" >"dd-${1//\//-}.txt" &&
+    git add . && git commit -qm "work on $1")
+}
+dd_cleanup() {
+  git -C "$PRIMARY" worktree remove --force "$MANAGED/${1//\//-}" 2>/dev/null
+  git -C "$PRIMARY" branch -D "$1" >/dev/null 2>&1
+  git -C "$PRIMARY" push -q origin --delete "$1" >/dev/null 2>&1
+  git -C "$PRIMARY" update-ref -d "refs/remotes/origin/$1" 2>/dev/null
+  rm -rf "$MANAGED/${1//\//-}"
+  return 0
+}
+# Fixture-shape guard: exit status of `merge-base --is-ancestor` run in PRIMARY.
+dd_ancestor() { git -C "$PRIMARY" merge-base --is-ancestor "$1" "$2" >/dev/null 2>&1; echo $?; }
+
+# Normally merged: tip is HEAD itself, no upstream.
+dd_worktree feat/dd-merged
+: >"$BRANCH_LOG"
+check 'remove --delete-branch deletes a normally merged branch with -d when gh is not on PATH' \
+  clwt_logged_without_gh remove feat/dd-merged --delete-branch
+check_equals 'the merged branch was deleted with branch -d' \
+  'branch -d feat/dd-merged' "$(cat "$BRANCH_LOG")"
+check_fails 'the merged branch is gone' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/dd-merged
+check 'the merged branch worktree is gone' test ! -d "$MANAGED/feat-dd-merged"
+dd_cleanup feat/dd-merged
+
+# Merged into its upstream, but NOT into HEAD: only the upstream rule accepts it.
+dd_worktree feat/dd-upstream
+dd_commit feat/dd-upstream
+(cd "$MANAGED/feat-dd-upstream" && git push -q -u origin feat/dd-upstream 2>/dev/null)
+check_equals 'fixture: the upstream branch tip is not in HEAD' 1 \
+  "$(dd_ancestor refs/heads/feat/dd-upstream HEAD)"
+check_equals 'fixture: the upstream branch tip is in its upstream' 0 \
+  "$(dd_ancestor refs/heads/feat/dd-upstream refs/remotes/origin/feat/dd-upstream)"
+: >"$BRANCH_LOG"
+check 'remove --delete-branch deletes a branch merged into its upstream with -d when gh is not on PATH' \
+  clwt_logged_without_gh remove feat/dd-upstream --delete-branch
+check_equals 'the upstream-merged branch was deleted with branch -d' \
+  'branch -d feat/dd-upstream' "$(cat "$BRANCH_LOG")"
+dd_cleanup feat/dd-upstream
+
+# Upstream configured but its ref is gone (the `fetch --prune` shape); tip in HEAD.
+dd_worktree feat/dd-gone
+git -C "$PRIMARY" config branch.feat/dd-gone.remote origin
+git -C "$PRIMARY" config branch.feat/dd-gone.merge refs/heads/feat/dd-gone
+check_equals 'fixture: the upstream is configured' 'refs/remotes/origin/feat/dd-gone' \
+  "$(git -C "$PRIMARY" for-each-ref --format='%(upstream)' refs/heads/feat/dd-gone)"
+check_fails 'fixture: the upstream ref does not exist' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/remotes/origin/feat/dd-gone
+: >"$BRANCH_LOG"
+check 'remove --delete-branch deletes a merged branch whose upstream ref is gone with -d when gh is not on PATH' \
+  clwt_logged_without_gh remove feat/dd-gone --delete-branch
+check_equals 'the gone-upstream branch was deleted with branch -d' \
+  'branch -d feat/dd-gone' "$(cat "$BRANCH_LOG")"
+dd_cleanup feat/dd-gone
+
+# Upstream exists and lacks the tip, while HEAD contains it: the rules are not
+# additive, so the branch must be refused. Primary's main is advanced to hold the
+# tip, then restored.
+main_before=$(git -C "$PRIMARY" rev-parse HEAD)
+dd_worktree feat/dd-behind
+dd_commit feat/dd-behind
+git -C "$PRIMARY" merge -q --ff-only feat/dd-behind
+git -C "$PRIMARY" config branch.feat/dd-behind.remote origin
+git -C "$PRIMARY" config branch.feat/dd-behind.merge refs/heads/stable
+check_equals 'fixture: the tip is in HEAD' 0 "$(dd_ancestor refs/heads/feat/dd-behind HEAD)"
+check_equals 'fixture: the tip is not in its upstream' 1 \
+  "$(dd_ancestor refs/heads/feat/dd-behind refs/remotes/origin/stable)"
+: >"$BRANCH_LOG"
+behind_out=$(clwt_logged_without_gh remove feat/dd-behind --delete-branch 2>&1)
+behind_rc=$?
+check_equals 'remove --delete-branch refuses and keeps the worktree when the upstream ref lacks the tip even though HEAD contains it: exit status' \
+  2 "$behind_rc"
+check_contains 'the upstream-lacks-tip refusal ends with the hint' "$REFUSAL_TAIL" "$behind_out"
+check 'the upstream-lacks-tip worktree is kept' test -d "$MANAGED/feat-dd-behind"
+check 'the upstream-lacks-tip branch is kept' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/dd-behind
+check_equals 'the upstream-lacks-tip refusal ran no branch command' '' "$(cat "$BRANCH_LOG")"
+dd_cleanup feat/dd-behind
+git -C "$PRIMARY" reset -q --hard "$main_before"
+
+# Unmerged local history: no upstream, no origin ref, tip not in HEAD.
+dd_worktree feat/dd-unmerged
+dd_commit feat/dd-unmerged
+check_equals 'fixture: the unmerged tip is not in HEAD' 1 \
+  "$(dd_ancestor refs/heads/feat/dd-unmerged HEAD)"
+check_equals 'fixture: the unmerged branch has no upstream' '' \
+  "$(git -C "$PRIMARY" for-each-ref --format='%(upstream)' refs/heads/feat/dd-unmerged)"
+: >"$BRANCH_LOG"
+unmerged_out=$(clwt_logged_without_gh remove feat/dd-unmerged --delete-branch 2>&1)
+unmerged_rc=$?
+check_equals 'remove --delete-branch refuses and keeps the worktree for unmerged local history: exit status' \
+  2 "$unmerged_rc"
+check_contains 'remove --delete-branch refusal says dropping --delete-branch removes only the worktree' \
+  "$REFUSAL_TAIL" "$unmerged_out"
+check_contains 'the unmerged refusal says nothing was removed' 'nothing was removed' "$unmerged_out"
+check 'the unmerged worktree is kept' test -d "$MANAGED/feat-dd-unmerged"
+check 'the unmerged branch is kept' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/dd-unmerged
+check_equals 'the unmerged refusal ran no branch command' '' "$(cat "$BRANCH_LOG")"
+dd_cleanup feat/dd-unmerged
+
+# The merge check itself cannot run: fail closed, even though the tip IS in HEAD.
+dd_worktree feat/dd-cannot-check
+make_failing_git 'merge-base'
+cannot_out=$(PATH="$FAILGIT:$NOGH" clwt_in "$PRIMARY" remove feat/dd-cannot-check --delete-branch 2>&1)
+cannot_rc=$?
+rm -f "$FAILGIT/git"
+check_equals 'remove --delete-branch refuses and keeps the worktree when the merge check cannot run: exit status' \
+  2 "$cannot_rc"
+check_contains 'the cannot-check refusal ends with the hint' "$REFUSAL_TAIL" "$cannot_out"
+check 'the cannot-check worktree is kept' test -d "$MANAGED/feat-dd-cannot-check"
+check 'the cannot-check branch is kept' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/dd-cannot-check
+dd_cleanup feat/dd-cannot-check
+
 check_fails 'prune rejects a positional argument' clwt prune something
 check_fails 'prune rejects an unknown flag' clwt prune --force
 
