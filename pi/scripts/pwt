@@ -1887,7 +1887,7 @@ verify_squash_merged() {
       verified_pr=$VERIFIED_PR_NUMBER
       ;;
     OPEN | CLOSED)
-      die "refusing to delete branch $branch: its pull request is $state, not merged; $BRANCH_REFUSAL_TAIL"
+      die "refusing to delete branch $branch: pull request #$VERIFIED_PR_NUMBER is $state, not merged; $BRANCH_REFUSAL_TAIL"
       ;;
     NONE)
       die "refusing to delete branch $branch: no pull request for it in $origin_gh_repo; $BRANCH_REFUSAL_TAIL"

@@ -1673,7 +1673,7 @@ predict_branch_delete() {
 # so a fork's same-named pull request comes back too.
 verify_squash_merged() {
   local branch=$1 tip records num state head cross oid
-  local merged_same='' merged_other='' other_num='' other_state=''
+  local merged_same='' merged_other='' other_num='' other_state='' fork_num=''
   tip=$(git rev-parse --verify --quiet "refs/heads/$branch") ||
     die "cannot read the tip of branch $branch; $BRANCH_REFUSAL_TAIL"
   require_gh 'remove --delete-branch' "; $BRANCH_REFUSAL_TAIL"
@@ -1689,7 +1689,11 @@ verify_squash_merged() {
       [[ ! $cross =~ ^(true|false)$ ]] || [[ ! $oid =~ ^[0-9a-f]{40,64}$ ]]; then
       die "unexpected pull request record from gh for $owner/$repo; $BRANCH_REFUSAL_TAIL"
     fi
-    [[ $head == "$branch" && $cross == false ]] || continue
+    [[ $head == "$branch" ]] || continue
+    if [[ $cross == true ]]; then
+      [[ -n $fork_num ]] || fork_num=$num
+      continue
+    fi
     if [[ $state == MERGED && $oid == "$tip" ]]; then
       merged_same=$num
     elif [[ $state == MERGED ]]; then
@@ -1710,6 +1714,9 @@ verify_squash_merged() {
   fi
   if [[ -n $other_num ]]; then
     die "refusing to delete branch $branch: pull request #$other_num is $other_state, not merged; $BRANCH_REFUSAL_TAIL"
+  fi
+  if [[ -n $fork_num ]]; then
+    die "refusing to delete branch $branch: pull request #$fork_num is from a fork, which remove --delete-branch does not accept; $BRANCH_REFUSAL_TAIL"
   fi
   die "refusing to delete branch $branch: no pull request for it in $owner/$repo; $BRANCH_REFUSAL_TAIL"
 }

@@ -6553,8 +6553,8 @@ for sq_state in OPEN CLOSED; do
   check_branch_refusal \
     "remove --delete-branch refuses and keeps the worktree when the pull request is $sq_state" \
     "$sq_name" "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
-  check_contains "the $sq_state refusal says the pull request is not merged" \
-    'not merged' "$sq_out"
+  check_contains "the $sq_state refusal names pull request #9000 and says it is not merged" \
+    "pull request #9000 is $sq_state, not merged" "$sq_out"
   sq_cleanup "$sq_name"
 done
 

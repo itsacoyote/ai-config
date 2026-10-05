@@ -2744,7 +2744,7 @@ sq_expect_refusal 'remove --delete-branch refuses and keeps the worktree when th
   'pull request #45 is CLOSED' feat/sq-closed
 sq_cleanup feat/sq-closed
 
-# A merged PR at the tip wins over an older closed attempt, in either order.
+# A merged PR at the tip wins over an older closed attempt.
 sq_setup feat/sq-retry
 pl_set feat/sq-retry "$(pl_rec 46 CLOSED feat/sq-retry false "$sq_parent")" \
   "$(pl_rec 47 MERGED feat/sq-retry false "$sq_tip")"
@@ -2782,7 +2782,7 @@ sq_setup feat/sq-fork
 pl_set feat/sq-fork "$(pl_rec 48 MERGED feat/sq-fork true "$sq_tip")"
 sq_run feat/sq-fork
 sq_expect_refusal 'remove --delete-branch refuses when only a fork PR with the same branch name is merged' \
-  'no pull request for it in owner/project' feat/sq-fork
+  'pull request #48 is from a fork' feat/sq-fork
 sq_cleanup feat/sq-fork
 
 # --head matches loosely in real gh; a record for another head branch is not this branch's PR.

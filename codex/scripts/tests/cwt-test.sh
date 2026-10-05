@@ -2801,7 +2801,7 @@ sq_setup feat/sq-fork
 pl_set feat/sq-fork "$(pl_rec 48 MERGED feat/sq-fork true "$sq_tip")"
 sq_run feat/sq-fork
 sq_expect_refusal 'remove --delete-branch refuses when only a fork PR with the same branch name is merged' \
-  'no pull request for it in owner/project' feat/sq-fork
+  'pull request #48 is from a fork' feat/sq-fork
 sq_cleanup feat/sq-fork
 
 # --head matches loosely in real gh; a record for another head branch is not this branch's PR.
