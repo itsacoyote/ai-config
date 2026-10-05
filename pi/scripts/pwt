@@ -24,6 +24,7 @@ PWT_PR_FETCH_WORKTREE=''
 PWT_INSTALL_LOCK=''
 PWT_PR_CONTEXT_TMP=''
 PWT_PR_CHECKS_ERR_FILE=''
+PWT_PR_STATE_FILE=''
 cleanup_on_exit() {
   if [[ -n ${PWT_LIST_FILE:-} ]]; then
     rm -f "$PWT_LIST_FILE"
@@ -40,6 +41,9 @@ cleanup_on_exit() {
   if [[ -n ${PWT_PR_CHECKS_ERR_FILE:-} ]]; then
     rm -f "$PWT_PR_CHECKS_ERR_FILE"
   fi
+  if [[ -n ${PWT_PR_STATE_FILE:-} ]]; then
+    rm -f "$PWT_PR_STATE_FILE"
+  fi
 }
 trap cleanup_on_exit EXIT
 
@@ -54,6 +58,9 @@ Usage:
                                     check out a pull request, then launch read-only
   pwt root [-- <args>]             launch in the primary checkout
   pwt remove <branch> [--delete-branch]
+                                   --delete-branch also deletes a squash-merged
+                                   branch when GitHub shows its merged PR at the
+                                   same commit (needs gh)
   pwt prune [--yes]                sweep worktrees whose branch has merged
   pwt install                      symlink pwt onto your PATH
   pwt help
@@ -66,6 +73,7 @@ Commands:
   root      Launch in the primary (non-worktree) checkout.
   list      List this repository's managed worktrees.
   remove    Remove a clean managed worktree; keep its branch by default.
+            --delete-branch deletes it if merged, or squash-merged per GitHub (gh).
   prune     Remove managed worktrees whose branch has an already-merged PR.
   install   Symlink this script to ~/.local/bin/pwt.
   help      Show this usage.
@@ -950,11 +958,11 @@ fail_worktree_creation() {
 }
 
 require_gh() {
-  local what=$1
+  local what=$1 suffix=${2:-}
   command -v gh >/dev/null 2>&1 ||
-    die "$what needs gh to reach GitHub, but gh is not on PATH"
+    die "$what needs gh to reach GitHub, but gh is not on PATH$suffix"
   gh auth status >/dev/null 2>&1 ||
-    die "$what needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)"
+    die "$what needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)$suffix"
 }
 
 valid_head_oid() {
@@ -1817,6 +1825,10 @@ resolve_removable() {
   resolved_worktree=$target
 }
 
+# Set by verified_pr_state on its success path so a caller running in this
+# shell can name the verified pull request.
+VERIFIED_PR_NUMBER=''
+
 # Appended to every refusal so the user knows the state and the way out.
 readonly BRANCH_REFUSAL_TAIL='nothing was removed (drop --delete-branch to remove only the worktree)'
 
@@ -1849,12 +1861,55 @@ predict_branch_delete() {
   die "refusing to delete branch $branch: cannot verify that it is merged into $ref; $BRANCH_REFUSAL_TAIL"
 }
 
+# Sets verified_tip and verified_pr in the caller, or dies. Reuses prune's
+# strict PR check. branch_pr_state runs in this shell, its state going through
+# a file, because a command substitution would discard VERIFIED_PR_NUMBER.
+verify_squash_merged() {
+  local branch=$1 tip state rc=0
+  tip=$(git -C "$primary" rev-parse --verify --quiet "refs/heads/$branch") ||
+    die "cannot read the tip of branch $branch; $BRANCH_REFUSAL_TAIL"
+  require_gh 'remove --delete-branch' "; $BRANCH_REFUSAL_TAIL"
+  PWT_PR_STATE_FILE=$(mktemp "${TMPDIR:-/tmp}/pwt-pr-state.XXXXXX") ||
+    die "cannot create a scratch file for the pull request check; $BRANCH_REFUSAL_TAIL"
+  VERIFIED_PR_NUMBER=''
+  branch_pr_state "$branch" "$tip" >"$PWT_PR_STATE_FILE" || rc=$?
+  state=$(cat "$PWT_PR_STATE_FILE")
+  rm -f "$PWT_PR_STATE_FILE"
+  PWT_PR_STATE_FILE=''
+  case $rc in
+    0) ;;
+    2) die "unexpected pull request record from gh for branch $branch; $BRANCH_REFUSAL_TAIL" ;;
+    *) die "gh could not look up the pull request for branch $branch; $BRANCH_REFUSAL_TAIL" ;;
+  esac
+  case $state in
+    MERGED)
+      valid_pr_number "$VERIFIED_PR_NUMBER" ||
+        die "unexpected pull request record from gh for branch $branch; $BRANCH_REFUSAL_TAIL"
+      verified_tip=$tip
+      verified_pr=$VERIFIED_PR_NUMBER
+      ;;
+    OPEN | CLOSED)
+      die "refusing to delete branch $branch: its pull request is $state, not merged; $BRANCH_REFUSAL_TAIL"
+      ;;
+    NONE)
+      die "refusing to delete branch $branch: no pull request for it in $origin_gh_repo; $BRANCH_REFUSAL_TAIL"
+      ;;
+    UNVERIFIED)
+      die "refusing to delete branch $branch: GitHub's pull request does not match it (the head commit differs, including commits added after a pwt pr checkout; the pull request is in another repository; or it is from a fork); $BRANCH_REFUSAL_TAIL"
+      ;;
+    *)
+      die "unexpected pull request record from gh for branch $branch; $BRANCH_REFUSAL_TAIL"
+      ;;
+  esac
+}
+
 # Inspect local content, then repeat ownership at the final mutation boundary
 # before asking Git to remove anything.
 remove_worktree() {
   local branch=$1 delete_branch=$2 expected_target=${3:-} expected_head=${4:-}
   local target ignored_before ignored_after current_head
   local f status marker
+  local verified_tip='' verified_pr='' # set by verify_squash_merged
   local -a doomed=()
 
   resolve_removable "$branch"
@@ -1875,7 +1930,7 @@ remove_worktree() {
     die "worktree has uncommitted or untracked work, refusing to remove: $target"
   fi
   if ((delete_branch)) && ! predict_branch_delete "$branch"; then
-    die "refusing to delete branch $branch: not merged into its upstream or HEAD; $BRANCH_REFUSAL_TAIL"
+    verify_squash_merged "$branch"
   fi
   ignored_after=$(worktree_ignored_files "$target") ||
     die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
@@ -1938,10 +1993,20 @@ remove_worktree() {
   note "removed $target"
 
   if ((delete_branch)); then
-    # Kept as the backstop if the prediction above was wrong.
-    git -C "$primary" branch -d "$branch" ||
-      die "removed worktree but could not safely delete branch: $branch"
-    note "deleted branch $branch"
+    if [[ -n $verified_pr ]]; then
+      # The worktree can gain a commit between the GitHub check and its
+      # removal; -D would destroy it.
+      [[ $(git -C "$primary" rev-parse --verify --quiet "refs/heads/$branch") == "$verified_tip" ]] ||
+        die "removed the worktree but kept branch $branch: its tip moved after the pull request check"
+      git -C "$primary" branch -D "$branch" ||
+        die "removed worktree but could not delete branch: $branch"
+      note "deleted squash-merged branch $branch (PR #$verified_pr)"
+    else
+      # Kept as the backstop if the prediction above was wrong.
+      git -C "$primary" branch -d "$branch" ||
+        die "removed worktree but could not safely delete branch: $branch"
+      note "deleted branch $branch"
+    fi
   fi
 }
 
@@ -2328,6 +2393,7 @@ verified_pr_state() {
       return 0
     }
   fi
+  VERIFIED_PR_NUMBER=$number
   printf '%s\n' "$state"
 }
 

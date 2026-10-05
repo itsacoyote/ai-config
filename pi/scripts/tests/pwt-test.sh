@@ -6393,8 +6393,8 @@ check_branch_refusal \
   'remove --delete-branch refuses unmerged local history and keeps the worktree' \
   feat/unmerged-delete "$unmerged_head" "$unmerged_status" "$unmerged_out" \
   "$UNMERGED_BRANCH_LOG"
-check_contains 'the unmerged-history refusal names the branch' \
-  'feat/unmerged-delete' "$unmerged_out"
+check_contains 'the unmerged-history refusal, with gh off PATH, says it needs gh' \
+  'remove --delete-branch needs gh' "$unmerged_out"
 check 'the unmerged-history refusal keeps the preparation marker' \
   test -d "$unmerged_marker"
 check 'the unmerged-history refusal keeps the session folder' \
@@ -6453,6 +6453,244 @@ check_not_contains 'non-forcing deletion never uses -D' \
   'branch -D' "$(cat "$PD_LOG")"
 check_equals 'non-forcing deletion makes exactly one branch call' \
   1 "$(wc -l <"$PD_LOG" | tr -d ' ')"
+
+
+# Squash-merged branches: the predictor fails, so GitHub decides. A squash
+# leaves no origin/<branch>, no upstream, and a tip the primary HEAD lacks.
+sq_dir() { printf '%s\n' "$MANAGED/$(printf '%s' "$1" | tr '/' '-')"; }
+sq_branch() {
+  local dir
+  launch_reset
+  new_head_branch "$1" || return 1
+  dir=$(sq_dir "$1")
+  printf 'squashed work\n' >"$dir/squash.txt"
+  git -C "$dir" add squash.txt
+  git -C "$dir" commit -qm 'add squashed work'
+}
+check_squash_shape() {
+  local branch=$1 tip
+  tip=$(git -C "$PRIMARY" rev-parse "refs/heads/$branch")
+  check_ref_absent "fixture: $branch has no origin/<branch>" \
+    "refs/remotes/origin/$branch"
+  check_equals "fixture: $branch has no upstream" '' "$(branch_upstream "$branch")"
+  check_fails "fixture: the primary HEAD lacks the $branch tip" \
+    git -C "$PRIMARY" merge-base --is-ancestor "$tip" HEAD
+}
+# sq_run <branch> <pwt-function>: sets sq_status and sq_out, resets and fills
+# SQ_LOG (git branch calls) and the gh log.
+sq_run() {
+  local branch=$1 runner=$2
+  SQ_LOG="$TMP/sq-branch-log"
+  rm -f "$SQ_LOG"
+  : >"$PWT_GH_LOG"
+  sq_status=0
+  sq_out=$(PWT_TEST_BRANCH_LOG="$SQ_LOG" "$runner" remove "$branch" --delete-branch 2>&1) ||
+    sq_status=$?
+}
+sq_cleanup() {
+  rm -f "$PWT_GH_STATES/$(printf '%s' "$1" | tr '/' '-')" \
+    "$PWT_GH_FAILURES/$(printf '%s' "$1" | tr '/' '-')"
+  if [ -d "$(sq_dir "$1")" ]; then pwt remove "$1" >/dev/null 2>&1; fi
+  git -C "$PRIMARY" branch -D "$1" >/dev/null 2>&1 || true
+}
+
+sq_branch feat/sq-merged
+check_squash_shape feat/sq-merged
+pr_state feat/sq-merged MERGED
+sq_run feat/sq-merged pwt
+check 'remove --delete-branch deletes a squash-merged branch whose merged PR head matches the local tip' \
+  test "$sq_status" -eq 0
+check_contains 'the squash-merged deletion note names the branch and PR #9000' \
+  'deleted squash-merged branch feat/sq-merged (PR #9000)' "$sq_out"
+check_ref_absent 'the squash-merged branch is gone' refs/heads/feat/sq-merged
+check 'the squash-merged worktree is removed' test ! -e "$(sq_dir feat/sq-merged)"
+check_contains 'the squash-merged branch is force-deleted with -D' \
+  'branch -D feat/sq-merged' "$(cat "$SQ_LOG")"
+check_not_contains 'the squash-merged branch is not deleted with -d' \
+  'branch -d' "$(cat "$SQ_LOG")"
+check_contains 'the squash-merged lookup runs against the origin repository' \
+  '--repo github.com/owner/project' "$(cat "$PWT_GH_LOG")"
+check_contains 'the squash-merged lookup asks for the branch by head ref' \
+  'pr list --head feat/sq-merged' "$(cat "$PWT_GH_LOG")"
+sq_cleanup feat/sq-merged
+
+sq_branch feat/sq-advanced
+pr_state feat/sq-advanced MERGED
+printf 'after the merge\n' >"$(sq_dir feat/sq-advanced)/later.txt"
+git -C "$(sq_dir feat/sq-advanced)" add later.txt
+git -C "$(sq_dir feat/sq-advanced)" commit -qm 'commit after the merged head'
+sq_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-advanced)
+check_squash_shape feat/sq-advanced
+sq_run feat/sq-advanced pwt
+check_branch_refusal \
+  'remove --delete-branch refuses and keeps the worktree when the branch has a commit after the merged PR head' \
+  feat/sq-advanced "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+check_contains 'the later-commit refusal names the differing head commit' \
+  'head commit differs' "$sq_out"
+check_contains 'the later-commit refusal names another repository' \
+  'another repository' "$sq_out"
+check_contains 'the later-commit refusal names a fork' 'fork' "$sq_out"
+sq_cleanup feat/sq-advanced
+
+sq_branch feat/sq-nopr
+sq_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-nopr)
+check_squash_shape feat/sq-nopr
+sq_run feat/sq-nopr pwt
+check_branch_refusal \
+  'remove --delete-branch refuses and keeps the worktree when the branch has no pull request' \
+  feat/sq-nopr "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+check_contains 'the no-PR refusal says there is no pull request' \
+  'no pull request' "$sq_out"
+sq_cleanup feat/sq-nopr
+
+for sq_state in OPEN CLOSED; do
+  sq_name=feat/sq-$(printf '%s' "$sq_state" | tr 'A-Z' 'a-z')
+  sq_branch "$sq_name"
+  sq_tip=$(git -C "$PRIMARY" rev-parse "refs/heads/$sq_name")
+  pr_state "$sq_name" "$sq_state"
+  check_squash_shape "$sq_name"
+  sq_run "$sq_name" pwt
+  check_branch_refusal \
+    "remove --delete-branch refuses and keeps the worktree when the pull request is $sq_state" \
+    "$sq_name" "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+  check_contains "the $sq_state refusal says the pull request is not merged" \
+    'not merged' "$sq_out"
+  sq_cleanup "$sq_name"
+done
+
+sq_branch feat/sq-unauth
+sq_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-unauth)
+pr_state feat/sq-unauth MERGED
+touch "$PWT_GH_UNAVAILABLE"
+sq_run feat/sq-unauth pwt
+rm -f "$PWT_GH_UNAVAILABLE"
+check_branch_refusal \
+  'remove --delete-branch refuses before removing anything when gh is not authenticated' \
+  feat/sq-unauth "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+check_contains 'the unauthenticated refusal names gh auth login' \
+  'gh auth login' "$sq_out"
+check_contains 'the unauthenticated refusal names the remove --delete-branch command' \
+  'remove --delete-branch needs gh' "$sq_out"
+sq_cleanup feat/sq-unauth
+
+sq_branch feat/sq-nogh
+sq_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-nogh)
+sq_run feat/sq-nogh pwt_without_gh
+check_branch_refusal \
+  'remove --delete-branch refuses before removing anything when gh is not on PATH and the branch is not merged' \
+  feat/sq-nogh "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+check_contains 'the missing-gh refusal says gh is not on PATH' 'not on PATH' "$sq_out"
+sq_cleanup feat/sq-nogh
+
+sq_branch feat/sq-lookup-fails
+sq_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-lookup-fails)
+pr_state_failure feat/sq-lookup-fails
+sq_run feat/sq-lookup-fails pwt
+check_branch_refusal \
+  'remove --delete-branch refuses before removing anything when the gh lookup fails' \
+  feat/sq-lookup-fails "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+check_contains 'the failed-lookup refusal says gh failed' 'gh could not' "$sq_out"
+sq_cleanup feat/sq-lookup-fails
+
+sq_branch feat/sq-malformed
+sq_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-malformed)
+pr_state feat/sq-malformed UNKNOWN
+sq_run feat/sq-malformed pwt
+check_branch_refusal \
+  'remove --delete-branch refuses before removing anything when gh output is malformed' \
+  feat/sq-malformed "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+check_contains 'the malformed refusal says the output was unexpected' \
+  'unexpected' "$sq_out"
+sq_cleanup feat/sq-malformed
+
+sq_branch feat/sq-fork-only
+sq_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-fork-only)
+pr_state feat/sq-fork-only MERGED '' true fork-owner fork-project
+sq_run feat/sq-fork-only pwt
+check_branch_refusal \
+  'remove --delete-branch refuses when only a fork PR with the same branch name is merged' \
+  feat/sq-fork-only "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+check_contains 'the fork-PR refusal names a fork' 'fork' "$sq_out"
+sq_cleanup feat/sq-fork-only
+
+# A `pwt pr` branch is verified through its recorded PR URL, even for a fork.
+launch_reset
+pr_meta 902 feat/sq-recorded true fork-owner fork-project
+pwt pr 902 >/dev/null 2>&1
+git -C "$PRIMARY" update-ref -d refs/remotes/origin/feat/sq-recorded
+git -C "$PRIMARY" config --unset branch.feat/sq-recorded.remote || true
+git -C "$PRIMARY" config --unset branch.feat/sq-recorded.merge || true
+pr_state feat/sq-recorded MERGED '' true fork-owner fork-project \
+  https://github.com/owner/project/pull/902
+check_equals 'fixture: the recorded PR URL marker is set' \
+  https://github.com/owner/project/pull/902 \
+  "$(git -C "$PRIMARY" config --get branch.feat/sq-recorded.worktree-pr-url)"
+check_squash_shape feat/sq-recorded
+sq_run feat/sq-recorded pwt
+check 'remove --delete-branch deletes a merged pwt pr branch through its recorded PR URL' \
+  test "$sq_status" -eq 0
+check_contains 'the recorded-PR deletion note names PR #902' \
+  'deleted squash-merged branch feat/sq-recorded (PR #902)' "$sq_out"
+check_ref_absent 'the recorded-PR branch is gone' refs/heads/feat/sq-recorded
+check_contains 'the recorded-PR lookup uses the canonical PR URL' \
+  'pr view https://github.com/owner/project/pull/902' "$(cat "$PWT_GH_LOG")"
+sq_cleanup feat/sq-recorded
+
+# The tip moves while GitHub is being asked: the worktree goes, the branch stays.
+sq_branch feat/sq-moves
+pr_state feat/sq-moves MERGED
+check_squash_shape feat/sq-moves
+sq_verified_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-moves)
+SQ_LOG="$TMP/sq-branch-log"
+rm -f "$SQ_LOG"
+sq_status=0
+sq_out=$(
+  export PWT_TEST_PRUNE_MUTATION=head-after-state
+  export PWT_TEST_PRUNE_BRANCH=feat/sq-moves
+  export PWT_TEST_PRUNE_TARGET="$(sq_dir feat/sq-moves)"
+  export PWT_TEST_BRANCH_LOG="$SQ_LOG"
+  pwt remove feat/sq-moves --delete-branch 2>&1
+) || sq_status=$?
+sq_moved_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-moves)
+check 'remove --delete-branch keeps the branch when its tip moves after verification' \
+  test "$sq_status" -ne 0
+check 'fixture: the tip moved during the GitHub lookup' \
+  test "$sq_moved_tip" != "$sq_verified_tip"
+check_contains 'the moved-tip failure says the branch was kept' \
+  'kept branch feat/sq-moves' "$sq_out"
+check 'the moved-tip worktree was removed' test ! -e "$(sq_dir feat/sq-moves)"
+check_not_contains 'the moved-tip branch is never deleted' \
+  'branch -D' "$(cat "$SQ_LOG")"
+sq_cleanup feat/sq-moves
+
+# A normally merged branch never reaches gh, so a gh failure cannot block it;
+# the cannot-check refusal must not ask gh either.
+sq_branch feat/sq-cannot-check
+pr_state feat/sq-cannot-check MERGED
+sq_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-cannot-check)
+SQ_LOG="$TMP/sq-branch-log"
+rm -f "$SQ_LOG"
+: >"$PWT_GH_LOG"
+sq_status=0
+sq_out=$(
+  PWT_TEST_GIT_FAIL=merge-base PWT_TEST_BRANCH_LOG="$SQ_LOG" \
+    pwt remove feat/sq-cannot-check --delete-branch 2>&1
+) || sq_status=$?
+check_branch_refusal 'the cannot-check refusal never asked gh: refusal shape' \
+  feat/sq-cannot-check "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
+check_equals 'the cannot-check refusal never asked gh' '' "$(cat "$PWT_GH_LOG")"
+sq_cleanup feat/sq-cannot-check
+
+# prune and pr keep require_gh's exact message: no suffix, whatever the script is called.
+launch_reset
+pwt new feat/sq-prune-auth >/dev/null 2>&1
+touch "$PWT_GH_UNAVAILABLE"
+sq_out=$(pwt prune 2>&1) || true
+rm -f "$PWT_GH_UNAVAILABLE"
+check_equals 'prune output is unchanged when gh is not authenticated' \
+  "${PWT##*/}: prune needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)" \
+  "$sq_out"
+sq_cleanup feat/sq-prune-auth
 
 check 'remove status explicitly inspects dirty submodules' \
   grep -qF -- '--ignore-submodules=none' "$PWT"
