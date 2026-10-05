@@ -11,6 +11,12 @@
 
 set -uo pipefail
 
+# The gh stub's review-comments fixtures need to apply the same --jq
+# expression pwt passes to real gh (flattening --paginate's per-page shape),
+# which this suite does with the system jq rather than hand-rolling a JSON
+# transform in bash.
+command -v jq >/dev/null 2>&1 || { echo "jq is required to run this suite" >&2; exit 1; }
+
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)
 PWT=${PWT_UNDER_TEST:-"$REPO_ROOT/pi/scripts/pwt"}
 TEST_SOURCE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/${BASH_SOURCE[0]##*/}
@@ -109,6 +115,19 @@ ln -s "$TMP/real-home" "$HOME"
 mkdir -p "$TMP/other-volume/worktrees/owner/project"
 mkdir -p "$HOME/github/owner"
 ln -s "$TMP/other-volume/worktrees" "$HOME/github/.worktrees"
+
+# Review mode pins Pi's skill discovery to ~/.agents/skills/pr-review,
+# physically resolved. Seeded here as a SYMLINK to a fixture directory — it is
+# one in the real ai-config checkout too — so the suite exercises physical
+# resolution rather than a plain directory a resolver could pass by luck.
+PR_REVIEW_SKILL_FIXTURE="$TMP/pr-review-skill-fixture"
+mkdir -p "$PR_REVIEW_SKILL_FIXTURE" "$HOME/.agents/skills"
+printf '# pr-review\n' >"$PR_REVIEW_SKILL_FIXTURE/SKILL.md"
+ln -s "$PR_REVIEW_SKILL_FIXTURE" "$HOME/.agents/skills/pr-review"
+# The physical path pwt's resolver reports: may differ from
+# $PR_REVIEW_SKILL_FIXTURE's own spelling if $TMP sits under a symlinked
+# ancestor (macOS's /tmp and /var are themselves symlinks).
+PR_REVIEW_SKILL_PHYSICAL=$(cd -P "$PR_REVIEW_SKILL_FIXTURE" && pwd -P)
 
 REMOTE="$HOME/remotes/owner/project.git"
 PRIMARY_LOGICAL="$HOME/github/owner/project"
@@ -533,11 +552,130 @@ export PWT_GH_OTHER_PRS="$TMP/gh-other-prs"
 export PWT_GH_STATES="$TMP/gh-states"
 export PWT_GH_FAILURES="$TMP/gh-failures"
 export PWT_GH_LOG="$TMP/gh.log"
+export PWT_GH_API_LOG="$TMP/gh-api.log"
 mkdir -p "$PWT_GH_PRS" "$PWT_GH_OTHER_PRS" \
   "$PWT_GH_STATES" "$PWT_GH_FAILURES"
 : >"$PWT_GH_LOG"
+: >"$PWT_GH_API_LOG"
 cat >"$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
+
+# Crude JSON string escaper — enough for what the pr-context fixtures need
+# (backslash, double-quote, embedded newline), not general-purpose. awk, not
+# sed's classic `:a;N;$!ba` line-join: BSD/macOS sed does not accept that
+# script on one line (labels need their own line there), so it silently
+# fails to join and every embedded newline in a fixture body reaches the
+# stub's --jq-style output as a REAL newline — breaking the one-line-per-field
+# contract every other field's `sed -n 'Np'` extraction depends on.
+json_escape() {
+  printf '%s' "$1" | awk '
+    {
+      gsub(/\\/, "\\\\")
+      gsub(/"/, "\\\"")
+      if (NR > 1) printf "\\n"
+      printf "%s", $0
+    }
+  '
+}
+
+# read_fixture <path> <default> — the file's content if it exists, else
+# <default>. Collapses the repeated if-exists/else-default shape every
+# fixture lookup in gh_pr_view_context below used to spell out by hand.
+read_fixture() {
+  if [ -f "$1" ]; then cat "$1"; else printf '%s' "$2"; fi
+}
+
+# Renders write_pr_context's single combined `gh pr view <url> --json ...
+# --jq ...` call: 19 newline-separated values in the exact order the real
+# --jq expression would produce (7 header scalars, 7 emptiness counts, then
+# 5 tojson'd section blobs). Each per-field fixture file is optional; a
+# missing one falls back to a small default so every existing `pr_meta`-only
+# test still gets a well-formed context without adding its own fixtures.
+gh_pr_view_context() {
+  local number=$1 meta=$2
+  local head_ref cross url oid title body issues files changed comments reviews
+  local title_len body_len issues_len files_len comments_len reviews_len
+  local number_out=$number author=octocat base=main
+  head_ref=$(sed -n 's/^headRefName=//p' "$meta")
+  cross=$(sed -n 's/^isCrossRepository=//p' "$meta")
+  url=$(sed -n 's/^url=//p' "$meta")
+  oid=$(sed -n 's/^headRefOid=//p' "$meta")
+  # Two independent override hooks, distinct from pr_head_moved (which only
+  # affects the SEPARATE final re-check call further down in the stub): this
+  # is the combined view call write_pr_context reads its header and section
+  # data from, so overriding here is what exercises validating THAT call's
+  # own url/oid against the caller's known-good values, not only the final
+  # re-read.
+  if [ -f "$PWT_GH_PRS/$number.context-url-mismatch" ]; then
+    url="${url}-mismatched"
+  fi
+  if [ -f "$PWT_GH_PRS/$number.initial-moved-head" ]; then
+    oid=$(cat "$PWT_GH_PRS/$number.initial-moved-head")
+  fi
+  # Four more override hooks, same shape as context-url-mismatch: each
+  # mismatches exactly ONE header scalar the combined view call reports,
+  # leaving every other field correct, so each of write_pr_context's
+  # pr_number/pr_head/pr_cross/pr_author/pr_base checks can be proven to
+  # fire on its own rather than riding on another check's message.
+  if [ -f "$PWT_GH_PRS/$number.context-number-mismatch" ]; then
+    number_out="${number}9"
+  fi
+  if [ -f "$PWT_GH_PRS/$number.context-headref-mismatch" ]; then
+    head_ref="${head_ref}-mismatched"
+  fi
+  if [ -f "$PWT_GH_PRS/$number.context-cross-invalid" ]; then
+    cross='maybe'
+  fi
+  if [ -f "$PWT_GH_PRS/$number.context-author-invalid" ]; then
+    author='evil login'
+  fi
+  if [ -f "$PWT_GH_PRS/$number.context-author-underscore" ]; then
+    author='octo_cat'
+  fi
+  if [ -f "$PWT_GH_PRS/$number.context-author-app" ]; then
+    author='app/dependabot'
+  fi
+  if [ -f "$PWT_GH_PRS/$number.context-author-app-malformed" ]; then
+    author='foo/bar'
+  fi
+  if [ -f "$PWT_GH_PRS/$number.context-base-invalid" ]; then
+    base='-bad..base'
+  fi
+  title=$(read_fixture "$PWT_GH_PRS/$number.title" "Test PR #$number")
+  body=$(read_fixture "$PWT_GH_PRS/$number.body" "Test PR #$number body")
+  issues=$(read_fixture "$PWT_GH_PRS/$number.issues.json" '[]')
+  issues_len=$(read_fixture "$PWT_GH_PRS/$number.issues.count" 0)
+  files=$(read_fixture "$PWT_GH_PRS/$number.files.json" '[]')
+  files_len=$(read_fixture "$PWT_GH_PRS/$number.files.count" 0)
+  changed=$(read_fixture "$PWT_GH_PRS/$number.changed-files" "$files_len")
+  comments=$(read_fixture "$PWT_GH_PRS/$number.comments.json" '[]')
+  comments_len=$(read_fixture "$PWT_GH_PRS/$number.comments.count" 0)
+  reviews=$(read_fixture "$PWT_GH_PRS/$number.reviews.json" '[]')
+  reviews_len=$(read_fixture "$PWT_GH_PRS/$number.reviews.count" 0)
+  title_len=${#title}
+  body_len=${#body}
+
+  printf '%s\n' "$number_out"
+  printf '%s\n' "$url"
+  printf '%s\n' "$author"
+  printf '%s\n' "$base"
+  printf '%s\n' "$head_ref"
+  printf '%s\n' "$oid"
+  printf '%s\n' "$cross"
+  printf '%s\n' "$title_len"
+  printf '%s\n' "$body_len"
+  printf '%s\n' "$issues_len"
+  printf '%s\n' "$files_len"
+  printf '%s\n' "$changed"
+  printf '%s\n' "$comments_len"
+  printf '%s\n' "$reviews_len"
+  printf '{"title":"%s","body":"%s"}\n' "$(json_escape "$title")" "$(json_escape "$body")"
+  printf '{"closingIssuesReferences":%s}\n' "$issues"
+  printf '{"files":%s}\n' "$files"
+  printf '{"comments":%s}\n' "$comments"
+  printf '{"reviews":%s}\n' "$reviews"
+}
+
 if [ -f "$PWT_GH_UNAVAILABLE" ]; then
   printf 'gh: could not authenticate\n' >&2
   exit 1
@@ -580,10 +718,39 @@ if [ "$1" = pr ] && [ "$2" = view ]; then
   requested=$3
   number=${requested##*/}
   meta="$meta_root/$number"
+  # A full PR URL pins its own repository, same as real gh: it is never
+  # redirected by an ambient GH_REPO/GH_HOST override the way a bare PR
+  # number with no --repo is. write_pr_context always passes a URL, so its
+  # fixture always lives under the canonical PWT_GH_PRS, regardless of what
+  # meta_root ambient overrides resolved to above.
+  case "$requested" in
+    */pull/*) meta="$PWT_GH_PRS/$number" ;;
+  esac
   if [ ! -f "$meta" ]; then
     printf 'could not resolve pull request %s\n' "$3" >&2
     exit 1
   fi
+  case "$*" in
+    *changedFiles*)
+      # write_pr_context's combined call — the only one that asks for
+      # changedFiles, so matching on it (rather than the whole --json list)
+      # survives a field being reordered.
+      gh_pr_view_context "$number" "$meta"
+      exit 0
+      ;;
+    *'--json headRefOid --jq'*)
+      # write_pr_context's post-fetch re-check: --json headRefOid --jq
+      # '.headRefOid' only. A moved-head fixture overrides the fixture's own
+      # recorded head, simulating a push that landed mid-fetch.
+      moved="$PWT_GH_PRS/$number.moved-head"
+      if [ -f "$moved" ]; then
+        cat "$moved"
+      else
+        sed -n 's/^headRefOid=//p' "$meta"
+      fi
+      exit 0
+      ;;
+  esac
   case " $* " in
     *' --json state,'*)
       branch=$(sed -n 's/^headRefName=//p' "$meta")
@@ -745,7 +912,116 @@ if [ "$1" = pr ] && [ "$2" = checkout ]; then
   git merge --ff-only "refs/remotes/origin/$head_ref" >/dev/null
   exit $?
 fi
-exit 0
+if [ "$1" = pr ] && [ "$2" = checks ]; then
+  number=${3##*/pull/}
+  # Always keyed by number under the canonical PWT_GH_PRS, never meta_root:
+  # a full PR URL pins its own repository the same as real gh, regardless of
+  # what an ambient GH_REPO/GH_HOST override resolved meta_root to above.
+  meta="$PWT_GH_PRS/$number"
+  if [ ! -f "$meta" ]; then
+    printf 'could not resolve pull request %s\n' "$3" >&2
+    exit 1
+  fi
+  exit_file="$PWT_GH_PRS/$number.checks.exit"
+  out_file="$PWT_GH_PRS/$number.checks.out"
+  err_file="$PWT_GH_PRS/$number.checks.err"
+  rc=0
+  [ -f "$exit_file" ] && rc=$(cat "$exit_file")
+  # Lets a test hold this call open (PWT_PR_CHECKS_ERR_FILE is already set by
+  # this point — pwt assigns it, then redirects this call's stderr into that
+  # file, before invoking gh) so it can kill pwt mid-fetch and observe
+  # whether the EXIT trap, not an explicit rm, is what removes THAT temp
+  # file. The counterpart to diff-hang below, for the other cleanup_on_exit
+  # entry. Capped so an unkilled run cannot hang the suite.
+  if [ -f "$PWT_GH_PRS/$number.checks-hang" ]; then
+    n=0
+    while [ ! -f "$PWT_GH_PRS/$number.checks-resume" ] && [ "$n" -lt 100 ]; do
+      sleep 0.1
+      n=$((n + 1))
+    done
+  fi
+  if [ -f "$out_file" ]; then cat "$out_file"; else printf 'check1\tpass\t1s\turl\n'; fi
+  if [ -f "$err_file" ]; then cat "$err_file" >&2; fi
+  exit "$rc"
+fi
+if [ "$1" = pr ] && [ "$2" = diff ]; then
+  number=${3##*/pull/}
+  # Same fixed resolution as the checks handler above.
+  meta="$PWT_GH_PRS/$number"
+  if [ ! -f "$meta" ]; then
+    printf 'could not resolve pull request %s\n' "$3" >&2
+    exit 1
+  fi
+  if [ -f "$PWT_GH_PRS/$number.diff-fails" ]; then
+    echo "gh: failed to fetch the diff" >&2
+    exit 1
+  fi
+  # Lets a test hold this call open (PWT_PR_CONTEXT_TMP is already set by
+  # this point, mktemp'd well before the diff fetch) so it can kill pwt
+  # mid-fetch and observe whether the EXIT trap, not an explicit rm, is what
+  # removes the temp file. Capped so an unkilled run cannot hang the suite.
+  if [ -f "$PWT_GH_PRS/$number.diff-hang" ]; then
+    n=0
+    while [ ! -f "$PWT_GH_PRS/$number.diff-resume" ] && [ "$n" -lt 100 ]; do
+      sleep 0.1
+      n=$((n + 1))
+    done
+  fi
+  diff_file="$PWT_GH_PRS/$number.diff"
+  if [ -f "$diff_file" ]; then cat "$diff_file"; else printf 'diff --git a/file.txt b/file.txt\n+hello\n'; fi
+  exit 0
+fi
+if [ "$1" = api ]; then
+  last=''
+  jq_expr=''
+  slurp=0
+  prev=''
+  for arg in "$@"; do
+    if [ "$prev" = "--jq" ]; then jq_expr=$arg; fi
+    [ "$arg" = "--slurp" ] && slurp=1
+    prev=$arg
+    last=$arg
+  done
+  printf '%s\n' "$*" >>"$PWT_GH_API_LOG"
+  # Real gh refuses this combination outright, before it ever reaches an
+  # endpoint, so the stub refuses it too rather than silently applying --jq
+  # anyway.
+  if [ "$slurp" = 1 ] && [ -n "$jq_expr" ]; then
+    echo 'the `--slurp` option is not supported with `--jq` or `--template`' >&2
+    exit 1
+  fi
+  case "$last" in
+    repos/*/pulls/*/comments)
+      number=${last#repos/*/pulls/}
+      number=${number%/comments}
+      # Fixture format: an array of PAGES (`[[]]` for one empty page,
+      # `[[...],[...]]` for two) — real gh applies --jq to EACH page
+      # separately (no --slurp here), so this stub splits on pages with jq
+      # and re-applies the requested expression per page too, via the
+      # system jq this suite already requires. `-r`, not `-c`: gh's --jq
+      # prints like `jq -r`, so a `tojson`-wrapped string comes out
+      # unquoted — the trick pwt's own flatten below relies on.
+      raw=$(read_fixture "$PWT_GH_PRS/$number.review-comments.json" '[[]]')
+      printf '%s' "$raw" | jq -c '.[]' | while IFS= read -r page; do
+        if [ -n "$jq_expr" ]; then
+          printf '%s' "$page" | jq -r "$jq_expr"
+        else
+          printf '%s\n' "$page"
+        fi
+      done
+      exit 0
+      ;;
+  esac
+  printf 'gh stub: unhandled: %s\n' "$*" >&2
+  exit 97
+fi
+# Every gh invocation pwt makes is matched above; anything else reaching here
+# is either a bug in pwt (calling gh some new way this stub does not yet
+# model) or a bug in the stub itself — surfaced loudly and distinctly (97),
+# not the silent success a bare `exit 0` would give a call nobody actually
+# meant to make.
+printf 'gh stub: unhandled: %s\n' "$*" >&2
+exit 97
 STUB
 chmod +x "$BIN/gh"
 
@@ -817,6 +1093,100 @@ pr_meta() {
     "$2" "$3" "${4:-owner}" "${5:-project}" \
     "https://github.com/owner/project/pull/$1" "$oid" >"$PWT_GH_PRS/$1"
 }
+
+# --- pr-context.md fixtures -------------------------------------------------
+# Each of these is optional per PR number; gh_pr_view_context (in the gh stub
+# above) falls back to a small default for anything not set here, so every
+# existing pr_meta-only test still gets a well-formed context file. A JSON
+# array fixture's companion .count file is the section's "emptiness" signal —
+# it is not inferred from the JSON text, since a portable stub has no JSON
+# parser and the count is exactly what the tests need to control anyway.
+pr_title() { printf '%s' "$2" >"$PWT_GH_PRS/$1.title"; }
+pr_body() { printf '%s' "$2" >"$PWT_GH_PRS/$1.body"; }
+pr_issues() {
+  printf '%s' "$2" >"$PWT_GH_PRS/$1.issues.json"
+  printf '%s' "${3:-0}" >"$PWT_GH_PRS/$1.issues.count"
+}
+pr_files() {
+  printf '%s' "$2" >"$PWT_GH_PRS/$1.files.json"
+  printf '%s' "${3:-0}" >"$PWT_GH_PRS/$1.files.count"
+}
+pr_changed_files() { printf '%s' "$2" >"$PWT_GH_PRS/$1.changed-files"; }
+pr_comments() {
+  printf '%s' "$2" >"$PWT_GH_PRS/$1.comments.json"
+  printf '%s' "${3:-0}" >"$PWT_GH_PRS/$1.comments.count"
+}
+pr_reviews() {
+  printf '%s' "$2" >"$PWT_GH_PRS/$1.reviews.json"
+  printf '%s' "${3:-0}" >"$PWT_GH_PRS/$1.reviews.count"
+}
+pr_review_comments() { printf '%s' "$2" >"$PWT_GH_PRS/$1.review-comments.json"; }
+# pr_checks <number> [exit-code] [stdout] [stderr]
+pr_checks() {
+  printf '%s' "${2:-0}" >"$PWT_GH_PRS/$1.checks.exit"
+  printf '%s' "${3:-}" >"$PWT_GH_PRS/$1.checks.out"
+  printf '%s' "${4:-}" >"$PWT_GH_PRS/$1.checks.err"
+}
+# pr_checks_hang <number> — makes the checks stub block (see the gh stub
+# above) until pr_checks_resume is written or a 10s cap elapses, so a test
+# can kill pwt while PWT_PR_CHECKS_ERR_FILE is still set and observe the EXIT
+# trap — the counterpart to pr_diff_hang, for the OTHER temp file
+# cleanup_on_exit registers.
+pr_checks_hang() { : >"$PWT_GH_PRS/$1.checks-hang"; }
+pr_checks_resume() { : >"$PWT_GH_PRS/$1.checks-resume"; }
+pr_diff() { printf '%s' "$2" >"$PWT_GH_PRS/$1.diff"; }
+pr_diff_fails() { : >"$PWT_GH_PRS/$1.diff-fails"; }
+# pr_diff_hang <number> — makes the diff stub block (see the gh stub above)
+# until pr_diff_resume is written or a 10s cap elapses, so a test can kill
+# pwt while PWT_PR_CONTEXT_TMP is still set and observe the EXIT trap.
+pr_diff_hang() { : >"$PWT_GH_PRS/$1.diff-hang"; }
+pr_diff_resume() { : >"$PWT_GH_PRS/$1.diff-resume"; }
+# pr_head_moved <number> <new-oid> — the post-fetch re-check reports this
+# instead of the fixture's own headRefOid, simulating a push mid-fetch.
+pr_head_moved() { printf '%s' "$2" >"$PWT_GH_PRS/$1.moved-head"; }
+# pr_head_initial_moved <number> <new-oid> — the FIRST combined view call
+# (gh_pr_view_context) reports this oid instead of the fixture's own, while
+# the final re-check still reports the real one: an ABA change a final-read-
+# only check would never see.
+pr_head_initial_moved() { printf '%s' "$2" >"$PWT_GH_PRS/$1.initial-moved-head"; }
+# pr_context_url_mismatch <number> — the first combined view call reports a
+# url that does not match $pr_url, simulating gh answering about the wrong
+# pull request.
+pr_context_url_mismatch() { : >"$PWT_GH_PRS/$1.context-url-mismatch"; }
+# pr_context_number_mismatch <number> — the combined view call reports a
+# different pull request number than the one requested.
+pr_context_number_mismatch() { : >"$PWT_GH_PRS/$1.context-number-mismatch"; }
+# pr_context_headref_mismatch <number> — the combined view call reports a
+# different head ref than the metadata fixture's own headRefName.
+pr_context_headref_mismatch() { : >"$PWT_GH_PRS/$1.context-headref-mismatch"; }
+# pr_context_cross_invalid <number> — the combined view call reports a
+# non-boolean isCrossRepository value.
+pr_context_cross_invalid() { : >"$PWT_GH_PRS/$1.context-cross-invalid"; }
+# pr_context_author_invalid <number> — the combined view call reports an
+# author login containing characters no real GitHub login has.
+pr_context_author_invalid() { : >"$PWT_GH_PRS/$1.context-author-invalid"; }
+# pr_context_author_underscore <number> — the combined view call reports a
+# GitHub Enterprise managed-user-style login containing an underscore.
+pr_context_author_underscore() { : >"$PWT_GH_PRS/$1.context-author-underscore"; }
+# pr_context_author_app <number> — the combined view call reports a GitHub
+# App's bot login as `app/<name>`, gh's real shape for a bot-authored PR's
+# author (https://github.com/cli/cli/pull/14543), which the author check
+# must accept.
+pr_context_author_app() { : >"$PWT_GH_PRS/$1.context-author-app"; }
+# pr_context_author_app_malformed <number> — a slash-bearing login that is
+# NOT the `app/<name>` shape, proving the author check isn't loosened to
+# accept any slash.
+pr_context_author_app_malformed() { : >"$PWT_GH_PRS/$1.context-author-app-malformed"; }
+# pr_context_base_invalid <number> — the combined view call reports a base
+# branch name that fails git check-ref-format --branch.
+pr_context_base_invalid() { : >"$PWT_GH_PRS/$1.context-base-invalid"; }
+# pr_context_path <worktree-name> — pr-context.md's path for a managed
+# worktree's directory name (branch with / as -), matching where pwt writes
+# it: <primary git-common-dir>/pwt/sessions/<name>/pr-context.md.
+pr_context_path() { printf '%s\n' "$PRIMARY/.git/pwt/sessions/$1/pr-context.md"; }
+# pr_session_dir <worktree-name> — the session folder itself, for the
+# symlink-guard and remove/prune tests.
+pr_session_dir() { printf '%s\n' "$PRIMARY/.git/pwt/sessions/$1"; }
 
 pr_state() {
   local branch=$1 state=$2 oid=${3:-} cross=${4:-false}
@@ -895,9 +1265,17 @@ new_commit_on() {
 }
 
 seed_leftover_branch() {
-  local branch=$1 relation=$2 base local_sha
-  if git -C "$PRIMARY" worktree list --porcelain |
-    grep -qxF "branch refs/heads/$branch"; then
+  local branch=$1 relation=$2 base local_sha wt_list
+
+  # Captured into a variable and matched via a here-string, not piped straight
+  # into `grep -q`: `-q` closes its input the instant it finds a match, and
+  # piping a large `git worktree list` (this suite accumulates many by the
+  # time this runs) straight into that risks git getting SIGPIPE'd before it
+  # finishes writing — under `pipefail` that turns a REAL match into a
+  # false-negative failure here, non-deterministically. A here-string has no
+  # second process to SIGPIPE.
+  wt_list=$(git -C "$PRIMARY" worktree list --porcelain)
+  if grep -qxF "branch refs/heads/$branch" <<<"$wt_list"; then
     return 1
   fi
   base=$(cached_object "$branch") || return 1
@@ -1199,6 +1577,7 @@ check_not_contains 'pwt help omits yolo mode' 'yolo' "$help_text"
 # A phrase from the naming paragraph, not the bare --name flag: the synopsis
 # lines alone would keep this green with the whole paragraph deleted.
 check_output 'help documents session naming' 'naming the session' pwt help
+check_output 'usage documents --no-review' '--no-review' pwt help
 check_output 'an unknown subcommand is reported as unknown' \
   'unknown command' pwt definitely-not-a-command
 check_fails 'an unknown subcommand exits non-zero' pwt definitely-not-a-command
@@ -2301,8 +2680,8 @@ check_equals 'pr still launches after the fork warning' \
 
 pr_meta 103 feat/pr-passthrough false
 launch_reset
-pwt pr 103 -- --no-session --model 'space value' '' >/dev/null 2>&1
-check_equals 'permitted PR arguments stay unchanged before policy' \
+pwt pr 103 --no-review -- --no-session --model 'space value' '' >/dev/null 2>&1
+check_equals 'permitted PR arguments stay unchanged before policy (--no-review)' \
   '10' "$(launched argc)"
 check_arg_equals 'PR launch names the session before permitted arguments' 0 '--name'
 check_arg_equals 'PR launch names the session PR-103 before permitted arguments' \
@@ -2483,9 +2862,9 @@ section 'pr-policy'
 
 pr_meta 121 feat/pr-policy false
 launch_reset
-check 'PR launch accepts ordinary model, thinking, and prompt arguments' \
-  pwt pr 121 -- --model 'model value' --thinking high 'prompt value'
-check_equals 'PR launch adds the session name and exactly four enforcement tokens' \
+check 'PR launch accepts ordinary model, thinking, and prompt arguments (--no-review)' \
+  pwt pr 121 --no-review -- --model 'model value' --thinking high 'prompt value'
+check_equals 'PR launch adds the session name and exactly four enforcement tokens (--no-review)' \
   '11' "$(launched argc)"
 check_arg_equals 'PR launch names the session before forwarded arguments' 0 '--name'
 check_arg_equals 'PR launch names the session PR-121 before forwarded arguments' \
@@ -2506,8 +2885,8 @@ check_fails 'PR policy does not append the short context-disable alias' \
   launched_has_arg '-nc'
 
 launch_reset
-check 'reused PR worktrees receive the same launch policy' \
-  pwt pr 121 -- --provider google
+check 'reused PR worktrees receive the same launch policy (--no-review)' \
+  pwt pr 121 --no-review -- --provider google
 check_equals 'reused PR launch keeps permitted arguments before policy' \
   '8' "$(launched argc)"
 check_arg_equals 'reused PR launch names the session before permitted arguments' \
@@ -2522,12 +2901,12 @@ check_arg_equals 'reused PR launch appends no-approve last' 7 '--no-approve'
 
 launch_reset
 dash_value_status=0
-dash_value_out=$(pwt pr 121 -- --name -review \
+dash_value_out=$(pwt pr 121 --no-review -- --name -review \
   --system-prompt --approve 2>&1) || dash_value_status=$?
 if [ "$dash_value_status" -eq 0 ]; then
-  ok 'PR policy preserves dash-leading values using Pi parser semantics'
+  ok 'PR policy preserves dash-leading values using Pi parser semantics (--no-review)'
 else
-  not_ok "PR policy preserves dash-leading values using Pi parser semantics ($dash_value_out)"
+  not_ok "PR policy preserves dash-leading values using Pi parser semantics (--no-review) ($dash_value_out)"
 fi
 check_equals 'dash-leading values remain before the enforced suffix' \
   '10' "$(launched argc)"
@@ -2548,8 +2927,8 @@ check_arg_equals 'dash-leading value launch still appends no-approve last' \
   9 '--no-approve'
 
 launch_reset
-check 'PR policy permits audited policy-neutral Pi flags' \
-  pwt pr 121 -- --no-session --offline -p 'review prompt'
+check 'PR policy permits audited policy-neutral Pi flags (--no-review)' \
+  pwt pr 121 --no-review -- --no-session --offline -p 'review prompt'
 check_equals 'audited flags remain before the policy suffix' \
   '10' "$(launched argc)"
 check_arg_equals 'audited flags launch names the session first' 0 '--name'
@@ -2564,8 +2943,8 @@ check_arg_equals 'audited flag launch still appends policy last' \
 launch_reset
 # Pi treats a three-dash token after --print as its prompt, not as an option.
 # This catches a validator that scans the prompt as an unknown flag instead.
-check 'PR policy preserves Pi print prompts beginning with three dashes' \
-  pwt pr 121 -- -p '--- review this change'
+check 'PR policy preserves Pi print prompts beginning with three dashes (--no-review)' \
+  pwt pr 121 --no-review -- -p '--- review this change'
 check_equals 'three-dash print prompts remain before the policy suffix' \
   '8' "$(launched argc)"
 check_arg_equals 'three-dash print launch names the session first' 0 '--name'
@@ -2579,8 +2958,8 @@ check_arg_equals 'three-dash print launch still appends policy last' \
 launch_reset
 # Pi leaves a dash-leading invalid TUI value for its next parser iteration.
 # This catches a validator that skips a hidden policy override as that value.
-check 'PR policy accepts a valid TUI mode' \
-  pwt pr 121 -- --tui-mode fullscreen
+check 'PR policy accepts a valid TUI mode (--no-review)' \
+  pwt pr 121 --no-review -- --tui-mode fullscreen
 check_equals 'valid TUI mode remains before the policy suffix' \
   '8' "$(launched argc)"
 check_arg_equals 'valid TUI mode launch names the session first' 0 '--name'
@@ -2591,8 +2970,8 @@ check_arg_equals 'valid TUI mode launch still appends policy last' \
   7 '--no-approve'
 
 launch_reset
-check 'PR policy accepts a non-RPC output mode' \
-  pwt pr 121 -- --mode json
+check 'PR policy accepts a non-RPC output mode (--no-review)' \
+  pwt pr 121 --no-review -- --mode json
 check_equals 'non-RPC output mode remains before the policy suffix' \
   '8' "$(launched argc)"
 check_arg_equals 'non-RPC mode launch names the session first' 0 '--name'
@@ -2672,6 +3051,11 @@ for reserved_command in auth install remove uninstall update list config; do
     "$reserved_command"
 done
 check_pr_policy_rejects 'PR policy rejects dangling value-taking options' --model
+# check_pr_policy_rejects runs in review mode (no --no-review), so --skill and
+# --prompt-template below pass this loop via validate_pr_launch_args's
+# review-mode refusal, not via the dangling-value check this loop otherwise
+# exercises for every other option — confirmed separately under --no-review
+# below, where that refusal no longer applies and the real dangling check runs.
 for value_option in \
   --provider --api-key --system-prompt --append-system-prompt \
   --name -n --models --thinking --skill \
@@ -2680,6 +3064,14 @@ for value_option in \
     "PR policy rejects dangling value-taking option $value_option" \
     "$value_option"
 done
+
+launch_reset
+check_fails 'pr --no-review refuses a dangling --skill value' \
+  pwt pr 121 --no-review -- --skill
+check_equals 'a dangling --skill under --no-review never launches pi' '' "$(launched pwd)"
+check_output 'the dangling --skill refusal under --no-review names the real diagnostic' \
+  'needs a value after Pi option: --skill' \
+  pwt pr 121 --no-review -- --skill
 
 # Pi migrates a project .pi/commands directory before it creates the agent
 # session. PR launch must refuse that write even when the directory is tracked.
@@ -3104,7 +3496,15 @@ dirty_tracking_head=$(git -C "$PRIMARY" rev-parse \
 printf 'dirty\n' >>"$MANAGED/feat-pr-reuse-dirty/README.md"
 force_advance_pr_head feat/pr-reuse-dirty >/dev/null
 launch_reset
+# Snapshotted before the refusal, not just asserted absent afterward: an
+# earlier `pwt pr 302` call above already made one real review-comments
+# request, so counting is what proves THIS refused call made no new one — a
+# bare "does the log contain this" would trivially pass on that earlier
+# call's entry alone, whether or not this ordering guard exists.
+dirty_api_calls_before=$(grep -c 'pulls/302/comments' "$PWT_GH_API_LOG" || true)
 check_fails 'pr refuses a dirty reused worktree before refresh' pwt pr 302
+check_equals 'the dirty refusal never reached the review-comments fetch' \
+  "$dirty_api_calls_before" "$(grep -c 'pulls/302/comments' "$PWT_GH_API_LOG" || true)"
 check_equals 'dirty refusal preserves the worktree head' "$dirty_head" \
   "$(git -C "$MANAGED/feat-pr-reuse-dirty" rev-parse HEAD)"
 check_equals 'dirty refusal preserves the last verified head marker' "$dirty_head" \
@@ -3701,6 +4101,1144 @@ for candidate in "$MANAGED"/.pwt-pr-fetch.*; do
   fi
 done
 check_equals 'temporary PR fetch directories are cleaned up' '0' "$fetch_scratch_left"
+
+# --------------------------------------------------------- pr context file
+
+section 'pr context file'
+
+# --- basic write, ADR 0014 heading order, header head commit ---------------
+
+pr_meta 850 feat/ctx-basic false
+launch_reset
+pwt pr 850 >/dev/null 2>&1
+ctx_basic=$(pr_context_path feat-ctx-basic)
+check 'pr writes pr-context.md under .git/pwt/sessions/<name>' test -f "$ctx_basic"
+
+expected_headings='# Pull request #850
+## Description
+## Linked issues
+## Changed files
+## CI checks
+## Conversation comments
+## Reviews
+## Review comments
+## Diff'
+actual_headings=$(grep -E '^(# |## )' "$ctx_basic")
+check_equals "pr-context.md has the ADR 0014 headings in order" \
+  "$expected_headings" "$actual_headings"
+
+worktree_head=$(git -C "$MANAGED/feat-ctx-basic" rev-parse HEAD)
+header_head=$(sed -n 's/^- Head commit: //p' "$ctx_basic")
+check_equals 'pr-context.md header head commit equals the worktree HEAD' \
+  "$worktree_head" "$header_head"
+
+# The gh stub's review-comments default is the fixture's own per-page shape
+# ([[]], a single empty page, not a bare []); this is the one place that
+# default's joined-to-(none) rendering is checked for a PR with no other
+# review comments fixture at all.
+review_comments_default=$(awk '/^## Review comments$/{getline; print; exit}' "$ctx_basic")
+check_equals "a default PR's Review comments section renders (none)" \
+  '(none)' "$review_comments_default"
+
+# --- a moved head fails the fetch and leaves no file ------------------------
+
+pr_meta 851 feat/ctx-moved false
+pr_head_moved 851 '0000000000000000000000000000000000000009'
+launch_reset
+moved_out=$(pwt pr 851 2>&1)
+moved_rc=$?
+check 'pr fails and leaves no file when the PR head moves during the context fetch' \
+  test "$moved_rc" -ne 0
+check_contains 'the moved-head failure names "changed while fetching"' \
+  'changed while fetching' "$moved_out"
+check 'pr leaves no pr-context.md when the head moved during the fetch' \
+  test ! -f "$(pr_context_path feat-ctx-moved)"
+check 'pr never launches Pi when the head moved during the fetch' \
+  test -z "$(launched pwd)"
+
+# --- the SAME head-moved message fires even when only the FIRST combined
+# view call sees the moved head (an ABA change: away and back before the
+# final re-check), not just when the final re-check itself is stale -------
+
+pr_meta 8851 feat/ctx-aba false
+pr_head_initial_moved 8851 '0000000000000000000000000000000000000008'
+launch_reset
+aba_out=$(pwt pr 8851 2>&1)
+aba_rc=$?
+check 'pr fails when the head moved away and back before the final re-check (ABA)' \
+  test "$aba_rc" -ne 0
+check_contains 'the ABA failure also names "changed while fetching"' \
+  'changed while fetching' "$aba_out"
+check 'pr leaves no pr-context.md for the ABA head change' \
+  test ! -f "$(pr_context_path feat-ctx-aba)"
+
+# --- gh answering about the wrong pull request is refused, not rendered ----
+
+pr_meta 8852 feat/ctx-url-mismatch false
+pr_context_url_mismatch 8852
+launch_reset
+mismatch_out=$(pwt pr 8852 2>&1)
+mismatch_rc=$?
+check 'pr fails when the context fetch reports a different canonical URL' \
+  test "$mismatch_rc" -ne 0
+check 'pr leaves no pr-context.md for a mismatched canonical URL' \
+  test ! -f "$(pr_context_path feat-ctx-url-mismatch)"
+
+# --- gh returning a mismatched header scalar is refused, not rendered ------
+#
+# Each of these overrides exactly ONE header field the combined view call
+# reports, leaving every other field correct — proving each of
+# write_pr_context's pr_number/pr_head/pr_cross/pr_author/pr_base checks
+# fires on its own. Before these, deleting any one of those five checks
+# left no assertion in this suite failing, since nothing else inspects these
+# fields before they reach rendering.
+
+pr_meta 8853 feat/ctx-number-mismatch false
+pr_context_number_mismatch 8853
+launch_reset
+number_mismatch_out=$(pwt pr 8853 2>&1)
+number_mismatch_rc=$?
+check 'pr fails when the context fetch reports a different pull request number' \
+  test "$number_mismatch_rc" -ne 0
+check_contains 'that failure names the pull-request-number mismatch' \
+  'gh returned pull request #' "$number_mismatch_out"
+check 'pr leaves no pr-context.md for a mismatched pull request number' \
+  test ! -f "$(pr_context_path feat-ctx-number-mismatch)"
+
+pr_meta 8863 feat/ctx-headref-mismatch false
+pr_context_headref_mismatch 8863
+launch_reset
+headref_mismatch_out=$(pwt pr 8863 2>&1)
+headref_mismatch_rc=$?
+check 'pr fails when the context fetch reports a different head ref' \
+  test "$headref_mismatch_rc" -ne 0
+check_contains 'that failure names the head ref mismatch' \
+  'gh returned a different head ref' "$headref_mismatch_out"
+check 'pr leaves no pr-context.md for a mismatched head ref' \
+  test ! -f "$(pr_context_path feat-ctx-headref-mismatch)"
+
+pr_meta 8864 feat/ctx-cross-invalid false
+pr_context_cross_invalid 8864
+launch_reset
+cross_invalid_out=$(pwt pr 8864 2>&1)
+cross_invalid_rc=$?
+check 'pr fails when the context fetch reports a non-boolean fork flag' \
+  test "$cross_invalid_rc" -ne 0
+check_contains 'that failure names the invalid fork flag' \
+  'invalid fork flag' "$cross_invalid_out"
+check 'pr leaves no pr-context.md for a non-boolean fork flag' \
+  test ! -f "$(pr_context_path feat-ctx-cross-invalid)"
+
+pr_meta 8865 feat/ctx-author-invalid false
+pr_context_author_invalid 8865
+launch_reset
+author_invalid_out=$(pwt pr 8865 2>&1)
+author_invalid_rc=$?
+check 'pr fails when the context fetch reports an invalid author login' \
+  test "$author_invalid_rc" -ne 0
+check_contains 'that failure names the invalid author login' \
+  'invalid author login' "$author_invalid_out"
+check 'pr leaves no pr-context.md for an invalid author login' \
+  test ! -f "$(pr_context_path feat-ctx-author-invalid)"
+
+# A GitHub Enterprise managed-user login contains an underscore — the author
+# check must accept that, not just reject what it rejects.
+pr_meta 8866 feat/ctx-author-underscore false
+pr_context_author_underscore 8866
+launch_reset
+check 'pr succeeds when the author login contains an underscore (GHE managed user)' \
+  pwt pr 8866
+check 'pr-context.md exists for an underscore author login' \
+  test -f "$(pr_context_path feat-ctx-author-underscore)"
+
+# gh's real shape for a bot-authored PR's `.author.login` is `app/<name>`
+# (e.g. `app/dependabot`), not a bare login —
+# https://github.com/cli/cli/pull/14543. The author check must accept it,
+# and the review prompt must still fire for a bot-authored PR.
+pr_meta 8874 feat/ctx-author-app false
+pr_context_author_app 8874
+launch_reset
+check 'pr succeeds when the author login is a GitHub App bot (app/<name>)' \
+  pwt pr 8874
+ctx_8874=$(pr_context_path feat-ctx-author-app)
+check 'pr-context.md exists for a GitHub App bot author login' \
+  test -f "$ctx_8874"
+check_contains 'pr-context.md records the GitHub App bot author login' \
+  '- Author: app/dependabot' "$(cat "$ctx_8874")"
+app_prompt_index=$(($(launched argc) - 1))
+check_arg_equals 'pr sends the review prompt for a bot-authored PR' \
+  "$app_prompt_index" "/skill:pr-review 8874 $ctx_8874"
+
+# A malformed slash-bearing login that is NOT the `app/<name>` shape must
+# still be rejected — proving the fix doesn't loosen the regex to any slash.
+pr_meta 8875 feat/ctx-author-app-malformed false
+pr_context_author_app_malformed 8875
+launch_reset
+app_malformed_out=$(pwt pr 8875 2>&1)
+app_malformed_rc=$?
+check 'pr fails when the author login has a malformed slash-bearing prefix' \
+  test "$app_malformed_rc" -ne 0
+check_contains 'that failure names the invalid author login' \
+  'invalid author login' "$app_malformed_out"
+check 'pr leaves no pr-context.md for a malformed slash-bearing author login' \
+  test ! -f "$(pr_context_path feat-ctx-author-app-malformed)"
+
+pr_meta 8867 feat/ctx-base-invalid false
+pr_context_base_invalid 8867
+launch_reset
+base_invalid_out=$(pwt pr 8867 2>&1)
+base_invalid_rc=$?
+check 'pr fails when the context fetch reports an invalid base branch name' \
+  test "$base_invalid_rc" -ne 0
+check_contains 'that failure names the invalid base branch name' \
+  'invalid base branch name' "$base_invalid_out"
+check 'pr leaves no pr-context.md for an invalid base branch name' \
+  test ! -f "$(pr_context_path feat-ctx-base-invalid)"
+
+# --- a context-fetch failure keeps the new worktree; a retry reuses it -----
+
+pr_meta 852 feat/ctx-retry false
+pr_head_moved 852 '0000000000000000000000000000000000000009'
+launch_reset
+check_fails 'pr keeps the new worktree when the context fetch fails' pwt pr 852
+check 'the new worktree still exists after a failed context fetch' \
+  test -d "$MANAGED/feat-ctx-retry"
+rm -f "$PWT_GH_PRS/852.moved-head"
+launch_reset
+retry_out=$(pwt pr 852 2>&1)
+retry_rc=$?
+check 'a retry after a context-fetch failure succeeds by reusing the worktree' \
+  test "$retry_rc" -eq 0
+check_contains 'the retry actually took the reuse path, not a fresh checkout' \
+  'reusing existing worktree' "$retry_out"
+check 'the retried run wrote pr-context.md' \
+  test -f "$(pr_context_path feat-ctx-retry)"
+
+# --- reusing a worktree rewrites pr-context.md for the new head ------------
+
+pr_meta 853 feat/ctx-reuse-refresh false
+launch_reset
+pwt pr 853 >/dev/null 2>&1
+first_head=$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/853")
+first_ctx_head=$(sed -n 's/^- Head commit: //p' "$(pr_context_path feat-ctx-reuse-refresh)")
+check_equals 'the first pr run writes the initial head into pr-context.md' \
+  "$first_head" "$first_ctx_head"
+
+force_advance_pr_head feat/ctx-reuse-refresh >/dev/null
+assert_pr_oid_matches_remote 853
+launch_reset
+pwt pr 853 >/dev/null 2>&1
+new_head=$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/853")
+rewritten_ctx_head=$(sed -n 's/^- Head commit: //p' "$(pr_context_path feat-ctx-reuse-refresh)")
+check_equals 'pr on a reused worktree rewrites pr-context.md for the new head' \
+  "$new_head" "$rewritten_ctx_head"
+check_fails 'the reused worktree head really did change' \
+  test "$first_head" = "$new_head"
+
+# --- (none) for empty description, comments, and diff ----------------------
+# Description is empty only when BOTH title and body are empty — a PR with
+# a title but no body still has something worth showing.
+
+pr_meta 854 feat/ctx-empty false
+pr_title 854 ''
+pr_body 854 ''
+pr_diff 854 ''
+launch_reset
+pwt pr 854 >/dev/null 2>&1
+ctx_empty=$(pr_context_path feat-ctx-empty)
+none_count=$(awk '/^## (Description|Conversation comments|Diff)$/{getline; if ($0 == "(none)") c++} END{print c + 0}' "$ctx_empty")
+check_equals 'pr renders (none) for an empty title+body description, empty comments, and empty diff' \
+  '3' "$none_count"
+
+pr_meta 8854 feat/ctx-title-only false
+pr_body 8854 ''
+launch_reset
+pwt pr 8854 >/dev/null 2>&1
+ctx_title_only=$(pr_context_path feat-ctx-title-only)
+desc_title_only=$(awk '/^## Description$/{getline; print; exit}' "$ctx_title_only")
+check_fails 'pr renders fenced JSON, not (none), for a non-empty title with an empty body' \
+  test "$desc_title_only" = '(none)'
+
+# --- fencing a description containing its own triple-backtick line --------
+
+pr_meta 855 feat/ctx-fence false
+pr_body 855 'line one
+```
+should not close the section early
+```
+line three'
+launch_reset
+pwt pr 855 >/dev/null 2>&1
+ctx_fence=$(pr_context_path feat-ctx-fence)
+desc_fence=$(awk '/^## Description$/{getline; print; exit}' "$ctx_fence")
+check_contains 'pr fences a description containing a triple-backtick line so it cannot close the section' \
+  '````' "$desc_fence"
+
+# --- fence_for must count backticks through an invalid UTF-8 byte ----------
+#
+# `grep -oE` in a UTF-8 locale can silently find no match on a line containing
+# an invalid UTF-8 byte (this is the GNU/BSD grep behavior fence_for's
+# LC_ALL=C awk scan exists to avoid); undercounting there would pick
+# too-short a fence and let the content break out of it. This assertion DOES
+# toggle red/green against the OLD grep-based implementation when this suite
+# runs the way it actually runs, as `bash pwt-test.sh`: that subprocess
+# resolves `grep` to the real /usr/bin/grep, which undercounts this exact
+# input (confirmed: `grep -oE` on it exits 1, no match). The interactive
+# shell's own `grep` is a wrapper that wraps ugrep instead, which is lenient
+# here — but that wrapper is a shell FUNCTION, never inherited by a `bash
+# script.sh` subprocess, so it is not what the suite's own invocations see.
+pr_meta 8856 feat/ctx-fence-invalid-utf8 false
+pr_diff 8856 "$(printf '\xffbackticks: `````\nend')"
+launch_reset
+pwt pr 8856 >/dev/null 2>&1
+ctx_fence_utf8=$(pr_context_path feat-ctx-fence-invalid-utf8)
+diff_fence_utf8=$(awk '/^## Diff$/{getline; print; exit}' "$ctx_fence_utf8")
+check_equals 'pr fences a diff line with an invalid UTF-8 byte and a long backtick run' \
+  '``````' "$diff_fence_utf8"
+
+# --- fence_for's own awk scan failing aborts the render, not a silently
+# under-sized (or stale) fence ------------------------------------------------
+#
+# No real awk on any real machine actually fails here — every awk executes
+# fence_for's END block regardless of input. Exercised instead with a
+# substitute awk scoped to ONE invocation via a PATH prefix, not the whole
+# suite's shared PATH (which would also break the gh stub's own json_escape,
+# and every OTHER test's awk-based parsing of a rendered context file).
+#
+# The failure is triggered by CONTENT, not by matching fence_for's program
+# text: Description (rendered FIRST) succeeds normally and sets PR_FENCE for
+# real, then Diff (rendered LAST) is the one that fails. That ordering is
+# what makes this catch render_section's `|| exit 1` specifically — if only
+# the very first section ever failed, PR_FENCE would still be unset from
+# process start, and `set -u` would abort the render on its own regardless
+# of whether render_section propagates fence_for's failure at all.
+real_awk=$(command -v awk)
+broken_awk_dir=$TMP/broken-awk
+mkdir -p "$broken_awk_dir"
+cat >"$broken_awk_dir/awk" <<'STUB'
+#!/bin/sh
+case "$*" in
+  *RLENGTH*)
+    input=$(cat)
+    case "$input" in
+      *PWT_TEST_TRIGGER_AWK_FAIL*) exit 1 ;;
+      # "-1", not a non-arithmetic string: `$((longest + 1))` accepts it
+      # silently (arithmetic, not a variable reference), so removing the
+      # `[[ $longest =~ ^[0-9]+$ ]]` guard is what has to catch this, not
+      # `set -u` tripping over an unbound-variable reference in a bogus
+      # arithmetic expression (which a non-numeric WORD like "not-a-number"
+      # would trigger on its own, masking whether this guard exists at all).
+      *PWT_TEST_TRIGGER_AWK_NONNUMERIC*) printf -- '-1'; exit 0 ;;
+    esac
+    printf '%s' "$input" | "$PWT_TEST_REAL_AWK" "$@"
+    exit $?
+    ;;
+esac
+exec "$PWT_TEST_REAL_AWK" "$@"
+STUB
+chmod +x "$broken_awk_dir/awk"
+
+pr_meta 8868 feat/ctx-fence-awk-fails false
+pr_diff 8868 'PWT_TEST_TRIGGER_AWK_FAIL'
+launch_reset
+fence_awk_fail_out=$(PWT_TEST_REAL_AWK="$real_awk" PATH="$broken_awk_dir:$PATH" pwt pr 8868 2>&1)
+fence_awk_fail_rc=$?
+check "pr fails when fence_for's own awk scan fails on a LATER section, after an EARLIER one already set a real fence" \
+  test "$fence_awk_fail_rc" -ne 0
+check_contains 'that failure names the render, not a downstream symptom' \
+  "could not render pull request #8868's context" "$fence_awk_fail_out"
+check 'pr leaves no pr-context.md when fence_for cannot run' \
+  test ! -f "$(pr_context_path feat-ctx-fence-awk-fails)"
+
+# --- fence_for's own numeric guard, distinct from the awk-fails case above:
+# the awk process EXITS 0 and prints "-1" for $longest — arithmetically
+# valid (so `$((longest + 1))` and `set -u` both accept it without
+# complaint), just not what `^[0-9]+$` allows. Only the
+# `[[ $longest =~ ^[0-9]+$ ]]` guard — not the command substitution's own
+# `|| return 1`, and not an unbound-variable trip from a non-arithmetic
+# WORD like "not-a-number" — is what catches this.
+
+pr_meta 8872 feat/ctx-fence-nonnumeric false
+pr_diff 8872 'PWT_TEST_TRIGGER_AWK_NONNUMERIC'
+launch_reset
+fence_nonnumeric_out=$(PWT_TEST_REAL_AWK="$real_awk" PATH="$broken_awk_dir:$PATH" pwt pr 8872 2>&1)
+fence_nonnumeric_rc=$?
+check "pr fails when fence_for's longest-run scan returns non-numeric output" \
+  test "$fence_nonnumeric_rc" -ne 0
+check_contains 'that failure also names the render, not a downstream symptom' \
+  "could not render pull request #8872's context" "$fence_nonnumeric_out"
+check 'pr leaves no pr-context.md when fence_for returns a non-numeric length' \
+  test ! -f "$(pr_context_path feat-ctx-fence-nonnumeric)"
+
+# --- the initial combined view's own oid-FORMAT check fires before the
+# equality check, distinct from the ABA case above (which uses a validly
+# formatted but WRONG oid) --------------------------------------------------
+
+pr_meta 8871 feat/ctx-initial-oid-invalid false
+pr_head_initial_moved 8871 'not-a-valid-oid'
+launch_reset
+initial_oid_invalid_out=$(pwt pr 8871 2>&1)
+initial_oid_invalid_rc=$?
+check 'pr fails when the initial combined view reports an invalid head object ID' \
+  test "$initial_oid_invalid_rc" -ne 0
+check_contains 'that failure names the invalid head object ID' \
+  'invalid head object ID' "$initial_oid_invalid_out"
+check 'pr leaves no pr-context.md for an invalid initial head object ID' \
+  test ! -f "$(pr_context_path feat-ctx-initial-oid-invalid)"
+
+# --- gh pr checks exit-code rules -------------------------------------------
+
+pr_meta 856 feat/ctx-checks-pending false
+pr_checks 856 8 "check1	pending	url" ''
+launch_reset
+check 'pr writes the file when gh pr checks exits 8' pwt pr 856
+check 'pr-context.md exists for a pending checks run' \
+  test -f "$(pr_context_path feat-ctx-checks-pending)"
+
+pr_meta 857 feat/ctx-checks-failed false
+pr_checks 857 1 "check1	fail	1s	url" ''
+launch_reset
+check 'pr writes the file when gh pr checks exits 1 with output' pwt pr 857
+check 'pr-context.md exists for a failed-check run with output' \
+  test -f "$(pr_context_path feat-ctx-checks-failed)"
+
+pr_meta 8858 feat/ctx-checks-none-reported false
+pr_checks 8858 1 '' 'no checks reported on the a1b2c3d commit'
+launch_reset
+check 'pr writes the file when gh pr checks exits 1 with "no checks reported"' \
+  pwt pr 8858
+ctx_no_checks=$(pr_context_path feat-ctx-checks-none-reported)
+checks_section_none=$(awk '/^## CI checks$/{getline; print; exit}' "$ctx_no_checks")
+check_equals 'CI checks renders (none) when gh pr checks reports none configured' \
+  '(none)' "$checks_section_none"
+
+pr_meta 858 feat/ctx-checks-broken false
+pr_checks 858 1 '' 'gh: some other real failure'
+launch_reset
+check_fails 'pr fails when gh pr checks exits 1 with empty stdout and an error' \
+  pwt pr 858
+check 'pr leaves no pr-context.md when gh pr checks genuinely fails' \
+  test ! -f "$(pr_context_path feat-ctx-checks-broken)"
+
+# An exit code outside {0, 1, 8} is unconditionally fatal, even with
+# non-empty stdout — unlike exit 1, which is overloaded and only fatal when
+# stdout is also empty (see the exit-1 cases above). Mutation check: making
+# the `*)` arm of write_pr_context's checks-exit case succeed (falling
+# through like 0|8) leaves this the only assertion in the suite that fails.
+pr_meta 870 feat/ctx-checks-unknown-exit false
+pr_checks 870 4 "check1	error	1s	url" ''
+launch_reset
+unknown_checks_out=$(pwt pr 870 2>&1)
+unknown_checks_rc=$?
+check 'pr fails when gh pr checks exits with an unrecognized code even with output' \
+  test "$unknown_checks_rc" -ne 0
+check_contains 'that failure names the unrecognized exit code' \
+  '(exit 4)' "$unknown_checks_out"
+check 'pr leaves no pr-context.md when gh pr checks exits with an unrecognized code' \
+  test ! -f "$(pr_context_path feat-ctx-checks-unknown-exit)"
+
+# --- review comments use --paginate against the exact repo and host, WITHOUT
+# --slurp (real gh rejects --slurp combined with --jq outright) -------------
+
+pr_meta 860 feat/ctx-review-comments false
+launch_reset
+pwt pr 860 >/dev/null 2>&1
+api_call=$(grep 'pulls/860/comments' "$PWT_GH_API_LOG")
+check_contains 'pr requests review comments with --paginate' '--paginate' "$api_call"
+check_not_contains 'pr does not request review comments with --slurp' \
+  '--slurp' "$api_call"
+check_contains 'pr passes the PR host to gh api' \
+  '--hostname github.com' "$api_call"
+check_contains 'pr requests review comments scoped to the exact repository and PR' \
+  'repos/owner/project/pulls/860/comments' "$api_call"
+
+# --- a non-github.com origin pins gh api to ITS OWN host, not github.com --
+#
+# write_pr_context's own identity check (pr_url_identity) requires
+# PR_BASE_HOST to equal origin_host, so proving the pin is real means origin
+# itself must also be on the foreign host — not just the PR's URL — and the
+# checkout's real `git fetch` still has to succeed against it. `url.<base>.
+# insteadOf` can't do that: it rewrites the URL for EVERY consumer, including
+# `git remote get-url origin` (which pwt's own host derivation reads), so
+# origin would report the REAL host back, not the fake one. git's `file://`
+# transport instead ignores whatever authority precedes the path, so
+# `file://enterprise.example$REMOTE` fetches $REMOTE for real while `remote
+# get-url` still reports the literal host "enterprise.example" unmolested.
+# The 8859 fixture gets that same host in BOTH copies: the number-keyed
+# lookup the initial `gh pr view`/`gh pr checkout` calls read via meta_root,
+# and the full-URL lookup write_pr_context's own combined view call always
+# uses regardless of meta_root (see gh stub's `*/pull/*` override). Mutation
+# check: hard-coding `--hostname github.com` in the review-comments gh api
+# call passes every other assertion in this suite but fails this one.
+
+pr_meta 8859 feat/ctx-host-pin false
+sed 's#^url=https://github.com/#url=https://enterprise.example/#' \
+  "$PWT_GH_PRS/8859" >"$PWT_GH_PRS/8859.tmp"
+mv "$PWT_GH_PRS/8859.tmp" "$PWT_GH_PRS/8859"
+cp "$PWT_GH_PRS/8859" "$PWT_GH_OTHER_PRS/8859"
+git -C "$PRIMARY" remote set-url origin "file://enterprise.example$REMOTE"
+launch_reset
+check 'pr succeeds against a non-github.com origin' pwt pr 8859
+host_pin_call=$(grep 'pulls/8859/comments' "$PWT_GH_API_LOG")
+check_contains 'pr pins gh api to the PR host (enterprise.example)' \
+  '--hostname enterprise.example' "$host_pin_call"
+check_not_contains 'pr does not fall back to --hostname github.com' \
+  '--hostname github.com' "$host_pin_call"
+git -C "$PRIMARY" remote set-url origin "$REMOTE"
+
+# --- gh api --paginate --jq runs per PAGE, not slurped; write_pr_context
+# joins the per-comment lines into an array itself, so an empty PR renders
+# (none) and a two-page result is not left as a page-array wrapper ---------
+
+pr_meta 869 feat/ctx-review-comments-pages false
+pr_review_comments 869 '[[{"id":1,"body":"first page"}],[{"id":2,"body":"second page"}]]'
+launch_reset
+pwt pr 869 >/dev/null 2>&1
+ctx_pages=$(cat "$(pr_context_path feat-ctx-review-comments-pages)")
+check_contains 'pr joins two paginated pages into one list (first id present)' \
+  '"id":1' "$ctx_pages"
+check_contains 'pr joins two paginated pages into one list (second id present)' \
+  '"id":2' "$ctx_pages"
+check_not_contains 'pr does not leave a page-array wrapper in the rendered output' \
+  '[[' "$ctx_pages"
+
+# --- an explicit single-empty-page fixture also renders (none) -------------
+
+pr_meta 8860 feat/ctx-review-comments-empty-pages false
+pr_review_comments 8860 '[[]]'
+launch_reset
+pwt pr 8860 >/dev/null 2>&1
+ctx_empty_pages=$(pr_context_path feat-ctx-review-comments-empty-pages)
+review_comments_empty_pages=$(awk '/^## Review comments$/{getline; print; exit}' "$ctx_empty_pages")
+check_equals 'pr renders (none) for a review-comments fetch with zero comments' \
+  '(none)' "$review_comments_empty_pages"
+
+# --- Changed files truncation marker ----------------------------------------
+
+pr_meta 861 feat/ctx-truncated false
+pr_files 861 '[{"path":"a"},{"path":"b"}]' 2
+pr_changed_files 861 5
+launch_reset
+pwt pr 861 >/dev/null 2>&1
+ctx_truncated=$(cat "$(pr_context_path feat-ctx-truncated)")
+check_contains 'pr marks Changed files (truncated at N) when gh returns fewer files than changedFiles' \
+  '(truncated at 2)' "$ctx_truncated"
+# The marker is a trailing line AFTER the closing fence (see render_section),
+# not inside the fenced JSON block — confirmed by position, not just presence.
+changed_files_tail=$(awk '/^## Changed files$/{f=1; next} f && /^```+$/{n++; if (n==2) {getline; print; exit}}' \
+  "$(pr_context_path feat-ctx-truncated)")
+check_equals 'the truncation marker is the line right after the closing fence' \
+  '(truncated at 2)' "$changed_files_tail"
+
+# --- a non-numeric count from gh is refused before it reaches arithmetic ---
+
+pr_meta 8862 feat/ctx-nonnumeric-count false
+pr_issues 8862 '[]' 'not-a-number'
+launch_reset
+nonnumeric_out=$(pwt pr 8862 2>&1)
+nonnumeric_rc=$?
+check 'pr fails when gh returns a non-numeric issues count' \
+  test "$nonnumeric_rc" -ne 0
+# Not just check_fails: bash arithmetic on a non-numeric operand errors out
+# on its own further down (rendering "Linked issues"), so a bare exit-code
+# check would still pass with the validation loop deleted. The message is
+# what proves THIS check is what actually fired, not a downstream crash.
+check_contains 'the failure names the non-numeric field' \
+  'non-numeric issues_len' "$nonnumeric_out"
+check 'pr leaves no pr-context.md for a non-numeric count' \
+  test ! -f "$(pr_context_path feat-ctx-nonnumeric-count)"
+
+# --- a hard gh failure names --no-review and launches nothing --------------
+
+pr_meta 862 feat/ctx-diff-fails false
+pr_diff_fails 862
+launch_reset
+diff_fail_out=$(pwt pr 862 2>&1)
+diff_fail_rc=$?
+check 'pr exits non-zero when gh pr diff fails' test "$diff_fail_rc" -ne 0
+check_contains 'that failure names --no-review' '--no-review' "$diff_fail_out"
+check 'pr leaves no pr-context.md when gh pr diff fails' \
+  test ! -f "$(pr_context_path feat-ctx-diff-fails)"
+check 'pr leaves no temp context file when gh pr diff fails' \
+  test -z "$(find "$(pr_session_dir feat-ctx-diff-fails)" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)"
+check 'pr never launches Pi when gh pr diff fails' \
+  test -z "$(launched pwd)"
+
+# --- a stale pr-context.md is removed before a failing retry ----------------
+
+pr_meta 863 feat/ctx-stale false
+launch_reset
+pwt pr 863 >/dev/null 2>&1
+check 'a stale pr-context.md exists before the failing retry' \
+  test -f "$(pr_context_path feat-ctx-stale)"
+pr_diff_fails 863
+launch_reset
+pwt pr 863 >/dev/null 2>&1 || true
+check 'pr removes a stale pr-context.md before fetching, so a failed fetch leaves none' \
+  test ! -f "$(pr_context_path feat-ctx-stale)"
+
+# --- a stale pr-context.md that cannot be removed fails loudly -------------
+# `rm -f` on a directory prints an error and exits non-zero (it refuses
+# unconditionally, empty or not, without -r) but that exit status used to be
+# discarded outright — silently leaving the "stale" directory in place while
+# the rest of write_pr_context ran anyway.
+
+pr_meta 8857 feat/ctx-stale-dir false
+launch_reset
+pwt pr 8857 >/dev/null 2>&1
+stale_dir_path=$(pr_context_path feat-ctx-stale-dir)
+check 'a pr-context.md exists before being replaced with a directory' \
+  test -f "$stale_dir_path"
+rm -f "$stale_dir_path"
+mkdir -p "$stale_dir_path"
+touch "$stale_dir_path/occupant"
+launch_reset
+stale_dir_out=$(pwt pr 8857 2>&1)
+stale_dir_rc=$?
+check 'pr fails when a stale pr-context.md cannot be removed (it is a directory)' \
+  test "$stale_dir_rc" -ne 0
+check_contains 'the failure names the stale pr-context.md removal' \
+  'stale pr-context.md' "$stale_dir_out"
+check 'the occupied directory is left untouched, not blindly rm -rf-ed' \
+  test -f "$stale_dir_path/occupant"
+rm -rf "$stale_dir_path"
+
+# --- killing pwt mid-fetch relies on the EXIT trap, not explicit cleanup --
+#
+# Every explicit failure path in write_pr_context already does its own
+# `rm -f "$tmp"` before returning, so those paths would still pass with
+# PWT_PR_CONTEXT_TMP never wired into cleanup_on_exit at all. The only way
+# to exercise the trap itself is to kill the process while it is blocked
+# mid-fetch, before any explicit cleanup runs. Mutation check: dropping
+# `"${PWT_PR_CONTEXT_TMP:-}" "${PWT_PR_CHECKS_ERR_FILE:-}"` from
+# cleanup_on_exit's `rm -f` line leaves the temp file behind here, while
+# every other pr-context test still passes.
+
+pr_meta 8869 feat/ctx-trap-kill false
+pr_diff_hang 8869
+launch_reset
+pwt pr 8869 >"$TMP/pwt-trap-kill.out" 2>&1 &
+trap_pid=$!
+trap_session_dir=$(pr_session_dir feat-ctx-trap-kill)
+waited=0
+while [ -z "$(find "$trap_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)" ] && [ "$waited" -lt 100 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+check 'the temp context file exists while the fetch is blocked mid-flight' \
+  test -n "$(find "$trap_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)"
+# pwt (the test helper) backgrounds `pwt() { pwt_in ...; }` calling
+# `pwt_in() { (cd "$dir" && "$PWT" "$@"); }`, which is two process forks
+# deep from trap_pid ($!): the parens subshell, then the real script it
+# execs. Killing trap_pid itself only reaches the outer wrapper, not the
+# process actually holding the EXIT trap we're testing — so the real script
+# is found by its command line instead of by a fixed number of pgrep hops.
+# `-o` (oldest), not `| tail -1`: bash 3.2's subshell wrapper for
+# "cd ... && $PWT ..." also carries "$PWT pr 8869" in its own command line
+# under `ps`, so the pattern matches BOTH processes. `tail -1` picked
+# whichever one `pgrep` happened to print last — on this bash that is the
+# wrapper, not the execed script — and killing the wrapper never delivers
+# the signal to the process actually holding the EXIT trap. The real script
+# is reliably the older of the two.
+script_pid=$(pgrep -o -f "$PWT pr 8869")
+kill -TERM "${script_pid:-$trap_pid}" 2>/dev/null
+wait "$trap_pid" 2>/dev/null
+pr_diff_resume 8869
+check 'killing pwt mid-fetch leaves no temp context file behind (the EXIT trap cleaned it up)' \
+  test -z "$(find "$trap_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)"
+rm -f "$TMP/pwt-trap-kill.out"
+# The checkout itself completed before the kill (write_pr_context runs after
+# it); left in place it's just an inert worktree, but later sections assert
+# exact worktree/branch inventories, so it is cleaned up like every other
+# fixture in this suite.
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-trap-kill" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-trap-kill >/dev/null 2>&1
+
+# --- killing pwt mid-checks relies on the EXIT trap too, for the OTHER
+# temp file cleanup_on_exit registers (PWT_PR_CHECKS_ERR_FILE) — the
+# trap-kill test above only ever exercises PWT_PR_CONTEXT_TMP, because by
+# the time the diff call (where IT hangs) runs, the checks call is already
+# done and PWT_PR_CHECKS_ERR_FILE has already been cleared. Mutation check:
+# dropping "${PWT_PR_CHECKS_ERR_FILE:-}" from cleanup_on_exit's `rm -f`
+# line leaves the checks error temp file behind here while the trap-kill
+# test above still passes.
+
+pr_meta 8870 feat/ctx-checks-trap-kill false
+pr_checks_hang 8870
+launch_reset
+# The real TMPDIR is shared with every other process on the machine (and
+# with earlier, possibly-killed runs of this very suite); matched by name
+# pattern alone, a stale leftover from any of those would be mistaken for
+# THIS run's file. Snapshotting what already matches before launching, and
+# only accepting a name absent from that snapshot, is what makes this
+# specific to the file pwt just created.
+checks_err_before=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'pwt-pr-checks-err.*' 2>/dev/null)
+pwt pr 8870 >"$TMP/pwt-checks-trap-kill.out" 2>&1 &
+checks_trap_pid=$!
+waited=0
+checks_err_file=''
+while [ "$waited" -lt 100 ]; do
+  checks_err_after=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'pwt-pr-checks-err.*' 2>/dev/null)
+  checks_err_file=$(comm -13 <(printf '%s\n' "$checks_err_before" | sort) <(printf '%s\n' "$checks_err_after" | sort) | head -1)
+  [ -n "$checks_err_file" ] && break
+  sleep 0.1
+  waited=$((waited + 1))
+done
+check 'the checks error temp file exists while gh pr checks is blocked mid-flight' \
+  test -n "$checks_err_file"
+checks_script_pid=$(pgrep -o -f "$PWT pr 8870")
+kill -TERM "${checks_script_pid:-$checks_trap_pid}" 2>/dev/null
+wait "$checks_trap_pid" 2>/dev/null
+pr_checks_resume 8870
+check 'killing pwt mid-checks leaves no checks error temp file behind (the EXIT trap cleaned it up)' \
+  test ! -e "$checks_err_file"
+rm -f "$TMP/pwt-checks-trap-kill.out"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-checks-trap-kill" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-checks-trap-kill >/dev/null 2>&1
+
+# --- a pr-context.md symlink planted mid-fetch cannot redirect the final
+# move (L2): the move must never treat that destination as a directory to
+# move INTO, even though it is a symlink pointing at one -----------------
+
+pr_meta 871 feat/ctx-symlink-move false
+pr_diff_hang 871
+launch_reset
+pwt pr 871 >"$TMP/pwt-symlink-move.out" 2>&1 &
+move_pid=$!
+move_session_dir=$(pr_session_dir feat-ctx-symlink-move)
+waited=0
+while [ -z "$(find "$move_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)" ] && [ "$waited" -lt 100 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+evil_move_target="$TMP/evil-move-target"
+mkdir -p "$evil_move_target"
+ctx_move_path=$(pr_context_path feat-ctx-symlink-move)
+rm -f "$ctx_move_path"
+ln -s "$evil_move_target" "$ctx_move_path"
+pr_diff_resume 871
+wait "$move_pid"
+move_rc=$?
+check 'pr still succeeds when a symlink is planted at pr-context.md mid-fetch' \
+  test "$move_rc" -eq 0
+check 'pr refuses to write pull request context through a pr-context.md symlink (target stays empty)' \
+  test -z "$(ls -A "$evil_move_target" 2>/dev/null)"
+check 'pr-context.md is a real file, not the planted symlink, after the move' \
+  test -f "$ctx_move_path" -a ! -L "$ctx_move_path"
+rm -f "$TMP/pwt-symlink-move.out"
+
+# --- a REAL directory (not a symlink) planted at pr-context.md mid-fetch
+# defeats mv_no_target_directory's -T/-h guard — that flag only refuses a
+# symlink pointing at a directory, not an actual directory, so `mv` moves
+# the temp file INTO it and still exits 0. The post-mv `[[ -f ... ]]` check
+# is what has to catch THIS, since the symlink test above never exercises
+# it (there, -h/-T already prevents the move from landing inside the
+# planted target in the first place).
+
+pr_meta 8873 feat/ctx-dir-move false
+pr_diff_hang 8873
+launch_reset
+pwt pr 8873 >"$TMP/pwt-dir-move.out" 2>&1 &
+dirmove_pid=$!
+dirmove_session_dir=$(pr_session_dir feat-ctx-dir-move)
+waited=0
+while [ -z "$(find "$dirmove_session_dir" -maxdepth 1 -name '.pr-context.*' 2>/dev/null)" ] && [ "$waited" -lt 100 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+ctx_dirmove_path=$(pr_context_path feat-ctx-dir-move)
+rm -f "$ctx_dirmove_path"
+mkdir -p "$ctx_dirmove_path"
+touch "$ctx_dirmove_path/occupant"
+pr_diff_resume 8873
+wait "$dirmove_pid"
+dirmove_rc=$?
+check 'pr fails when a real directory is planted at pr-context.md mid-fetch' \
+  test "$dirmove_rc" -ne 0
+dirmove_out=$(cat "$TMP/pwt-dir-move.out")
+check_contains 'that failure names the non-regular-file landing, not a downstream symptom' \
+  'did not land as a regular file' "$dirmove_out"
+check 'the planted directory is still a directory, not replaced' \
+  test -d "$ctx_dirmove_path"
+check 'the planted directory still holds its original occupant, untouched' \
+  test -f "$ctx_dirmove_path/occupant"
+rm -rf "$TMP/pwt-dir-move.out" "$ctx_dirmove_path"
+
+# --- symlink guards, write path (ensure_session_folder) --------------------
+#
+# Each guard-test moves the real component aside, replaces it with a symlink
+# to a throwaway "evil" target, asserts the write refuses and the evil
+# target stays empty, then restores the real component so later tests in
+# this section see the same session tree as before. Mutation check: deleting
+# any one of refuse_symlinked_session_path's three `-L` guards makes exactly
+# the matching one of these three assertions fail (ensure_session_folder
+# would instead `mkdir -p` through the symlink and write into the evil
+# target, so "target stays empty" is the load-bearing assertion, not just
+# the exit code).
+
+pwt_git_dir="$PRIMARY/.git"
+pwt_dir="$pwt_git_dir/pwt"
+
+pr_meta 864 feat/ctx-symlink-pwt false
+rm -rf "$TMP/pwt-dir-backup"
+mv "$pwt_dir" "$TMP/pwt-dir-backup"
+evil_pwt=$TMP/evil-pwt-target
+mkdir -p "$evil_pwt"
+ln -s "$evil_pwt" "$pwt_dir"
+launch_reset
+check_fails 'pr refuses a symlinked pwt directory' pwt pr 864
+check 'a symlinked pwt directory leaves its target untouched' \
+  test -z "$(ls -A "$evil_pwt" 2>/dev/null)"
+rm -f "$pwt_dir"
+mv "$TMP/pwt-dir-backup" "$pwt_dir"
+
+pr_meta 865 feat/ctx-symlink-sessions false
+sessions_dir="$pwt_dir/sessions"
+rm -rf "$TMP/sessions-dir-backup"
+mv "$sessions_dir" "$TMP/sessions-dir-backup"
+evil_sessions=$TMP/evil-sessions-target
+mkdir -p "$evil_sessions"
+ln -s "$evil_sessions" "$sessions_dir"
+launch_reset
+check_fails 'pr refuses a symlinked sessions directory' pwt pr 865
+check 'a symlinked sessions directory leaves its target untouched' \
+  test -z "$(ls -A "$evil_sessions" 2>/dev/null)"
+rm -f "$sessions_dir"
+mv "$TMP/sessions-dir-backup" "$sessions_dir"
+
+# resolve_session_folder's containment check would ALSO refuse this symlink
+# (evil_name resolves outside the managed sessions root), so a bare
+# exit-code-and-untouched pair does not depend on refuse_symlinked_session_
+# path's own `-L "$name"` guard specifically — check_contains on the exact
+# message is what's covered only as a pair with that containment backup.
+pr_meta 866 feat/ctx-symlink-name false
+evil_name=$TMP/evil-name-target
+mkdir -p "$evil_name"
+ln -s "$evil_name" "$sessions_dir/feat-ctx-symlink-name"
+launch_reset
+symlink_name_out=$(pwt pr 866 2>&1)
+symlink_name_rc=$?
+check 'pr refuses a symlinked session folder' test "$symlink_name_rc" -ne 0
+check_contains 'pr names the symlinked session folder specifically' \
+  'refusing a symlinked session folder' "$symlink_name_out"
+check 'a symlinked session folder leaves its target untouched' \
+  test -z "$(ls -A "$evil_name" 2>/dev/null)"
+rm -f "$sessions_dir/feat-ctx-symlink-name"
+
+# --- remove/prune delete the session folder, including Pi session history --
+
+pr_meta 867 feat/ctx-remove-session false
+launch_reset
+pwt pr 867 >/dev/null 2>&1
+check 'the session folder exists before removal' \
+  test -d "$(pr_session_dir feat-ctx-remove-session)"
+# Simulates Pi's own session state living alongside pr-context.md: remove
+# must delete the WHOLE folder, not just the context file.
+printf 'session transcript\n' >"$(pr_session_dir feat-ctx-remove-session)/history.jsonl"
+check 'remove deletes the worktree session folder' pwt remove feat/ctx-remove-session
+check 'the session folder is gone after removal' \
+  test ! -d "$(pr_session_dir feat-ctx-remove-session)"
+check 'remove deletes Pi session history with the session folder' \
+  test ! -e "$(pr_session_dir feat-ctx-remove-session)/history.jsonl"
+
+launch_reset
+pwt new feat/ctx-remove-no-session >/dev/null 2>&1
+check 'remove succeeds when the session folder is absent' \
+  pwt remove feat/ctx-remove-no-session
+
+pr_meta 868 feat/ctx-prune-session false
+launch_reset
+pwt pr 868 >/dev/null 2>&1
+check 'the session folder exists before pruning' \
+  test -d "$(pr_session_dir feat-ctx-prune-session)"
+pr_state feat/ctx-prune-session MERGED
+pwt prune --yes >/dev/null 2>&1
+check 'prune deletes the pruned worktree session folder' \
+  test ! -d "$(pr_session_dir feat-ctx-prune-session)"
+
+# --- symlink guards, delete path (session_folder_if_present) ---------------
+#
+# Same shape as the write-path guards above, but exercised through `remove`.
+# remove_worktree calls refuse_symlinked_session_path (pwt:~1787) exactly
+# ONCE, and that one call checks all three components (pwt dir, sessions
+# dir, name) — before `git worktree remove` ever runs, not just before the
+# session folder's own delete afterward. So for ALL THREE of these, the
+# worktree itself must still exist after the refusal, proving `git worktree
+# remove` never ran. Mutation check: moving that check back to after `git
+# worktree remove` (its original position) makes all three worktree-survival
+# assertions below fail, not just the first.
+
+launch_reset
+pwt new feat/ctx-rm-symlink-pwt >/dev/null 2>&1
+rm -rf "$TMP/pwt-dir-backup"
+mv "$pwt_dir" "$TMP/pwt-dir-backup"
+evil_rm_pwt=$TMP/evil-rm-pwt-target
+mkdir -p "$evil_rm_pwt"
+ln -s "$evil_rm_pwt" "$pwt_dir"
+check_fails 'remove refuses a symlinked pwt directory' pwt remove feat/ctx-rm-symlink-pwt
+check 'a symlinked pwt directory leaves its target untouched on removal' \
+  test -z "$(ls -A "$evil_rm_pwt" 2>/dev/null)"
+check 'the worktree itself still exists — refused before git worktree remove ran' \
+  test -d "$MANAGED/feat-ctx-rm-symlink-pwt"
+rm -f "$pwt_dir"
+mv "$TMP/pwt-dir-backup" "$pwt_dir"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-rm-symlink-pwt" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-rm-symlink-pwt >/dev/null 2>&1
+
+launch_reset
+pwt new feat/ctx-rm-symlink-sessions >/dev/null 2>&1
+rm -rf "$TMP/sessions-dir-backup"
+mv "$sessions_dir" "$TMP/sessions-dir-backup"
+evil_rm_sessions=$TMP/evil-rm-sessions-target
+mkdir -p "$evil_rm_sessions"
+ln -s "$evil_rm_sessions" "$sessions_dir"
+check_fails 'remove refuses a symlinked sessions directory' pwt remove feat/ctx-rm-symlink-sessions
+check 'a symlinked sessions directory leaves its target untouched on removal' \
+  test -z "$(ls -A "$evil_rm_sessions" 2>/dev/null)"
+check 'the worktree itself still exists — refused before git worktree remove ran (sessions)' \
+  test -d "$MANAGED/feat-ctx-rm-symlink-sessions"
+rm -f "$sessions_dir"
+mv "$TMP/sessions-dir-backup" "$sessions_dir"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-rm-symlink-sessions" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-rm-symlink-sessions >/dev/null 2>&1
+
+launch_reset
+pwt new feat/ctx-rm-symlink-name >/dev/null 2>&1
+evil_rm_name=$TMP/evil-rm-name-target
+mkdir -p "$evil_rm_name"
+ln -s "$evil_rm_name" "$sessions_dir/feat-ctx-rm-symlink-name"
+# Same pairing as the pr-path guard above: the containment check in
+# resolve_session_folder is a backup for this one, so check_contains on the
+# exact message is what proves THIS guard specifically, not just its backup.
+symlink_rm_name_out=$(pwt remove feat/ctx-rm-symlink-name 2>&1)
+symlink_rm_name_rc=$?
+check 'remove refuses a symlinked session folder' test "$symlink_rm_name_rc" -ne 0
+check_contains 'remove names the symlinked session folder specifically' \
+  'refusing a symlinked session folder' "$symlink_rm_name_out"
+check 'a symlinked session folder leaves its target untouched on removal' \
+  test -z "$(ls -A "$evil_rm_name" 2>/dev/null)"
+check 'the worktree itself still exists — refused before git worktree remove ran (name)' \
+  test -d "$MANAGED/feat-ctx-rm-symlink-name"
+rm -f "$sessions_dir/feat-ctx-rm-symlink-name"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-ctx-rm-symlink-name" >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/ctx-rm-symlink-name >/dev/null 2>&1
+
+# ------------------------------------------------------------- pr review mode
+
+section 'pr review mode'
+
+# --- default review mode: skill pin, enforced suffix, prompt order ---------
+
+pr_meta 950 feat/review-prompt-basic false
+launch_reset
+pwt pr 950 >/dev/null 2>&1
+review_ctx_950=$(pr_context_path feat-review-prompt-basic)
+check_equals 'pr review mode launch has exactly ten argv elements' \
+  '10' "$(launched argc)"
+check_arg_equals 'pr review mode names the session first' 0 '--name'
+check_arg_equals 'pr review mode names the session PR-950' 1 'PR-950'
+check_arg_equals 'pr passes --no-skills before --skill in review mode' 2 '--no-skills'
+check_arg_equals \
+  'pr passes --no-skills --skill <physical personal pr-review path> before the enforced suffix' \
+  3 '--skill'
+check_arg_equals \
+  'pr passes the physical personal pr-review skill path before the enforced suffix' \
+  4 "$PR_REVIEW_SKILL_PHYSICAL"
+check_arg_equals 'pr disables extension discovery after the skill pin' 5 '--no-extensions'
+check_arg_equals 'pr policy appends the tool option after the skill pin' 6 '--tools'
+check_arg_equals 'pr policy limits tools to read-only after the skill pin' \
+  7 'read,grep,find,ls'
+check_arg_equals 'pr policy appends no-approve last in the enforced suffix' 8 '--no-approve'
+check_arg_equals \
+  'pr launches pi with /skill:pr-review <n> <context path> as the last argument' \
+  9 "/skill:pr-review 950 $review_ctx_950"
+# Adjacency, not just position: the suffix's own last token sits directly
+# before the prompt, with nothing else in between.
+suffix_before_prompt_index=$(($(launched argc) - 2))
+check_arg_equals 'pr keeps the enforced tool suffix as the last options before the prompt' \
+  "$suffix_before_prompt_index" '--no-approve'
+
+# --- reused worktree still sends the review prompt --------------------------
+
+launch_reset
+pwt pr 950 >/dev/null 2>&1
+check_equals 'pr on a reused worktree launches with exactly ten argv elements' \
+  '10' "$(launched argc)"
+check_arg_equals 'pr on a reused worktree names the session first' 0 '--name'
+check_arg_equals 'pr on a reused worktree names the session PR-950' 1 'PR-950'
+check_arg_equals 'pr on a reused worktree passes --no-skills before --skill in review mode' \
+  2 '--no-skills'
+check_arg_equals \
+  'pr on a reused worktree passes --skill before the physical personal pr-review path' \
+  3 '--skill'
+check_arg_equals \
+  'pr on a reused worktree passes the physical personal pr-review skill path before the enforced suffix' \
+  4 "$PR_REVIEW_SKILL_PHYSICAL"
+reused_prompt_index=$(($(launched argc) - 1))
+check_arg_equals 'pr on a reused worktree launches with the review prompt' \
+  "$reused_prompt_index" "/skill:pr-review 950 $review_ctx_950"
+
+# --- missing personal skill dies naming --no-review, never launches --------
+#
+# A real pr_meta fixture is required here, not just a numeric argument: the
+# resolver must die BEFORE any gh call, and without a fixture a broken
+# resolver would still exit non-zero via the unrelated "cannot resolve pull
+# request" failure further down, passing this check for the wrong reason.
+
+pr_meta 951 feat/review-prompt-missing-skill false
+launch_reset
+mv "$HOME/.agents/skills/pr-review" "$TMP/pr-review-skill-link-backup"
+missing_skill_out=$(pwt pr 951 2>&1)
+missing_skill_rc=$?
+mv "$TMP/pr-review-skill-link-backup" "$HOME/.agents/skills/pr-review"
+check 'pr exits non-zero naming --no-review when ~/.agents/skills/pr-review is missing, and never launches pi' \
+  test "$missing_skill_rc" -ne 0
+check_contains 'the missing personal skill failure names --no-review' \
+  '--no-review' "$missing_skill_out"
+check_equals 'a missing personal skill never launches pi' '' "$(launched pwd)"
+check 'a missing personal skill creates no worktree' \
+  test ! -d "$MANAGED/feat-review-prompt-missing-skill"
+
+# A present directory with no SKILL.md inside is refused the same way — the
+# requirement is the file, not merely the resolved path existing.
+launch_reset
+rm -f "$PR_REVIEW_SKILL_FIXTURE/SKILL.md"
+missing_md_out=$(pwt pr 951 2>&1)
+missing_md_rc=$?
+printf '# pr-review\n' >"$PR_REVIEW_SKILL_FIXTURE/SKILL.md"
+check 'pr exits non-zero when the personal pr-review skill has no SKILL.md' \
+  test "$missing_md_rc" -ne 0
+check_contains 'the missing SKILL.md failure names --no-review' \
+  '--no-review' "$missing_md_out"
+check_equals 'a missing SKILL.md never launches pi' '' "$(launched pwd)"
+
+# --- review mode refuses passthrough --skill / --no-skills / -ns -----------
+#
+# Each gets a real pr_meta fixture: without one, a broken refusal would still
+# exit non-zero (and never launch) via the unrelated "cannot resolve pull
+# request" failure, passing these checks for the wrong reason. With a real
+# fixture, a broken refusal runs the checkout through to a real `pi` launch.
+
+pr_meta 952 feat/review-prompt-refuse-skill false
+launch_reset
+check_fails 'pr refuses a passthrough --skill in review mode' \
+  pwt pr 952 -- --skill ./evil-skill
+check_equals 'a refused passthrough --skill never launches pi' '' "$(launched pwd)"
+
+pr_meta 953 feat/review-prompt-refuse-no-skills false
+launch_reset
+check_fails 'pr refuses a passthrough --no-skills in review mode' \
+  pwt pr 953 -- --no-skills
+check_equals 'a refused passthrough --no-skills never launches pi' '' "$(launched pwd)"
+
+pr_meta 958 feat/review-prompt-refuse-ns false
+launch_reset
+check_fails 'pr refuses a passthrough -ns in review mode' \
+  pwt pr 958 -- -ns
+check_equals 'a refused passthrough -ns never launches pi' '' "$(launched pwd)"
+
+pr_meta 962 feat/review-prompt-refuse-prompt-template false
+launch_reset
+check_fails 'pr refuses a passthrough --prompt-template in review mode' \
+  pwt pr 962 -- --prompt-template ./evil-template
+check_equals 'a refused passthrough --prompt-template never launches pi' '' "$(launched pwd)"
+
+# The refusal is specific to review mode, not a blanket ban on these flags —
+# --no-review must still accept them.
+pr_meta 957 feat/review-prompt-skill-override-no-review false
+launch_reset
+check 'a passthrough --skill is allowed under --no-review' \
+  pwt pr 957 --no-review -- --skill ./some-skill
+
+pr_meta 960 feat/review-prompt-no-skills-override-no-review false
+launch_reset
+check 'a passthrough --no-skills is allowed under --no-review' \
+  pwt pr 960 --no-review -- --no-skills
+
+pr_meta 961 feat/review-prompt-ns-override-no-review false
+launch_reset
+check 'a passthrough -ns is allowed under --no-review' \
+  pwt pr 961 --no-review -- -ns
+
+pr_meta 963 feat/review-prompt-template-override-no-review false
+launch_reset
+check 'a passthrough --prompt-template is allowed under --no-review' \
+  pwt pr 963 --no-review -- --prompt-template ./some-template
+
+# --- --no-review still refuses a symlinked session folder -------------------
+#
+# The symlink refusal happens inside ensure_session_folder via `die`, which
+# exits the whole process rather than returning a status finish_pr_context
+# could soften — this proves --no-review does not weaken it either. Modeled
+# on the remove-path symlink guard above (~4940).
+
+pr_meta 959 feat/review-prompt-no-review-symlink-name false
+evil_no_review_name=$TMP/evil-no-review-name-target
+mkdir -p "$evil_no_review_name"
+ln -s "$evil_no_review_name" "$(pr_session_dir feat-review-prompt-no-review-symlink-name)"
+launch_reset
+no_review_symlink_out=$(pwt pr 959 --no-review 2>&1)
+no_review_symlink_rc=$?
+check 'pr --no-review refuses a symlinked session folder' \
+  test "$no_review_symlink_rc" -ne 0
+check_contains 'the --no-review symlinked-session refusal names it specifically' \
+  'refusing a symlinked session folder' "$no_review_symlink_out"
+check_equals 'a refused symlinked session folder under --no-review never launches pi' \
+  '' "$(launched pwd)"
+check 'a symlinked session folder under --no-review leaves its target untouched' \
+  test -z "$(ls -A "$evil_no_review_name" 2>/dev/null)"
+rm -f "$(pr_session_dir feat-review-prompt-no-review-symlink-name)"
+
+# --- --no-review: no skill flags, no prompt, context still written ---------
+
+pr_meta 954 feat/review-prompt-no-review false
+launch_reset
+pwt pr 954 --no-review >/dev/null 2>&1
+ctx_954=$(pr_context_path feat-review-prompt-no-review)
+check 'pr --no-review still writes pr-context.md' test -f "$ctx_954"
+check_equals 'pr --no-review launches with no skill flags and no prompt and still writes pr-context.md' \
+  '6' "$(launched argc)"
+check_arg_equals 'pr --no-review still disables extension discovery' 2 '--no-extensions'
+check_arg_equals 'pr --no-review still appends the tool option' 3 '--tools'
+check_arg_equals 'pr --no-review still limits tools to read-only' 4 'read,grep,find,ls'
+check_arg_equals 'pr --no-review still appends no-approve last' 5 '--no-approve'
+check_fails 'pr --no-review never adds --no-skills' launched_has_arg '--no-skills'
+check_fails 'pr --no-review never adds --skill' launched_has_arg '--skill'
+check_fails 'pr --no-review never adds a review prompt' \
+  launched_has_arg "/skill:pr-review 954 $ctx_954"
+
+# --- --no-review: a context-fetch failure only warns, and still launches ---
+
+pr_meta 955 feat/review-prompt-fetch-fail false
+pr_head_moved 955 '0000000000000000000000000000000000000009'
+launch_reset
+fetch_fail_out=$(pwt pr 955 --no-review 2>&1)
+fetch_fail_rc=$?
+ctx_955=$(pr_context_path feat-review-prompt-fetch-fail)
+check 'pr --no-review still launches when the context fetch fails' \
+  test "$fetch_fail_rc" -eq 0
+check 'pr --no-review warns and launches when the context fetch fails, leaving no pr-context.md' \
+  test ! -f "$ctx_955"
+check_contains 'the --no-review warning names the actual fetch failure' \
+  'warning:' "$fetch_fail_out"
+check_not_contains 'the --no-review warning never mentions --no-review itself' \
+  '--no-review' "$fetch_fail_out"
+check_equals 'a failed fetch under --no-review still launches pi' \
+  "$MANAGED/feat-review-prompt-fetch-fail" "$(launched pwd)"
+check_fails 'a failed fetch under --no-review appends no review prompt either' \
+  launched_has_arg "/skill:pr-review 955 $ctx_955"
+
+# --- a literal `-- --no-review` is Pi's problem, not pwt's own flag ---------
+
+pr_meta 956 feat/review-prompt-literal-no-review false
+launch_reset
+no_review_literal_out=$(pwt pr 956 -- --no-review 2>&1)
+no_review_literal_rc=$?
+check 'pr <n> -- --no-review is rejected as a disallowed Pi option' \
+  test "$no_review_literal_rc" -ne 0
+check_contains 'the rejection names the disallowed --no-review option' \
+  'does not allow Pi option: --no-review' "$no_review_literal_out"
+check_equals 'a disallowed --no-review passthrough never launches pi' '' "$(launched pwd)"
 
 # ---------------------------------------------------------- worktree includes
 
@@ -5811,13 +7349,18 @@ if [ -f "$COMPLETION" ]; then
   else
     not_ok 'completion offers each supported flag to its owning command'
   fi
+  if printf '%s\n' "$pr_flags" | grep -qx -- '--no-review'; then
+    ok 'completion offers --no-review for pr'
+  else
+    not_ok 'completion offers --no-review for pr'
+  fi
 
   all_flags=''
   for sub in new branch open pr root list remove prune install help; do
     command_flags=$(complete_for pwt "$sub" operand '--')
     all_flags=$(printf '%s\n%s\n' "$all_flags" "$command_flags")
     case $sub in
-      pr) expected_flag='--force' ;;
+      pr) expected_flag=$'--force\n--no-review' ;;
       remove) expected_flag='--delete-branch' ;;
       prune) expected_flag='--yes' ;;
       *) expected_flag='' ;;

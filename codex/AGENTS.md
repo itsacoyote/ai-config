@@ -64,6 +64,6 @@ would understand the code without the comment, delete the comment.
 ## Skills
 
 Portable skills may accompany these conventions from the shared `agents/skills/` library,
-including `git-commit`, `branch-names`, `create-pr`, and `writing-skills`. If installed in
+including `git-commit`, `branch-names`, `create-pr`, `pr-review`, and `writing-skills`. If installed in
 this repository's `.agents/skills/` or in personal `~/.agents/skills`, Codex loads them
 automatically when the task matches; `$writing-skills` (and friends) invokes one explicitly.

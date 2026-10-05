@@ -48,7 +48,7 @@ and `clwt` will decline to manage it later.
 | `clwt new <type>/<slug>` | branch from the *current* origin default, create the worktree, launch |
 | `clwt branch <branch>` | check out an existing local or origin branch, launch |
 | `clwt open <branch>` | launch in an existing managed worktree |
-| `clwt pr <number> [--force]` | check a pull request out into a worktree, launch |
+| `clwt pr <number> [--force] [--no-review]` | check a pull request out into a worktree, launch |
 | `clwt root` | launch in the primary checkout |
 | `clwt remove <branch> [--delete-branch]` | remove a clean managed worktree |
 | `clwt prune [--yes]` | sweep worktrees whose branch has an already-merged PR; dry run without `--yes` |
@@ -76,6 +76,24 @@ equals that last verified head. `--force` never bypasses these reuse checks. Ign
 files such as `.env` survive; if the new PR tree would replace one, `clwt` refuses the refresh.
 For an older markerless PR worktree, verified native Git tracking permits only a fast-forward;
 rewritten history is refused because there is no last-verified head to trust yet.
+
+`clwt pr <n>` always fetches the pull request's context into `pr-context.md` in a session
+folder alongside the worktree (not inside it, so it never shows in `git status`), granting
+Claude read access to that folder with `--add-dir`; unless `--no-review`, it also sends a
+one-line `/pr-review <n> <path>` startup prompt — the review is already running when the
+session opens, no typing needed. `clwt remove`/`clwt prune` delete the session folder with
+the worktree. `--no-review` skips the prompt but still writes the file; a context-fetch
+failure then only warns instead of refusing to launch. Claude ranks a project subagent
+(`.claude/agents/<name>.md`) ABOVE a personal one of the same name — the opposite of its
+skill precedence — so a PR shipping its own `.claude/agents/pr-security.md` (or any other
+pass's subagent) could otherwise replace that pass of the review silently. `clwt pr`
+withholds the startup prompt (warning, not refusing to launch) when the PR's diff touches
+the top-level `.claude` directory, failing closed on a symlinked entry, a non-ASCII
+top-level name it cannot safely fold, or a base branch it cannot resolve; `--no-review`
+skips this guard entirely, since no prompt is sent either way. The guard cannot stop a PR
+from changing a root `CLAUDE.md` the session loads at startup; the fork warning `clwt`
+prints at launch is the only signal of that, so treat a fork PR's own `pr <n>` launch with
+the same caution as running any of its code.
 
 Tab completion autoloads in bash but not in zsh. If a zsh developer reports that `clwt <Tab>`
 does nothing, the fix is two lines in their `~/.zshrc` (see the README) — `~/.zshrc` is

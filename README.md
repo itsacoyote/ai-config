@@ -223,7 +223,7 @@ defect.
 | `clwt new <type>/<slug>` | branch from the **current** origin default, create the worktree, launch |
 | `clwt branch <branch>` | check out an existing local or origin branch, launch |
 | `clwt open <branch>` | launch in an existing managed worktree |
-| `clwt pr <number> [--force]` | check a pull request out into a worktree, launch (warns on forks) |
+| `clwt pr <number> [--force] [--no-review]` | check a pull request out into a worktree, launch (warns on forks) |
 | `clwt root` | launch in the primary checkout |
 | `clwt remove <branch> [--delete-branch]` | remove a clean managed worktree |
 | `clwt prune [--yes]` | sweep worktrees whose branch has a merged PR — dry run without `--yes` |
@@ -260,6 +260,14 @@ Every launching subcommand also passes `--name` to `claude`, naming the session 
 number (`PR-<n>`), the branch, or the primary checkout's current branch for `root` — branch
 names with slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it,
 since `claude` takes the last value it sees.
+
+`clwt pr <n>` always fetches the PR's context into `pr-context.md`, in a session folder
+alongside the worktree; unless `--no-review`, it also sends a one-line
+`/pr-review <n> <path>` startup prompt, so the session opens already reviewing.
+`--no-review` skips the prompt but still writes the file (a fetch failure then only warns
+instead of refusing to launch). `clwt remove`/`clwt prune` delete the session folder with
+the worktree. Details, including the residual AGENTS.md/CLAUDE.md risk, are in the
+[`clwt` skill](claude/skills/clwt/SKILL.md) and [ADR 0014](docs/decisions/0014-pr-context-handoff.md).
 
 ### Why it's a CLI and not a skill
 
@@ -504,7 +512,8 @@ This repo ships harness-specific configuration plus a portable Agent Skills libr
 - **[`claude/`](claude/)** — the full workflow library for Claude Code, linked
   **globally** by `link.sh` (see [Installing the library](#installing-the-library)).
 - **[`agents/`](agents/)** — portable Open Agent Skills shared by Codex and Pi, authored in
-  `agents/skills/`. Both harnesses auto-discover project `.agents/skills/` and personal
+  `agents/skills/` (currently `branch-names`, `create-pr`, `git-commit`, `pr-review`,
+  `writing-skills`). Both harnesses auto-discover project `.agents/skills/` and personal
   `~/.agents/skills/`; `link.sh` links the personal location.
 - **[`codex/`](codex/)** — Codex-specific `AGENTS.md` guidance, manually merged into a
   project when wanted. Skill installation is documented in [`codex/README.md`](codex/README.md).

@@ -60,7 +60,7 @@ source ~/.local/share/bash-completion/completions/pwt
 | `pwt new <type>/<slug>` | Create a branch from the current origin default, create its worktree, and launch Pi. |
 | `pwt branch <branch>` | Check out an existing local or origin branch and launch Pi. |
 | `pwt open <branch>` | Launch Pi in an existing managed worktree. |
-| `pwt pr <number> [--force]` | Check out a pull request and launch Pi with restricted model tools. |
+| `pwt pr <number> [--force] [--no-review]` | Check out a pull request and launch Pi with restricted model tools. |
 | `pwt root` | Launch Pi in the primary checkout. |
 | `pwt remove <branch> [--delete-branch]` | Remove a clean managed worktree. |
 | `pwt prune [--yes]` | Find worktrees with merged pull requests; `--yes` applies the dry run. |
@@ -107,10 +107,12 @@ merged pull request and remains a dry run unless `--yes` is present.
 
 Use `pwt pr` only for trusted pull requests under the local-user threat model. The model
 gets context files but only the `read`, `grep`, `find`, and `ls` tools. After validating
-forwarded arguments, `pwt` appends this policy as the final Pi arguments:
+forwarded arguments, `pwt` appends this policy as the final Pi options (in review mode,
+only the startup prompt follows it); in review mode (not `--no-review`) the skill pin
+comes first, so the full enforced tail is:
 
 ```text
---no-extensions --tools read,grep,find,ls --no-approve
+--no-skills --skill <personal pr-review skill path> --no-extensions --tools read,grep,find,ls --no-approve
 ```
 
 The validator rejects Pi commands and options that could change tools or trust, load an
@@ -122,6 +124,23 @@ This is a model-tool restriction, not an OS sandbox. Git checkout may run locall
 configured hooks or filters, allowed read tools can expose copied secrets to the model
 provider, and Pi still uses trusted global configuration. Review the pull request's source
 and local Git configuration before launching it.
+
+### Review startup and `pr-context.md`
+
+`pwt pr <n>` always fetches the PR's context into `pr-context.md`, in a session folder
+alongside the worktree; unless `--no-review`, it also sends a one-line
+`/skill:pr-review <n> <path>` startup prompt as the final argument, so the session opens
+already reviewing. `--no-review` skips the skill pin and the prompt but still writes the
+file; a context-fetch failure then only warns instead of refusing to launch. Because Pi keeps the
+first-discovered skill on a name collision, review mode also pins skill discovery to the
+personal `~/.agents/skills/pr-review` with `--no-skills --skill <path>` (above), so a PR
+shipping its own `.agents/skills/pr-review` cannot replace the review; if that personal
+skill is missing, `pwt pr` exits non-zero naming `--no-review`, and a passthrough
+`--skill`/`--no-skills`/`-ns`/`--prompt-template` is refused in review mode for the same reason.
+`pwt remove`/`pwt prune` delete the session folder with the worktree, including Pi's own
+conversation history for it. Even with the skill pinned, a PR can still change a root
+`AGENTS.md` that the launched session loads; the fork warning is the only signal of that,
+so treat a fork PR's own `pr <n>` launch with the same caution as running any of its code.
 
 ### Tests
 
