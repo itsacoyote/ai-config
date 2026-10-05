@@ -75,9 +75,11 @@ check_ref_absent() {
   fi
 }
 
+# Capture first: `grep -q` exiting early SIGPIPEs git and fails the pipeline.
 worktree_registered_at() {
-  git -C "$PRIMARY" worktree list --porcelain |
-    grep -qF "worktree $1"
+  local list
+  list=$(git -C "$PRIMARY" worktree list --porcelain) || return 1
+  [[ $'\n'$list$'\n' == *$'\n'"worktree $1"$'\n'* ]]
 }
 
 current_section=''
@@ -1859,7 +1861,8 @@ check_fails 'list fails closed when Git cannot enumerate worktrees' \
 check_output 'list reports the Git enumeration failure instead of an empty state' \
   'cannot list repository worktrees' pwt_git_fail worktree-list list
 
-if pwt list 2>&1 | grep -qF "$PRIMARY "; then
+list_output=$(pwt list 2>&1) || true
+if [[ $list_output == *"$PRIMARY "* ]]; then
   not_ok 'list does not present the primary checkout as a managed worktree'
 else
   ok 'list does not present the primary checkout as a managed worktree'
@@ -4092,7 +4095,8 @@ if [ -n "$partial_fetch_path" ]; then
   rm -rf "$partial_fetch_path"
 fi
 
-if git -C "$PRIMARY" worktree list --porcelain | grep -q 'pwt-pr-fetch'; then
+fetch_worktree_list=$(git -C "$PRIMARY" worktree list --porcelain) || true
+if [[ $fetch_worktree_list == *pwt-pr-fetch* ]]; then
   not_ok 'temporary PR fetch worktrees are cleaned up'
 else
   ok 'temporary PR fetch worktrees are cleaned up'
@@ -6216,19 +6220,10 @@ pwt_without_gh() { pwt_in_with_path "$PRIMARY" "$NOGH" "$@"; }
 branch_upstream() {
   git -C "$PRIMARY" for-each-ref --format='%(upstream)' "refs/heads/$1"
 }
-branch_log_lines() { if [ -f "$1" ]; then cat "$1"; fi; }
 # `pwt new` branches track origin/stable, whose tip the primary's HEAD lacks. A
 # branch cut from HEAD with no upstream exercises the HEAD rule instead.
 new_head_branch() {
   git -C "$PRIMARY" branch "$1" HEAD && pwt branch "$1" >/dev/null 2>&1
-}
-
-# Captures the list first: `grep -q` exiting early SIGPIPEs git, which fails
-# the pipeline under pipefail once enough worktrees exist.
-registered_worktree() {
-  local list
-  list=$(git -C "$PRIMARY" worktree list --porcelain) || return 1
-  [[ $list == *"worktree $1"* ]]
 }
 
 # check_branch_refusal <label> <branch> <tip> <status> <output> <branch-log>
@@ -6237,13 +6232,13 @@ check_branch_refusal() {
   dir="$MANAGED/$(printf '%s' "$branch" | tr '/' '-')"
   check "$label: exits non-zero" test "$status" -ne 0
   check "$label: keeps the worktree directory" test -d "$dir"
-  check "$label: keeps the worktree registered" registered_worktree "$dir"
+  check "$label: keeps the worktree registered" worktree_registered_at "$dir"
   check_equals "$label: keeps the branch at its tip" \
     "$tip" "$(git -C "$PRIMARY" rev-parse "refs/heads/$branch")"
   check_contains "$label: says dropping --delete-branch removes only the worktree" \
     'drop --delete-branch to remove only the worktree' "$out"
   check_equals "$label: never attempts a branch deletion" \
-    '' "$(branch_log_lines "$log")"
+    '' "$(cat "$log" 2>/dev/null)"
 }
 
 # A fresh `pwt new` branch sits at its upstream's tip: the shape `git branch -d`

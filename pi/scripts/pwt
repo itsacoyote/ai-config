@@ -1938,8 +1938,7 @@ remove_worktree() {
   note "removed $target"
 
   if ((delete_branch)); then
-    # predict_branch_delete already accepted this branch, so -d is expected to
-    # succeed; it stays as the guard against a branch moved since the check.
+    # Kept as the backstop if the prediction above was wrong.
     git -C "$primary" branch -d "$branch" ||
       die "removed worktree but could not safely delete branch: $branch"
     note "deleted branch $branch"
