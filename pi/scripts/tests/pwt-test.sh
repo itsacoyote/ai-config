@@ -6589,7 +6589,7 @@ sq_run feat/sq-lookup-fails pwt
 check_branch_refusal \
   'remove --delete-branch refuses before removing anything when the gh lookup fails' \
   feat/sq-lookup-fails "$sq_tip" "$sq_status" "$sq_out" "$SQ_LOG"
-check_contains 'the failed-lookup refusal says gh failed' 'gh could not' "$sq_out"
+check_contains 'the failed-lookup refusal says the state could not be determined' 'cannot determine the pull request state' "$sq_out"
 sq_cleanup feat/sq-lookup-fails
 
 sq_branch feat/sq-malformed
@@ -6620,8 +6620,7 @@ pwt pr 902 >/dev/null 2>&1
 git -C "$PRIMARY" update-ref -d refs/remotes/origin/feat/sq-recorded
 git -C "$PRIMARY" config --unset branch.feat/sq-recorded.remote || true
 git -C "$PRIMARY" config --unset branch.feat/sq-recorded.merge || true
-pr_state feat/sq-recorded MERGED '' true fork-owner fork-project \
-  https://github.com/owner/project/pull/902
+pr_state feat/sq-recorded MERGED
 check_equals 'fixture: the recorded PR URL marker is set' \
   https://github.com/owner/project/pull/902 \
   "$(git -C "$PRIMARY" config --get branch.feat/sq-recorded.worktree-pr-url)"
@@ -6652,6 +6651,9 @@ sq_out=$(
   pwt remove feat/sq-moves --delete-branch 2>&1
 ) || sq_status=$?
 sq_moved_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/sq-moves)
+check 'the moved-tip branch still exists' \
+  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/sq-moves
+check 'the moved-tip branch tip is readable' test -n "$sq_moved_tip"
 check 'remove --delete-branch keeps the branch when its tip moves after verification' \
   test "$sq_status" -ne 0
 check 'fixture: the tip moved during the GitHub lookup' \

@@ -1825,8 +1825,7 @@ resolve_removable() {
   resolved_worktree=$target
 }
 
-# Set by verified_pr_state on its success path so a caller running in this
-# shell can name the verified pull request.
+# Set by verified_pr_state for any identity-verified PR; visible only to callers in this shell.
 VERIFIED_PR_NUMBER=''
 
 # Appended to every refusal so the user knows the state and the way out.
@@ -1861,9 +1860,8 @@ predict_branch_delete() {
   die "refusing to delete branch $branch: cannot verify that it is merged into $ref; $BRANCH_REFUSAL_TAIL"
 }
 
-# Sets verified_tip and verified_pr in the caller, or dies. Reuses prune's
-# strict PR check. branch_pr_state runs in this shell, its state going through
-# a file, because a command substitution would discard VERIFIED_PR_NUMBER.
+# Runs branch_pr_state in this shell via a file: a command substitution would
+# discard VERIFIED_PR_NUMBER.
 verify_squash_merged() {
   local branch=$1 tip state rc=0
   tip=$(git -C "$primary" rev-parse --verify --quiet "refs/heads/$branch") ||
@@ -1879,7 +1877,7 @@ verify_squash_merged() {
   case $rc in
     0) ;;
     2) die "unexpected pull request record from gh for branch $branch; $BRANCH_REFUSAL_TAIL" ;;
-    *) die "gh could not look up the pull request for branch $branch; $BRANCH_REFUSAL_TAIL" ;;
+    *) die "cannot determine the pull request state for branch $branch; $BRANCH_REFUSAL_TAIL" ;;
   esac
   case $state in
     MERGED)
