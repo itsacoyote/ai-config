@@ -2391,10 +2391,41 @@ check_output 'prune distinguishes gh missing from gh unauthenticated' \
 check_output 'pr also reports gh missing from PATH' \
   'not on PATH' clwt_without_gh pr 101
 
-# remove --delete-branch decides whether `git branch -d` would accept the branch
-# BEFORE removing anything. Every refusal test asserts the hint tail rather than
-# git's own "not merged" wording: the tail is what proves clwt (and not an early
-# missing-binary failure under the stripped PATH) refused.
+check_fails 'prune rejects a positional argument' clwt prune something
+check_fails 'prune rejects an unknown flag' clwt prune --force
+
+# prune's containment, primary-checkout, and symlink guards were previously
+# unreachable: candidacy needs a MERGED state, and only feat/merged-* ever had a
+# state file, so every guarded case was filtered out by the *state* check long
+# before the guard mattered. Deleting any of the three left the suite green.
+# These put each guarded case into the merged-and-clean state — the only state
+# from which prune would actually delete — and assert survival.
+pr_state feat/stray MERGED
+primary_branch_now=$(cd "$PRIMARY" && git symbolic-ref --short HEAD)
+pr_state "$primary_branch_now" MERGED
+
+git -C "$PRIMARY" worktree add -q -b feat/link-target "$MANAGED/feat-link-target" 2>/dev/null
+git -C "$PRIMARY" worktree add -q -b feat/symlink-prune "$MANAGED/feat-symlink-prune" 2>/dev/null
+rm -rf "$MANAGED/feat-symlink-prune"
+ln -s "$MANAGED/feat-link-target" "$MANAGED/feat-symlink-prune"
+pr_state feat/symlink-prune MERGED
+
+clwt prune --yes >/dev/null 2>&1
+
+check 'prune never removes an unmanaged worktree even when its PR is merged' \
+  test -d "$UNMANAGED"
+check 'prune never removes the primary checkout even when its branch is merged' \
+  test -d "$PRIMARY"
+check 'prune never removes a symlinked worktree path even when its PR is merged' \
+  test -L "$MANAGED/feat-symlink-prune"
+check 'the symlink target survives too' test -d "$MANAGED/feat-link-target"
+
+rm -f "$MANAGED/feat-symlink-prune"
+rm -f "$CLWT_GH_STATES/feat-stray" "$CLWT_GH_STATES/feat-symlink-prune" \
+  "$CLWT_GH_STATES/$(printf '%s' "$primary_branch_now" | tr '/' '-')"
+
+# Refusal tests assert the hint tail, not git's wording: the stripped PATH can
+# fail early on a missing binary, and only the tail proves clwt itself refused.
 section 'remove --delete-branch decision'
 
 REAL_GIT=$(command -v git)
@@ -2523,6 +2554,8 @@ dd_cleanup feat/dd-unmerged
 
 # The merge check itself cannot run: fail closed, even though the tip IS in HEAD.
 dd_worktree feat/dd-cannot-check
+check_equals 'fixture: the cannot-check tip is in HEAD' 0 \
+  "$(dd_ancestor refs/heads/feat/dd-cannot-check HEAD)"
 make_failing_git 'merge-base'
 cannot_out=$(PATH="$FAILGIT:$NOGH" clwt_in "$PRIMARY" remove feat/dd-cannot-check --delete-branch 2>&1)
 cannot_rc=$?
@@ -2534,39 +2567,6 @@ check 'the cannot-check worktree is kept' test -d "$MANAGED/feat-dd-cannot-check
 check 'the cannot-check branch is kept' \
   git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/dd-cannot-check
 dd_cleanup feat/dd-cannot-check
-
-check_fails 'prune rejects a positional argument' clwt prune something
-check_fails 'prune rejects an unknown flag' clwt prune --force
-
-# prune's containment, primary-checkout, and symlink guards were previously
-# unreachable: candidacy needs a MERGED state, and only feat/merged-* ever had a
-# state file, so every guarded case was filtered out by the *state* check long
-# before the guard mattered. Deleting any of the three left the suite green.
-# These put each guarded case into the merged-and-clean state — the only state
-# from which prune would actually delete — and assert survival.
-pr_state feat/stray MERGED
-primary_branch_now=$(cd "$PRIMARY" && git symbolic-ref --short HEAD)
-pr_state "$primary_branch_now" MERGED
-
-git -C "$PRIMARY" worktree add -q -b feat/link-target "$MANAGED/feat-link-target" 2>/dev/null
-git -C "$PRIMARY" worktree add -q -b feat/symlink-prune "$MANAGED/feat-symlink-prune" 2>/dev/null
-rm -rf "$MANAGED/feat-symlink-prune"
-ln -s "$MANAGED/feat-link-target" "$MANAGED/feat-symlink-prune"
-pr_state feat/symlink-prune MERGED
-
-clwt prune --yes >/dev/null 2>&1
-
-check 'prune never removes an unmanaged worktree even when its PR is merged' \
-  test -d "$UNMANAGED"
-check 'prune never removes the primary checkout even when its branch is merged' \
-  test -d "$PRIMARY"
-check 'prune never removes a symlinked worktree path even when its PR is merged' \
-  test -L "$MANAGED/feat-symlink-prune"
-check 'the symlink target survives too' test -d "$MANAGED/feat-link-target"
-
-rm -f "$MANAGED/feat-symlink-prune"
-rm -f "$CLWT_GH_STATES/feat-stray" "$CLWT_GH_STATES/feat-symlink-prune" \
-  "$CLWT_GH_STATES/$(printf '%s' "$primary_branch_now" | tr '/' '-')"
 
 # -------------------------------------------------------------------- install
 

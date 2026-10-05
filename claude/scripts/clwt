@@ -1639,25 +1639,33 @@ resolve_removable() {
   resolved_worktree=$target
 }
 
-# Predicts `git branch -d`'s verdict BEFORE anything is removed, so a branch
-# it would refuse never leaves the worktree already gone. git merges against
-# the upstream when its ref exists and against HEAD otherwise — never both —
-# and HEAD here is the caller's, the same one the later `git branch -d` sees.
-#
-# Fail closed, each step in its own `if` (set -e): a missing branch or a
-# merge-base error (exit >1) must read as "not accepted", never as merged.
+# Appended to every refusal so the user knows the state and the way out.
+readonly BRANCH_REFUSAL_TAIL='nothing was removed (drop --delete-branch to remove only the worktree)'
+
+# Predicts `git branch -d` before anything is removed. -d checks the upstream
+# when its ref exists, else HEAD — never both — and HEAD is the caller's, as
+# for the later -d. Anything but a proven ancestor (incl. merge-base exit >1)
+# refuses. The status is captured in an `if` so set -e cannot abort on exit 1.
 refuse_branch_delete_if_unmerged() {
-  local branch=$1 upstream ref=HEAD
+  local branch=$1 upstream ref=HEAD rc=0
   upstream=$(git for-each-ref --format='%(upstream)' "refs/heads/$branch") ||
-    die "cannot read the upstream of branch $branch; nothing was removed (drop --delete-branch to remove only the worktree)"
+    die "cannot read the upstream of branch $branch; $BRANCH_REFUSAL_TAIL"
   if [[ -n $upstream ]] && git show-ref --verify --quiet "$upstream"; then
     ref=$upstream
   fi
-  if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null &&
-    git merge-base --is-ancestor "refs/heads/$branch" "$ref"; then
-    return 0
+  if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    if git merge-base --is-ancestor "refs/heads/$branch" "$ref"; then
+      return 0
+    else
+      rc=$?
+    fi
+  else
+    rc=2
   fi
-  die "refusing to delete branch $branch: not merged into $ref; nothing was removed (drop --delete-branch to remove only the worktree)"
+  if ((rc == 1)); then
+    die "refusing to delete branch $branch: not merged into $ref; $BRANCH_REFUSAL_TAIL"
+  fi
+  die "refusing to delete branch $branch: cannot verify that it is merged into $ref; $BRANCH_REFUSAL_TAIL"
 }
 
 # Reports what removal will destroy, then removes. Shared by remove and prune.
@@ -1694,8 +1702,7 @@ remove_worktree() {
   remove_session_folder "${target##*/}"
 
   if ((delete_branch)); then
-    # -d, not -D: the refusal above is only a prediction, and -d is the
-    # backstop if it was wrong.
+    # -d, not -D: backstop if the prediction above was wrong.
     git branch -d "$branch"
     note "deleted branch $branch"
   fi
