@@ -1817,6 +1817,38 @@ resolve_removable() {
   resolved_worktree=$target
 }
 
+# Appended to every refusal so the user knows the state and the way out.
+readonly BRANCH_REFUSAL_TAIL='nothing was removed (drop --delete-branch to remove only the worktree)'
+
+# Predicts `git branch -d` before anything is removed. -d checks the upstream
+# when its ref exists, else HEAD — never both — and runs in the primary, so
+# HEAD is the primary's. Returns 0 when -d will accept, 1 when the tip is
+# proven not an ancestor. Anything else, incl. merge-base exit >1, dies: a
+# check that could not run proves nothing.
+# Called after `!`, so errexit is off inside: every command checks its own status.
+predict_branch_delete() {
+  local branch=$1 upstream ref=HEAD rc=0
+  upstream=$(git -C "$primary" for-each-ref --format='%(upstream)' \
+    "refs/heads/$branch") ||
+    die "cannot read the upstream of branch $branch; $BRANCH_REFUSAL_TAIL"
+  if [[ -n $upstream ]] && git -C "$primary" show-ref --verify --quiet "$upstream"; then
+    ref=$upstream
+  fi
+  if git -C "$primary" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    if git -C "$primary" merge-base --is-ancestor "refs/heads/$branch" "$ref"; then
+      return 0
+    else
+      rc=$?
+    fi
+  else
+    rc=2
+  fi
+  if ((rc == 1)); then
+    return 1
+  fi
+  die "refusing to delete branch $branch: cannot verify that it is merged into $ref; $BRANCH_REFUSAL_TAIL"
+}
+
 # Inspect local content, then repeat ownership at the final mutation boundary
 # before asking Git to remove anything.
 remove_worktree() {
@@ -1841,6 +1873,9 @@ remove_worktree() {
   refuse_hidden_index_state "$target"
   if worktree_is_dirty "$target"; then
     die "worktree has uncommitted or untracked work, refusing to remove: $target"
+  fi
+  if ((delete_branch)) && ! predict_branch_delete "$branch"; then
+    die "refusing to delete branch $branch: not merged into its upstream or HEAD; $BRANCH_REFUSAL_TAIL"
   fi
   ignored_after=$(worktree_ignored_files "$target") ||
     die "cannot list ignored files in $target; refusing to remove without knowing what would be destroyed"
@@ -1903,7 +1938,8 @@ remove_worktree() {
   note "removed $target"
 
   if ((delete_branch)); then
-    # -d, never -D: local commits must survive a requested branch cleanup.
+    # predict_branch_delete already accepted this branch, so -d is expected to
+    # succeed; it stays as the guard against a branch moved since the check.
     git -C "$primary" branch -d "$branch" ||
       die "removed worktree but could not safely delete branch: $branch"
     note "deleted branch $branch"

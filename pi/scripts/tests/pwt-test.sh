@@ -210,6 +210,9 @@ case ${PWT_TEST_GIT_FAIL:-} in
   ls-remote)
     case $args in *' ls-remote --symref origin HEAD '*) exit 70 ;; esac
     ;;
+  merge-base)
+    case $args in *' merge-base --is-ancestor '*) exit 70 ;; esac
+    ;;
   include-ls-files)
     case $args in
       *' ls-files --others --ignored --exclude-from='*) exit 70 ;;
@@ -6201,43 +6204,261 @@ if [ -d "$MANAGED/feat-remove-registration-moved" ]; then
 fi
 pwt remove feat/remove-registration-decoy >/dev/null 2>&1
 
-# Non-forcing branch deletion removes a fully merged branch but preserves a
-# clean branch containing local-only commits after its worktree is removed.
+# Branch deletion is decided before anything is removed. The refusal cases run
+# with gh off PATH so a later GitHub lookup cannot rescue them.
+NOGH="$TMP/nogh"
+mkdir -p "$NOGH"
+for binary in bash git sed tr head grep mktemp rm rmdir mkdir cat dirname basename awk wc sort cut; do
+  ln -s "$(command -v "$binary")" "$NOGH/$binary"
+done
+pwt_without_gh() { pwt_in_with_path "$PRIMARY" "$NOGH" "$@"; }
+
+branch_upstream() {
+  git -C "$PRIMARY" for-each-ref --format='%(upstream)' "refs/heads/$1"
+}
+branch_log_lines() { if [ -f "$1" ]; then cat "$1"; fi; }
+# `pwt new` branches track origin/stable, whose tip the primary's HEAD lacks. A
+# branch cut from HEAD with no upstream exercises the HEAD rule instead.
+new_head_branch() {
+  git -C "$PRIMARY" branch "$1" HEAD && pwt branch "$1" >/dev/null 2>&1
+}
+
+# Captures the list first: `grep -q` exiting early SIGPIPEs git, which fails
+# the pipeline under pipefail once enough worktrees exist.
+registered_worktree() {
+  local list
+  list=$(git -C "$PRIMARY" worktree list --porcelain) || return 1
+  [[ $list == *"worktree $1"* ]]
+}
+
+# check_branch_refusal <label> <branch> <tip> <status> <output> <branch-log>
+check_branch_refusal() {
+  local label=$1 branch=$2 tip=$3 status=$4 out=$5 log=$6 dir
+  dir="$MANAGED/$(printf '%s' "$branch" | tr '/' '-')"
+  check "$label: exits non-zero" test "$status" -ne 0
+  check "$label: keeps the worktree directory" test -d "$dir"
+  check "$label: keeps the worktree registered" registered_worktree "$dir"
+  check_equals "$label: keeps the branch at its tip" \
+    "$tip" "$(git -C "$PRIMARY" rev-parse "refs/heads/$branch")"
+  check_contains "$label: says dropping --delete-branch removes only the worktree" \
+    'drop --delete-branch to remove only the worktree' "$out"
+  check_equals "$label: never attempts a branch deletion" \
+    '' "$(branch_log_lines "$log")"
+}
+
+# A fresh `pwt new` branch sits at its upstream's tip: the shape `git branch -d`
+# accepts through the upstream while the primary's HEAD lacks the tip.
 launch_reset
-pwt new feat/unmerged-delete >/dev/null 2>&1
+pwt new feat/pd-merged >/dev/null 2>&1
+pd_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/pd-merged)
+check_equals 'fixture: the merged branch tracks origin/stable' \
+  refs/remotes/origin/stable "$(branch_upstream feat/pd-merged)"
+check 'fixture: the merged branch tip is contained in its upstream' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$pd_tip" refs/remotes/origin/stable
+check_fails 'fixture: the primary HEAD lacks the merged branch tip' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$pd_tip" HEAD
+: >"$PWT_GH_LOG"
+PD_LOG="$TMP/pd-merged-branch-log"
+rm -f "$PD_LOG"
+pd_status=0
+PWT_TEST_BRANCH_LOG="$PD_LOG" \
+  pwt remove feat/pd-merged --delete-branch >/dev/null 2>&1 || pd_status=$?
+check 'remove --delete-branch deletes a normally merged branch with -d without invoking gh' \
+  test "$pd_status" -eq 0
+check_ref_absent 'a normally merged branch is gone after remove --delete-branch' \
+  refs/heads/feat/pd-merged
+check_equals 'a normally merged branch never invokes gh' '' "$(cat "$PWT_GH_LOG")"
+check_contains 'a normally merged branch is deleted with -d' \
+  'branch -d feat/pd-merged' "$(cat "$PD_LOG")"
+check_not_contains 'a normally merged branch is never force-deleted' \
+  'branch -D' "$(cat "$PD_LOG")"
+
+launch_reset
+pwt new feat/pd-merged-nogh >/dev/null 2>&1
+check 'remove --delete-branch deletes a normally merged branch with gh off PATH' \
+  pwt_without_gh remove feat/pd-merged-nogh --delete-branch
+check_ref_absent 'gh off PATH: a normally merged branch is gone' \
+  refs/heads/feat/pd-merged-nogh
+
+# Merged into its upstream while the primary's HEAD lacks the tip: only the
+# upstream rule accepts it.
+launch_reset
+pwt new feat/pd-upstream >/dev/null 2>&1
+printf 'pushed\n' >"$MANAGED/feat-pd-upstream/pushed.txt"
+git -C "$MANAGED/feat-pd-upstream" add pushed.txt
+git -C "$MANAGED/feat-pd-upstream" commit -qm 'add pushed history'
+git -C "$MANAGED/feat-pd-upstream" push -q -u origin feat/pd-upstream
+pd_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/pd-upstream)
+check_fails 'fixture: the primary HEAD lacks the upstream-merged tip' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$pd_tip" HEAD
+check_equals 'fixture: the upstream ref is origin/<branch>' \
+  refs/remotes/origin/feat/pd-upstream "$(branch_upstream feat/pd-upstream)"
+check 'fixture: the upstream ref contains the tip' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$pd_tip" \
+  refs/remotes/origin/feat/pd-upstream
+: >"$PWT_GH_LOG"
+PD_LOG="$TMP/pd-upstream-branch-log"
+rm -f "$PD_LOG"
+pd_status=0
+PWT_TEST_BRANCH_LOG="$PD_LOG" \
+  pwt remove feat/pd-upstream --delete-branch >/dev/null 2>&1 || pd_status=$?
+check 'remove --delete-branch deletes a branch merged into its upstream with -d without invoking gh' \
+  test "$pd_status" -eq 0
+check_ref_absent 'a branch merged into its upstream is gone' \
+  refs/heads/feat/pd-upstream
+check_equals 'a branch merged into its upstream never invokes gh' \
+  '' "$(cat "$PWT_GH_LOG")"
+check_contains 'a branch merged into its upstream is deleted with -d' \
+  'branch -d feat/pd-upstream' "$(cat "$PD_LOG")"
+git -C "$PRIMARY" push -q origin --delete feat/pd-upstream
+git -C "$PRIMARY" update-ref -d refs/remotes/origin/feat/pd-upstream
+
+# The upstream is configured but its remote-tracking ref is gone: -d falls back
+# to HEAD, which contains the tip.
+launch_reset
+new_head_branch feat/pd-gone
+git -C "$MANAGED/feat-pd-gone" push -q -u origin feat/pd-gone
+git -C "$PRIMARY" update-ref -d refs/remotes/origin/feat/pd-gone
+git -C "$PRIMARY" push -q origin --delete feat/pd-gone
+pd_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/pd-gone)
+check_equals 'fixture: the gone upstream is still configured' \
+  refs/remotes/origin/feat/pd-gone "$(branch_upstream feat/pd-gone)"
+check_ref_absent 'fixture: the upstream ref itself is gone' \
+  refs/remotes/origin/feat/pd-gone
+check 'fixture: the primary HEAD contains the gone-upstream tip' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$pd_tip" HEAD
+: >"$PWT_GH_LOG"
+PD_LOG="$TMP/pd-gone-branch-log"
+rm -f "$PD_LOG"
+pd_status=0
+PWT_TEST_BRANCH_LOG="$PD_LOG" \
+  pwt remove feat/pd-gone --delete-branch >/dev/null 2>&1 || pd_status=$?
+check 'remove --delete-branch deletes a merged branch whose upstream ref is gone with -d without invoking gh' \
+  test "$pd_status" -eq 0
+check_ref_absent 'a merged branch with a gone upstream is deleted' \
+  refs/heads/feat/pd-gone
+check_equals 'a merged branch with a gone upstream never invokes gh' \
+  '' "$(cat "$PWT_GH_LOG")"
+
+# The primary's HEAD contains the tip but the upstream does not: -d checks the
+# upstream alone, so the two rules are not additive.
+launch_reset
+new_head_branch feat/pd-upstream-lacks
+pd_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/pd-upstream-lacks)
+pd_unrelated=$(git -C "$PRIMARY" commit-tree \
+  "$(git -C "$PRIMARY" hash-object -t tree /dev/null)" -m unrelated)
+git -C "$PRIMARY" update-ref refs/remotes/origin/feat/pd-upstream-lacks "$pd_unrelated"
+git -C "$PRIMARY" config branch.feat/pd-upstream-lacks.remote origin
+git -C "$PRIMARY" config branch.feat/pd-upstream-lacks.merge \
+  refs/heads/feat/pd-upstream-lacks
+check 'fixture: the primary HEAD contains the tip' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$pd_tip" HEAD
+check_fails 'fixture: the upstream ref lacks the tip' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$pd_tip" \
+  refs/remotes/origin/feat/pd-upstream-lacks
+PD_LOG="$TMP/pd-lacks-branch-log"
+rm -f "$PD_LOG"
+pd_status=0
+pd_out=$(
+  PWT_TEST_BRANCH_LOG="$PD_LOG" \
+    pwt_without_gh remove feat/pd-upstream-lacks --delete-branch 2>&1
+) || pd_status=$?
+check_branch_refusal \
+  'remove --delete-branch refuses and keeps the worktree when the upstream ref lacks the tip even though HEAD contains it' \
+  feat/pd-upstream-lacks "$pd_tip" "$pd_status" "$pd_out" "$PD_LOG"
+pwt remove feat/pd-upstream-lacks >/dev/null 2>&1
+git -C "$PRIMARY" update-ref -d refs/remotes/origin/feat/pd-upstream-lacks
+git -C "$PRIMARY" branch -D feat/pd-upstream-lacks >/dev/null 2>&1
+
+# Local-only commits: -d would refuse, so nothing is removed, including the
+# preparation marker and the session folder.
+launch_reset
+new_head_branch feat/unmerged-delete
 printf 'local history\n' >"$MANAGED/feat-unmerged-delete/local.txt"
 git -C "$MANAGED/feat-unmerged-delete" add local.txt
 git -C "$MANAGED/feat-unmerged-delete" commit -qm 'add local-only history'
 unmerged_head=$(git -C "$MANAGED/feat-unmerged-delete" rev-parse HEAD)
+check_fails 'fixture: the unmerged tip is not contained in the primary HEAD' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$unmerged_head" HEAD
+check_equals 'fixture: the unmerged branch has no upstream' \
+  '' "$(branch_upstream feat/unmerged-delete)"
+unmerged_marker="$PRIMARY/.git/pwt/preparing-feat-unmerged-delete"
+mkdir -p "$unmerged_marker"
+unmerged_session=$(pr_session_dir feat-unmerged-delete)
+mkdir -p "$unmerged_session"
+printf 'notes\n' >"$unmerged_session/keep.txt"
 UNMERGED_BRANCH_LOG="$TMP/unmerged-branch-log"
+rm -f "$UNMERGED_BRANCH_LOG"
 unmerged_status=0
 unmerged_out=$(
   PWT_TEST_BRANCH_LOG="$UNMERGED_BRANCH_LOG" \
-    pwt remove feat/unmerged-delete --delete-branch 2>&1
-) || \
-  unmerged_status=$?
-check 'remove reports failure when safe branch deletion rejects local history' \
-  test "$unmerged_status" -ne 0
-check 'safe branch deletion still removes the disposable worktree' \
-  test ! -e "$MANAGED/feat-unmerged-delete"
-check 'safe branch deletion preserves the unmerged local branch' \
-  git -C "$PRIMARY" show-ref --verify --quiet refs/heads/feat/unmerged-delete
-check_equals 'safe branch deletion preserves the exact local commit' \
-  "$unmerged_head" "$(git -C "$PRIMARY" rev-parse feat/unmerged-delete)"
-check_contains 'safe branch deletion explains its partial completion' \
-  'could not safely delete branch' "$unmerged_out"
-check_output 'runtime branch deletion uses the non-forcing form' \
-  'branch -d feat/unmerged-delete' cat "$UNMERGED_BRANCH_LOG"
+    pwt_without_gh remove feat/unmerged-delete --delete-branch 2>&1
+) || unmerged_status=$?
+check_branch_refusal \
+  'remove --delete-branch refuses unmerged local history and keeps the worktree' \
+  feat/unmerged-delete "$unmerged_head" "$unmerged_status" "$unmerged_out" \
+  "$UNMERGED_BRANCH_LOG"
+check_contains 'the unmerged-history refusal names the branch' \
+  'feat/unmerged-delete' "$unmerged_out"
+check 'the unmerged-history refusal keeps the preparation marker' \
+  test -d "$unmerged_marker"
+check 'the unmerged-history refusal keeps the session folder' \
+  test -f "$unmerged_session/keep.txt"
+check_equals 'the unmerged-history refusal keeps the committed file' \
+  'local history' "$(cat "$MANAGED/feat-unmerged-delete/local.txt")"
 
-# Source-level pins complement the behavioral unmerged-history assertion. The
-# exact negative spelling does not claim to recognize every possible force form.
-check 'remove uses Git non-forcing branch deletion' \
-  grep -qF 'branch -d "$branch"' "$PWT"
-if grep -qF 'branch -D "$branch"' "$PWT"; then
-  not_ok 'remove source omits the exact branch -D spelling'
-else
-  ok 'remove source omits the exact branch -D spelling'
-fi
+# A dirty worktree is refused for its own reason before the merge check runs.
+printf 'wip\n' >"$MANAGED/feat-unmerged-delete/wip.txt"
+dirty_status=0
+dirty_out=$(pwt_without_gh remove feat/unmerged-delete --delete-branch 2>&1) ||
+  dirty_status=$?
+check 'remove --delete-branch refuses a dirty worktree before checking whether the branch is merged' \
+  test "$dirty_status" -ne 0
+check_contains 'the dirty refusal names uncommitted work' \
+  'uncommitted or untracked work' "$dirty_out"
+check_not_contains 'the dirty refusal does not mention branch deletion' \
+  'refusing to delete branch' "$dirty_out"
+rm -f "$MANAGED/feat-unmerged-delete/wip.txt"
+rmdir "$unmerged_marker"
+rm -rf "$unmerged_session"
+pwt remove feat/unmerged-delete >/dev/null 2>&1
+git -C "$PRIMARY" branch -D feat/unmerged-delete >/dev/null 2>&1
+
+# A merge check that cannot run proves nothing about the branch.
+launch_reset
+new_head_branch feat/pd-cannot-check
+pd_tip=$(git -C "$PRIMARY" rev-parse refs/heads/feat/pd-cannot-check)
+check 'fixture: the branch would be accepted by -d' \
+  git -C "$PRIMARY" merge-base --is-ancestor "$pd_tip" HEAD
+PD_LOG="$TMP/pd-cannot-check-branch-log"
+rm -f "$PD_LOG"
+pd_status=0
+pd_out=$(
+  PWT_TEST_GIT_FAIL=merge-base PWT_TEST_BRANCH_LOG="$PD_LOG" \
+    pwt_without_gh remove feat/pd-cannot-check --delete-branch 2>&1
+) || pd_status=$?
+check_branch_refusal \
+  'remove --delete-branch refuses and keeps the worktree when the merge check cannot run' \
+  feat/pd-cannot-check "$pd_tip" "$pd_status" "$pd_out" "$PD_LOG"
+check_contains 'the cannot-check refusal says it could not verify' \
+  'cannot verify that it is merged' "$pd_out"
+pwt remove feat/pd-cannot-check --delete-branch >/dev/null 2>&1
+
+# Non-forcing deletion: the branch log shows -d and never -D for an accepted
+# branch.
+launch_reset
+pwt new feat/pd-nonforcing >/dev/null 2>&1
+PD_LOG="$TMP/pd-nonforcing-branch-log"
+rm -f "$PD_LOG"
+PWT_TEST_BRANCH_LOG="$PD_LOG" \
+  pwt remove feat/pd-nonforcing --delete-branch >/dev/null 2>&1
+check_contains 'remove --delete-branch uses non-forcing deletion for a merged branch' \
+  'branch -d feat/pd-nonforcing' "$(cat "$PD_LOG")"
+check_not_contains 'non-forcing deletion never uses -D' \
+  'branch -D' "$(cat "$PD_LOG")"
+check_equals 'non-forcing deletion makes exactly one branch call' \
+  1 "$(wc -l <"$PD_LOG" | tr -d ' ')"
+
 check 'remove status explicitly inspects dirty submodules' \
   grep -qF -- '--ignore-submodules=none' "$PWT"
 
@@ -6428,12 +6649,6 @@ check 'prune removes nothing while gh is unauthenticated' \
   test -d "$MANAGED/feat-prune-auth"
 rm -f "$PWT_GH_UNAVAILABLE"
 
-NOGH="$TMP/nogh"
-mkdir -p "$NOGH"
-for binary in bash git sed tr head grep; do
-  ln -s "$(command -v "$binary")" "$NOGH/$binary"
-done
-pwt_without_gh() { pwt_in_with_path "$PRIMARY" "$NOGH" "$@"; }
 missing_gh_status=0
 missing_gh_out=$(pwt_without_gh prune 2>&1) || missing_gh_status=$?
 check 'prune fails when gh is not on PATH' test "$missing_gh_status" -ne 0
