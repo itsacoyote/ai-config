@@ -313,7 +313,7 @@ if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
   # A hook that runs while the lookup is in flight, to model the branch moving
   # after clwt has verified it.
   if [ -f "$CLWT_GH_LIST/$list_key.run" ]; then
-    bash "$(cat "$CLWT_GH_LIST/$list_key.run")" || exit 96
+    bash -c "$(cat "$CLWT_GH_LIST/$list_key.run")" || exit 96
   fi
   if [ -f "$CLWT_GH_LIST/$list_key.json" ]; then
     list_json=$(cat "$CLWT_GH_LIST/$list_key.json")
@@ -2619,35 +2619,10 @@ dd_cleanup feat/dd-cannot-check
 # --- the merge check cannot run: gh must not be consulted -------------------
 # A check that could not run is "unknown", and GitHub's answer must not paper
 # over it. gh is on PATH here, so a lookup would be visible in the log.
-dd_worktree feat/dd-cannot-check-gh
-pl_reset() { rm -f "$CLWT_GH_LIST"/*; : >"$CLWT_GH_LIST_LOG"; }
-pl_reset
-make_failing_git 'merge-base'
-cannot_gh_out=$(PATH="$FAILGIT:$PATH" clwt_in "$PRIMARY" remove feat/dd-cannot-check-gh --delete-branch 2>&1)
-cannot_gh_rc=$?
-rm -f "$FAILGIT/git"
-check_equals 'remove --delete-branch refuses when the merge check cannot run even though gh is available: exit status' \
-  2 "$cannot_gh_rc"
-check_contains 'the cannot-check refusal with gh available says it cannot verify' 'cannot verify' "$cannot_gh_out"
-check_equals 'the cannot-check refusal never asked gh' '' "$(cat "$CLWT_GH_LIST_LOG")"
-check 'the cannot-check worktree with gh available is kept' test -d "$MANAGED/feat-dd-cannot-check-gh"
-dd_cleanup feat/dd-cannot-check-gh
-
-# A branch -d accepts never reaches GitHub, even with gh on PATH.
-dd_worktree feat/dd-merged-gh
-: >"$BRANCH_LOG"
-check 'remove --delete-branch deletes a normally merged branch when gh is available' \
-  clwt_in "$PRIMARY" remove feat/dd-merged-gh --delete-branch
-check_equals 'a normally merged branch never asked gh' '' "$(cat "$CLWT_GH_LIST_LOG")"
-dd_cleanup feat/dd-merged-gh
-
-# --- squash-merged branches: the GitHub check -------------------------------
-# A squash merge leaves the branch tip out of main, so `branch -d` refuses.
-# Fixture: commits on the branch, a different commit on local main, no
-# origin/<branch>, no upstream. main is restored after each case.
 
 # pl_rec <number> <state> <headRefName> <isCrossRepository> <headRefOid>;
-# <number> is emitted raw so a case can pass a quoted, malformed one.
+# <number> and <isCrossRepository> are emitted raw so a case can pass a quoted
+# or null one.
 pl_rec() {
   printf '{"number":%s,"state":"%s","headRefName":"%s","isCrossRepository":%s,"headRefOid":"%s"}' \
     "$1" "$2" "$3" "$4" "$5"
@@ -2662,6 +2637,35 @@ pl_set() {
   done
   printf '%s]' "$out" >"$CLWT_GH_LIST/$key.json"
 }
+pl_reset() { rm -f "$CLWT_GH_LIST"/*; : >"$CLWT_GH_LIST_LOG"; }
+
+dd_worktree feat/dd-cannot-check-gh
+pl_reset
+make_failing_git 'merge-base'
+cannot_gh_out=$(PATH="$FAILGIT:$PATH" clwt_in "$PRIMARY" remove feat/dd-cannot-check-gh --delete-branch 2>&1)
+cannot_gh_rc=$?
+rm -f "$FAILGIT/git"
+check_equals 'remove --delete-branch refuses when the merge check cannot run even though gh is available: exit status' \
+  2 "$cannot_gh_rc"
+check_contains 'the cannot-check refusal with gh available says it cannot verify' 'cannot verify' "$cannot_gh_out"
+check_equals 'the cannot-check refusal never asked gh' '' "$(cat "$CLWT_GH_LIST_LOG")"
+check 'the cannot-check worktree with gh available is kept' test -d "$MANAGED/feat-dd-cannot-check-gh"
+dd_cleanup feat/dd-cannot-check-gh
+
+# A branch -d accepts never reaches GitHub, even with gh on PATH.
+dd_worktree feat/dd-merged-gh
+pl_reset
+: >"$BRANCH_LOG"
+check 'remove --delete-branch deletes a normally merged branch when gh is available' \
+  clwt_in "$PRIMARY" remove feat/dd-merged-gh --delete-branch
+check_equals 'a normally merged branch never asked gh' '' "$(cat "$CLWT_GH_LIST_LOG")"
+dd_cleanup feat/dd-merged-gh
+
+# --- squash-merged branches: the GitHub check -------------------------------
+# A squash merge leaves the branch tip out of main, so `branch -d` refuses.
+# Fixture: commits on the branch, a different commit on local main, no
+# origin/<branch>, no upstream. main is restored after each case.
+
 main_before=$(git -C "$PRIMARY" rev-parse HEAD)
 sq_setup() {
   dd_worktree "$1"
@@ -2686,7 +2690,6 @@ sq_run() {
 sq_cleanup() {
   dd_cleanup "$1"
   git -C "$PRIMARY" reset -q --hard "$main_before"
-  pl_reset
 }
 # sq_expect_refusal <label> <needle> <branch> — after sq_run: nothing removed.
 sq_expect_refusal() {
@@ -2797,13 +2800,29 @@ sq_expect_refusal 'remove --delete-branch refuses when the PR number is malforme
   'unexpected pull request record' feat/sq-badnum
 sq_cleanup feat/sq-badnum
 
+# Each record below is malformed in exactly one field except the null case,
+# which shifts fields (an empty @tsv field collapses under IFS tab).
+# sq_bad_record <branch> <label> <state> <isCrossRepository> <oid|TIP>
+sq_bad_record() {
+  local oid=$5
+  sq_setup "$1"
+  if [[ $oid == TIP ]]; then oid=$sq_tip; fi
+  pl_set "$1" "$(pl_rec 51 "$3" "$1" "$4" "$oid")"
+  sq_run "$1"
+  sq_expect_refusal "$2" 'unexpected pull request record' "$1"
+  sq_cleanup "$1"
+}
+sq_bad_record feat/sq-badstate 'remove --delete-branch refuses when the PR state is not OPEN, CLOSED or MERGED' DRAFT false TIP
+sq_bad_record feat/sq-badcross 'remove --delete-branch refuses when isCrossRepository is not a boolean' MERGED '"maybe"' TIP
+sq_bad_record feat/sq-nullcross 'remove --delete-branch refuses when isCrossRepository is null' MERGED null TIP
+sq_bad_record feat/sq-badoid 'remove --delete-branch refuses when the head SHA is malformed' MERGED false abc1234
+
 # The lookup stub moves the branch after the record is read, so the tip clwt
 # verified is stale by the time the worktree is gone: the worktree goes, the
 # branch (now holding an unreviewed commit) stays.
 sq_setup feat/sq-moves
 pl_set feat/sq-moves "$(pl_rec 50 MERGED feat/sq-moves false "$sq_tip")"
-printf '%s\n' "git -C '$MANAGED/feat-sq-moves' commit -q --allow-empty -m 'after the check'" >"$TMP/sq-moves.sh"
-printf '%s' "$TMP/sq-moves.sh" >"$CLWT_GH_LIST/feat-sq-moves.run"
+printf '%s\n' "git -C '$MANAGED/feat-sq-moves' commit -q --allow-empty -m 'after the check'" >"$CLWT_GH_LIST/feat-sq-moves.run"
 sq_run feat/sq-moves
 check_equals 'remove --delete-branch keeps the branch when its tip moves after verification: exit status' \
   2 "$sq_rc"
@@ -2820,7 +2839,7 @@ touch "$CLWT_GH_UNAVAILABLE"
 prune_unauth_out=$(clwt_in "$PRIMARY" prune 2>&1)
 rm -f "$CLWT_GH_UNAVAILABLE"
 check_equals 'prune output is unchanged when gh is not authenticated' \
-  'clwt: prune needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)' \
+  "${CLWT##*/}: prune needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)" \
   "$prune_unauth_out"
 
 # -------------------------------------------------------------------- install
