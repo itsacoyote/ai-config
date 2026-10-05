@@ -46,6 +46,9 @@ Usage:
                                     check out a pull request, then launch
   cwt root [-- <args>]             launch in the primary checkout
   cwt remove <branch> [--delete-branch]
+                                    --delete-branch also deletes a squash-merged
+                                    branch when GitHub shows its merged PR at the
+                                    same commit (needs gh)
   cwt prune [--yes]                sweep worktrees whose branch has merged
   cwt install                      symlink cwt onto your PATH
   cwt help
@@ -58,6 +61,7 @@ Commands:
   root      Launch in the primary (non-worktree) checkout.
   list      List this repository's managed worktrees.
   remove    Remove a clean managed worktree; keep its branch by default.
+            --delete-branch deletes it if merged, or squash-merged per GitHub (gh).
   prune     Remove managed worktrees whose branch has an already-merged PR.
   install   Symlink this script to ~/.local/bin/cwt.
   help      Show this usage.
@@ -1640,8 +1644,8 @@ readonly BRANCH_REFUSAL_TAIL='nothing was removed (drop --delete-branch to remov
 # Predicts `git branch -d` before anything is removed. -d checks the upstream
 # when its ref exists, else HEAD — never both — and HEAD is the caller's, as
 # for the later -d. Returns 0 when -d will accept, 1 when the tip is proven
-# not an ancestor. Anything else, incl. merge-base exit >1, dies: a check that
-# could not run proves nothing.
+# not an ancestor (the only case worth asking GitHub about). Anything else,
+# incl. merge-base exit >1, dies: a check that could not run proves nothing.
 # Called after `!`, so errexit is off inside: every command checks its own status.
 predict_branch_delete() {
   local branch=$1 upstream ref=HEAD rc=0
@@ -1665,14 +1669,59 @@ predict_branch_delete() {
   die "refusing to delete branch $branch: cannot verify that it is merged into $ref; $BRANCH_REFUSAL_TAIL"
 }
 
+# Sets verified_tip/verified_pr, or dies. --head matches the branch name alone,
+# so a fork's same-named pull request comes back too.
+verify_squash_merged() {
+  local branch=$1 tip records num state head cross oid
+  local merged_same='' merged_other='' other_num='' other_state=''
+  tip=$(git rev-parse --verify --quiet "refs/heads/$branch") ||
+    die "cannot read the tip of branch $branch; $BRANCH_REFUSAL_TAIL"
+  require_gh 'remove --delete-branch' "; $BRANCH_REFUSAL_TAIL"
+  records=$(gh pr list --repo "$owner/$repo" --head "$branch" --state all --limit 100 \
+    --json number,state,headRefName,isCrossRepository,headRefOid \
+    --jq '.[] | [.number, .state, .headRefName, .isCrossRepository, .headRefOid] | @tsv') ||
+    die "gh could not list pull requests for $owner/$repo; $BRANCH_REFUSAL_TAIL"
+  # headRefOid stays last: an empty field collapses under IFS tab and shifts
+  # the rest left, which the oid check then catches.
+  while IFS=$'\t' read -r num state head cross oid; do
+    [[ -n $num$state$head$cross$oid ]] || continue
+    if [[ ! $num =~ ^[0-9]+$ ]] || [[ ! $state =~ ^(OPEN|CLOSED|MERGED)$ ]] ||
+      [[ ! $cross =~ ^(true|false)$ ]] || [[ ! $oid =~ ^[0-9a-f]{40,64}$ ]]; then
+      die "unexpected pull request record from gh for $owner/$repo; $BRANCH_REFUSAL_TAIL"
+    fi
+    [[ $head == "$branch" && $cross == false ]] || continue
+    if [[ $state == MERGED && $oid == "$tip" ]]; then
+      merged_same=$num
+    elif [[ $state == MERGED ]]; then
+      merged_other=$num
+    elif [[ -z $other_num ]]; then
+      other_num=$num
+      other_state=$state
+    fi
+  done <<<"$records"
+
+  if [[ -n $merged_same ]]; then
+    verified_tip=$tip
+    verified_pr=$merged_same
+    return 0
+  fi
+  if [[ -n $merged_other ]]; then
+    die "refusing to delete branch $branch: merged pull request #$merged_other has a different head than the local tip; $BRANCH_REFUSAL_TAIL"
+  fi
+  if [[ -n $other_num ]]; then
+    die "refusing to delete branch $branch: pull request #$other_num is $other_state, not merged; $BRANCH_REFUSAL_TAIL"
+  fi
+  die "refusing to delete branch $branch: no pull request for it in $owner/$repo; $BRANCH_REFUSAL_TAIL"
+}
+
 # Reports what removal will destroy, then removes. Shared by remove and prune.
 remove_worktree() {
   local target=$1 branch=$2 delete_branch=$3
   local -a doomed=()
-  local f
+  local f verified_tip='' verified_pr='' # set by verify_squash_merged
 
   if ((delete_branch)) && ! predict_branch_delete "$branch"; then
-    die "refusing to delete branch $branch: not merged into its upstream or HEAD; $BRANCH_REFUSAL_TAIL"
+    verify_squash_merged "$branch"
   fi
 
   # Checked before the worktree is touched, not just before the session
@@ -1701,9 +1750,18 @@ remove_worktree() {
   remove_session_folder "${target##*/}"
 
   if ((delete_branch)); then
-    # -d, not -D: backstop if the prediction above was wrong.
-    git branch -d "$branch"
-    note "deleted branch $branch"
+    if [[ -n $verified_pr ]]; then
+      # The worktree can gain a commit between the GitHub check and its
+      # removal; -D would destroy it.
+      [[ $(git rev-parse --verify --quiet "refs/heads/$branch") == "$verified_tip" ]] ||
+        die "removed the worktree but kept branch $branch: its tip moved after the pull request check"
+      git branch -D "$branch"
+      note "deleted squash-merged branch $branch (PR #$verified_pr)"
+    else
+      # -d, not -D: backstop if the prediction above was wrong.
+      git branch -d "$branch"
+      note "deleted branch $branch"
+    fi
   fi
 }
 
@@ -1719,11 +1777,11 @@ cmd_root() {
 # turns a broken gh into a silent "nothing to prune", or turns every PR-less
 # branch into a deletion candidate. Neither is acceptable for a bulk delete.
 require_gh() {
-  local what=$1
+  local what=$1 suffix=${2:-}
   command -v gh >/dev/null 2>&1 ||
-    die "$what needs gh to reach GitHub, but gh is not on PATH"
+    die "$what needs gh to reach GitHub, but gh is not on PATH$suffix"
   gh auth status >/dev/null 2>&1 ||
-    die "$what needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)"
+    die "$what needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)$suffix"
 }
 
 # MERGED / OPEN / CLOSED, or NONE when the branch has no pull request. Safe to
