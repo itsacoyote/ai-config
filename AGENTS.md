@@ -125,7 +125,7 @@ caught three guards that could be removed with the suite fully green — the des
 `prune` containment checks, a symlink guard whose test was rejected by a *different*
 check first, and a `git`-failure guard whose test ran against the wrong directory
 entirely. A passing suite is not evidence that an assertion tests what its name says.
-Two recurring causes, both worth checking directly:
+Recurring causes, each worth checking directly:
 
 - **A test that passes for the wrong reason.** It asserts the right outcome via the wrong
   path — an error message that matches a substring of an unrelated failure, a command
@@ -140,7 +140,13 @@ Two recurring causes, both worth checking directly:
   disabled. Mutating the feature off, not just the guard, is what exposed it; where a
   fixture must have a shape, assert that shape. Transport is the same trap: the suites'
   file-path remotes never invoke ssh, so ssh-behavior tests point origin at an `ssh://`
-  URL answered by a stub `ssh` on `PATH`.
+  URL answered by a stub `ssh` on `PATH`. The same applies to squash-merge fixtures: a
+  branch that still has `origin/<branch>` as its upstream passes `git branch -d` on its
+  own, so those fixtures drop the remote ref and assert the tip is not an ancestor.
+- **A helper that fails on success.** Under `pipefail`, `git … | grep -q` exits as soon as
+  it matches, git dies of SIGPIPE, and the pipeline reports failure — so a `check_fails`
+  "is not registered" assertion passed while the worktree was still there. Capture the
+  output first, then match.
 
 When an assertion exists to catch a specific regression, say so in a comment — including
 what it would *fail* to catch.
