@@ -57,6 +57,8 @@ and `clwt` will decline to manage it later.
 `--yolo` on any launching subcommand adds `--dangerously-skip-permissions`. Arguments after `--`
 pass through to `claude`: `clwt new feat/x --yolo -- --model opus`.
 
+`remove <branch> --delete-branch` deletes the branch with `git branch -d` when git sees it as merged (no `gh` needed). Otherwise, if GitHub reports a MERGED pull request for the branch whose head commit equals the local branch tip (a squash merge), it deletes with `git branch -D` and names the PR; this needs an authenticated `gh`. Any other case refuses and removes nothing; drop `--delete-branch` to remove only the worktree. If the branch gains a commit while the check runs, the worktree is still removed but the branch is kept. A pull request merged into a non-default base branch also counts as merged. `clwt` looks pull requests up with `--repo owner/repo`, so it asks github.com, or the host in `GH_HOST`, not the origin host; same-named pull requests from forks are never accepted.
+
 Every launching subcommand also passes `--name` to `claude`, naming the session after the PR
 number, branch, or the primary checkout's current branch for `root` — branch names with
 slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it.
