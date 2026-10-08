@@ -96,6 +96,8 @@ relative to its merge base with the base branch: unlike Claude, Codex does
 not rank a personal skill above a project one on a name collision, so a pull
 request shipping `.agents/skills/pr-review` could otherwise replace the
 review the prompt is about to start. It still launches either way.
+Unless `--no-review`, `cwt pr` first fetches the pull request's base branch
+from origin; if that fetch fails, it withholds the prompt and warns.
 
 It also withholds the prompt when the PR's checked-out `.agents`/`.codex` tree is
 unchanged from its own merge base but has since diverged from the base branch's current
@@ -1508,6 +1510,20 @@ pr_shadows_skills() {
   return 1
 }
 
+# Returns 0 (setting PR_SHADOW_REASON) when the review must be withheld. The
+# guard reads the local origin/<base> ref; a missing or stale ref would make it
+# fail closed or judge old data, so it must never run after a failed fetch.
+# git's stderr stays visible to tell an auth failure from a missing base.
+pr_review_withheld() {
+  local target=$1 base_ref=$2 head_oid=$3
+  if ! GIT_TERMINAL_PROMPT=0 remote_git -C "$target" fetch --quiet --no-tags origin \
+    "+refs/heads/$base_ref:refs/remotes/origin/$base_ref"; then
+    PR_SHADOW_REASON="has a base branch cwt could not fetch (origin/$base_ref)"
+    return 0
+  fi
+  pr_shadows_skills "$target" "$base_ref" "$head_oid"
+}
+
 # Decides what a `cwt pr` launch does with write_pr_context's outcome: whether
 # a fetch failure is fatal (per --no-review), and whether to send the startup
 # review prompt. Shared by the fresh-checkout and reused-worktree paths so
@@ -1517,7 +1533,9 @@ pr_shadows_skills() {
 # guard too, scoped to the top-level .claude directory: Claude ranks a
 # project subagent above a personal one (the opposite of its skill
 # precedence), so a pull request shipping .claude/agents/pr-security.md could
-# otherwise replace that pass of the auto-started /pr-review.
+# otherwise replace that pass of the auto-started /pr-review. Under
+# --no-review neither the base fetch nor the guard runs: no prompt is sent
+# either way.
 finish_pr_context() {
   local no_review=$1 number=$2 ctx_ok=$3 target=$4 base_ref=$5 head_oid=$6
   local msg="${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
@@ -1526,7 +1544,7 @@ finish_pr_context() {
     return 0
   fi
   ((ctx_ok)) || die "$msg; run 'cwt pr $number --no-review' to skip it"
-  if pr_shadows_skills "$target" "$base_ref" "$head_oid"; then
+  if pr_review_withheld "$target" "$base_ref" "$head_oid"; then
     warn "pull request #$number ${PR_SHADOW_REASON:-touches a path under .agents or .codex} — the review was not started automatically"
     return 0
   fi
