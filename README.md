@@ -267,8 +267,11 @@ since `claude` takes the last value it sees.
 alongside the worktree; unless `--no-review`, it also sends a one-line
 `/pr-review <n> <path>` startup prompt, so the session opens already reviewing.
 `--no-review` skips the prompt but still writes the file (a fetch failure then only warns
-instead of refusing to launch). `clwt remove`/`clwt prune` delete the session folder with
-the worktree. Details, including the residual AGENTS.md/CLAUDE.md risk, are in the
+instead of refusing to launch). Unless `--no-review`, `clwt pr` first fetches the PR's base
+branch from origin; if that fetch fails, it withholds the prompt and warns. When the review
+is withheld for any reason and stdin and stderr are both terminals, `clwt pr` waits for Enter
+before launching (Ctrl-D continues, Ctrl-C cancels). `clwt remove`/`clwt prune` delete the
+session folder with the worktree. Details, including the residual AGENTS.md/CLAUDE.md risk, are in the
 [`clwt` skill](claude/skills/clwt/SKILL.md) and [ADR 0014](docs/decisions/0014-pr-context-handoff.md).
 
 ### Why it's a CLI and not a skill

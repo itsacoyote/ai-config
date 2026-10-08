@@ -132,8 +132,11 @@ exists yet.
 alongside the worktree (never inside it, so it never shows in `git status`); unless
 `--no-review`, it also sends a one-line `$pr-review <n> <path>` startup prompt, so the
 session opens already reviewing. `--no-review` skips the prompt but still writes the file;
-a context-fetch failure then only warns instead of refusing to launch. `cwt remove`/`cwt
-prune` delete the session folder with the worktree. Unlike Claude, Codex does not rank a personal skill above a
+a context-fetch failure then only warns instead of refusing to launch. Unless `--no-review`,
+`cwt pr` first fetches the PR's base branch from origin; if that fetch fails, it withholds
+the prompt and warns. When the review is withheld for any reason and stdin and stderr are
+both terminals, `cwt pr` waits for Enter before launching (Ctrl-D continues, Ctrl-C
+cancels). `cwt remove`/`cwt prune` delete the session folder with the worktree. Unlike Claude, Codex does not rank a personal skill above a
 project one on a name collision, so `cwt pr` additionally withholds the prompt (warning
 instead, still launching) when the checked-out PR's diff against its merge base touches a
 path under `.agents` or `.codex` — a pull request could otherwise ship its own
