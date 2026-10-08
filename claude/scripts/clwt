@@ -92,6 +92,9 @@ refusing to launch. A symlink, containment, or mkdir refusal on the session
 folder itself stays fatal either way — that signals tampering, not a
 transient fetch failure.
 
+Unless `--no-review`, `clwt pr` first fetches the pull request's base branch
+from origin; if that fetch fails, it withholds the prompt and warns.
+
 `clwt pr` also withholds the prompt (and warns instead) when the pull
 request's own checked-out diff touches the top-level `.claude` directory
 relative to its merge base with the base branch: Claude ranks a project
@@ -1535,15 +1538,22 @@ finish_pr_context() {
     return 0
   fi
   ((ctx_ok)) || die "$msg; run 'clwt pr $number --no-review' to skip it"
-  if pr_shadows_skills "$target" "$base_ref" "$head_oid"; then
-    warn "pull request #$number ${PR_SHADOW_REASON:-touches a path under .claude} — the review was not started automatically"
+  # pr_shadows_skills reads the local refs/remotes/origin/<base>; a missing or
+  # stale ref made it fail closed or judge old data. It must not run after a
+  # failed fetch: a stale ref could still pass it. stderr stays visible, since
+  # git's message tells an auth failure from a missing base.
+  if ! GIT_TERMINAL_PROMPT=0 remote_git -C "$target" fetch --quiet --no-tags origin \
+    "+refs/heads/$base_ref:refs/remotes/origin/$base_ref"; then
+    PR_SHADOW_REASON="has a base branch clwt could not fetch (origin/$base_ref)"
+  elif ! pr_shadows_skills "$target" "$base_ref" "$head_oid"; then
+    # `--` fences the prompt from any variadic option already sitting at the end
+    # of LAUNCH_ARGS (a developer's own passthrough `--add-dir`, `--allowedTools`,
+    # etc.) so it is never read as one more value for that option instead of its
+    # own argument.
+    LAUNCH_ARGS+=(--add-dir "$SESSION_FOLDER" -- "/pr-review $number $SESSION_FOLDER/pr-context.md")
     return 0
   fi
-  # `--` fences the prompt from any variadic option already sitting at the end
-  # of LAUNCH_ARGS (a developer's own passthrough `--add-dir`, `--allowedTools`,
-  # etc.) so it is never read as one more value for that option instead of its
-  # own argument.
-  LAUNCH_ARGS+=(--add-dir "$SESSION_FOLDER" -- "/pr-review $number $SESSION_FOLDER/pr-context.md")
+  warn "pull request #$number ${PR_SHADOW_REASON:-touches a path under .claude} — the review was not started automatically"
 }
 
 reuse_pr_or_refuse() {
