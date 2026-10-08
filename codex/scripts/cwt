@@ -1533,9 +1533,11 @@ pr_shadows_skills() {
 # guard reads the local origin/<base> ref; a missing or stale ref would make it
 # fail closed or judge old data, so it must never run after a failed fetch.
 # git's stderr stays visible to tell an auth failure from a missing base.
+# Fetches from the primary checkout: a PR worktree's relative core.hooksPath
+# would run the PR's own hooks.
 pr_review_withheld() {
   local target=$1 base_ref=$2 head_oid=$3
-  if ! GIT_TERMINAL_PROMPT=0 remote_git -C "$target" fetch --quiet --no-tags origin \
+  if ! GIT_TERMINAL_PROMPT=0 remote_git -C "$primary" fetch --quiet --no-tags origin \
     "+refs/heads/$base_ref:refs/remotes/origin/$base_ref"; then
     PR_SHADOW_REASON="has a base branch cwt could not fetch (origin/$base_ref)"
     return 0

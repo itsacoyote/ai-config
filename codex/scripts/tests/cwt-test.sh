@@ -3330,6 +3330,32 @@ check_equals 'GIT_TERMINAL_PROMPT does not reach the launched session' '<unset>'
 check_equals 'the env-check PR still gets its review prompt' \
   "$(review_prompt_for 1009 feat-bf-env)" "$(launched_arg_list | tail -2)"
 
+# A relative core.hooksPath resolves against the working tree git runs in, so a
+# base fetch run from the PR's worktree would execute the PR's own hook. The
+# hook logs every ref update it sees; checkout steps may legitimately log other
+# refs, so the assertion is that none of them is the base ref.
+_fixture_add_exec_hook() {
+  local idx=$1 blob
+  blob=$(printf '#!/bin/sh\ncat >>"%s"\n' "$HOOK_LOG" | git -C "$SCRATCH_PUSH" hash-object -w --stdin)
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --add --cacheinfo "100755,$blob,.prhooks/reference-transaction"
+}
+HOOK_LOG="$TMP/pr-tree-hook.log"
+bf_hk=$(release_base release/hooks)
+bf_hk_head=$(with_fixture_tree "$bf_hk" 'add pr hook' _fixture_add_exec_hook)
+push_and_print feat/bf-hooks "$bf_hk_head" >/dev/null
+write_pr_meta 1011 feat/bf-hooks false "$bf_hk_head"
+pr_base 1011 release/hooks
+: >"$HOOK_LOG"
+git -C "$PRIMARY" config core.hooksPath .prhooks
+launch_reset
+cwt pr 1011 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset core.hooksPath
+check_equals 'the base fetch updated the base ref' "$bf_hk" "$(local_base_oid release/hooks)"
+check_not_contains "pr's base fetch does not run hooks from the pull request's tree" \
+  'refs/remotes/origin/release/hooks' "$(cat "$HOOK_LOG")"
+check_equals 'the hooks PR still gets its review prompt' \
+  "$(review_prompt_for 1011 feat-bf-hooks)" "$(launched_arg_list | tail -2)"
+
 # The reused-worktree path fetches the base too. --no-review creates the
 # worktree without fetching, so the base ref is still absent before the reuse.
 bf_reuse=$(release_base release/reuse)
