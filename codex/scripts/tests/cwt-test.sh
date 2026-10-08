@@ -84,6 +84,10 @@ section() {
 
 # ---------------------------------------------------------------- world setup
 
+# A run from a terminal must never block on a read: cwt pauses for Enter when it
+# skips a requested review. The pause tests give cwt a pty of their own.
+exec </dev/null
+
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/cwt-test.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -3164,11 +3168,11 @@ base_pr() {
   pr_base "$1" "$3"
 }
 
-# assert_review_skipped <number> <condition> — no prompt was sent and the session
-# still launched.
+# assert_review_skipped <condition> — no prompt was sent and the session still
+# launched.
 assert_review_skipped() {
-  check_equals "pr sends no review prompt $2" '' "$(launched args)"
-  check "pr still launches $2" test -n "$(launched pwd)"
+  check_equals "pr sends no review prompt $1" '' "$(launched args)"
+  check "pr still launches $1" test -n "$(launched pwd)"
 }
 
 review_prompt_for() { printf -- '--\n$pr-review %s %s' "$1" "$(pr_context_path "$2")"; }
@@ -3234,7 +3238,7 @@ launch_reset
 bf_gone_out=$(cwt pr 1004 2>&1)
 check_contains 'pr names the failed fetch when the base is gone from origin' 'could not fetch' "$bf_gone_out"
 check_contains 'the failed-fetch reason names the base ref' 'origin/release/gone' "$bf_gone_out"
-assert_review_skipped 1004 "when the base fetch fails, even with a stale local ref"
+assert_review_skipped "when the base fetch fails, even with a stale local ref"
 
 # A base name git rejects as a refspec (it passes check-ref-format --branch only
 # when $PRIMARY has a previous checkout) must skip, not crash.
@@ -3249,7 +3253,7 @@ launch_reset
 bf_prev_out=$(cwt pr 1005 2>&1)
 check_contains 'pr skips the review with the fetch reason when the base name is not fetchable' \
   'could not fetch' "$bf_prev_out"
-assert_review_skipped 1005 "for an unfetchable base name"
+assert_review_skipped "for an unfetchable base name"
 
 # --no-review never fetches. A stale local ref with a newer origin tip
 # distinguishes "no fetch" from "fetch failed"; a fetch would move the ref.
@@ -3277,7 +3281,7 @@ launch_reset
 bf_cl_out=$(cwt pr 1007 2>&1)
 check_contains 'pr still skips the review when the PR itself changes .agents' \
   'touches a path under .agents' "$bf_cl_out"
-assert_review_skipped 1007 "when the PR itself changes .agents"
+assert_review_skipped "when the PR itself changes .agents"
 
 # The fetch succeeds and only the guard's own rev-parse fails, so the guard's
 # "cannot resolve the base ref" branch keeps coverage now that a missing base
@@ -3291,7 +3295,7 @@ rm -f "$FAILGIT/git"
 check_contains 'pr skips the review when the guard cannot resolve the fetched base' \
   'could verify' "$bf_gd_out"
 check_not_contains 'a guard rev-parse failure is not reported as a failed fetch' 'could not fetch' "$bf_gd_out"
-assert_review_skipped 1008 "when the guard cannot resolve the base"
+assert_review_skipped "when the guard cannot resolve the base"
 
 # The fetch goes through remote_git (ssh fail-fast options) with
 # GIT_TERMINAL_PROMPT=0 on that call only: a prompting https credential helper
@@ -3339,6 +3343,144 @@ check_contains 'fixture: the second run reuses the worktree' 'reusing existing w
 check_equals 'pr fetches the base on a reused worktree' "$bf_reuse" "$(local_base_oid release/reuse)"
 check_equals 'pr starts the review on a reused worktree once the base is fetched' \
   "$(review_prompt_for 1010 feat-bf-reuse)" "$(launched_arg_list | tail -2)"
+
+section 'pr skipped-review pause'
+
+# The pause tests run cwt on a pseudo-terminal (BSD `script`). The writer runs in
+# a pipeline subshell, so it asserts nothing: it records to a file and the main
+# shell asserts afterwards.
+PAUSE_PROMPT='press Enter to open the session without the review'
+
+# Closing the pipe without a newline (mode eof) becomes Ctrl-D under script.
+tty_writer() {
+  local rec=$1 mode=$2 watch=$3 i=0 seen=0 timeout=1 lines
+  while [ "$i" -lt 100 ]; do
+    if grep -qF -- "$PAUSE_PROMPT" "$watch" 2>/dev/null; then seen=1 timeout=0; break; fi
+    if [ -s "$CWT_TEST_LOG" ]; then timeout=0; break; fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  lines=$(wc -l <"$CWT_TEST_LOG" | tr -d ' ')
+  printf 'prompt_seen=%s\ntimeout=%s\nlog_lines=%s\n' "$seen" "$timeout" "$lines" >"$rec"
+  if [ "$mode" = enter ]; then printf '\n'; fi
+}
+
+tty_run() {
+  local rec=$1 out=$2 mode=$3 watch=$4
+  shift 4
+  : >"$out"
+  : >"$rec"
+  (cd "$PRIMARY" && tty_writer "$rec" "$mode" "$watch" | /usr/bin/script -q /dev/null "$@" >"$out" 2>&1)
+}
+
+tty_text() { tr -d '\r\010' <"$1" | sed 's/\^D//g'; }
+rec_value() { sed -n "s/^$2=//p" "$1" | tail -1; }
+
+# pause_pr <number> <head-ref> <cross> — a PR the guard withholds the review
+# from (it adds .agents), on a base that exists on origin only.
+pause_pr() {
+  local base head
+  base=$(release_base "release/pause-$1")
+  head=$(commit_adding_path "$base" '.agents/skills/pr-review/SKILL.md' 'shadowing skill')
+  push_and_print "$2" "$head" >/dev/null
+  write_pr_meta "$1" "$2" "$3" "$head"
+  pr_base "$1" "release/pause-$1"
+}
+
+PAUSE_REC="$TMP/pause.rec"
+PAUSE_OUT="$TMP/pause.out"
+
+pause_pr 1101 feat/pause-enter false
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_OUT" "$CWT" pr 1101
+check_equals 'pr waits for Enter on a terminal when the review is skipped' 1 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_equals 'pr has not launched while it waits for Enter' 0 "$(rec_value "$PAUSE_REC" log_lines)"
+check_contains 'pr launches once Enter is sent' "pwd=$MANAGED/feat-pause-enter" "$(cat "$CWT_TEST_LOG")"
+check_equals 'pr launches without the review prompt after Enter' '' "$(launched args)"
+check_contains 'the skip warning is printed on the terminal' \
+  'the review was not started automatically' "$(tty_text "$PAUSE_OUT")"
+
+pause_pr 1102 feat/pause-eof false
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" eof "$PAUSE_OUT" "$CWT" pr 1102
+check_equals 'pr waits at the pause before Ctrl-D' 1 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_equals 'pr has not launched while it waits for Ctrl-D' 0 "$(rec_value "$PAUSE_REC" log_lines)"
+check 'pr launches after Ctrl-D at the pause' test -n "$(launched pwd)"
+check_equals 'pr launches without the review prompt after Ctrl-D' '' "$(launched args)"
+
+# stdin is a non-terminal that never closes, so an ungated `read` would block
+# until the watchdog kills it. stderr is a terminal here, which isolates the
+# stdin half of the gate: with only the stderr check the pause would still run.
+pause_pr 1103 feat/pause-stdin false
+HELD_STDIN="$TMP/held-stdin"
+mkfifo "$HELD_STDIN"
+launch_reset
+: >"$PAUSE_OUT"
+within_scan_budget "$PRIMARY" /usr/bin/script -q /dev/null \
+  bash -c 'exec "$0" pr 1103 <>"$1"' "$CWT" "$HELD_STDIN" >"$PAUSE_OUT" 2>&1 </dev/null
+check 'pr launches without waiting when stdin is not a terminal' test -n "$(launched pwd)"
+check_contains 'the skip warning was printed when stdin is not a terminal' \
+  'the review was not started automatically' "$(tty_text "$PAUSE_OUT")"
+check_not_contains 'pr does not wait when stdin is not a terminal' "$PAUSE_PROMPT" "$(tty_text "$PAUSE_OUT")"
+rm -f "$HELD_STDIN"
+
+# stdout and stdin are terminals, stderr is a file: the prompt would be
+# invisible, so it must not be printed or waited for.
+pause_pr 1104 feat/pause-stderr false
+PAUSE_ERR="$TMP/pause.err"
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_ERR" \
+  bash -c 'exec "$0" pr 1104 2>"$1"' "$CWT" "$PAUSE_ERR"
+check_contains 'the skip warning reached the redirected stderr' \
+  'the review was not started automatically' "$(cat "$PAUSE_ERR")"
+check_equals 'pr does not pause when stderr is not a terminal' 0 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_not_contains 'pr does not print the pause prompt when stderr is not a terminal' \
+  "$PAUSE_PROMPT" "$(cat "$PAUSE_ERR")"
+check 'pr launched without any input when stderr is not a terminal' test -n "$(launched pwd)"
+check_equals 'pr (stderr not a terminal) launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr (stderr not a terminal) launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
+
+# The PR would be skipped if reviewed (it adds .agents); --no-review must not
+# turn that into a pause.
+pause_pr 1105 feat/pause-no-review false
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_OUT" "$CWT" pr 1105 --no-review
+check_equals 'pr --no-review does not pause on a terminal' 0 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_not_contains 'pr --no-review does not print the pause prompt on a terminal' \
+  "$PAUSE_PROMPT" "$(tty_text "$PAUSE_OUT")"
+check 'pr --no-review launched without any input on a terminal' test -n "$(launched pwd)"
+check_equals 'pr --no-review launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr --no-review launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
+
+pr_meta 1106 feat/pause-review false
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_OUT" "$CWT" pr 1106
+check_equals 'pr does not pause on a terminal when the review starts' 0 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_not_contains 'pr does not print the pause prompt when the review starts' \
+  "$PAUSE_PROMPT" "$(tty_text "$PAUSE_OUT")"
+check_equals 'pr passes the review prompt when it does not pause' \
+  "$(review_prompt_for 1106 feat-pause-review)" "$(launched_arg_list | tail -2)"
+check_equals 'pr (review starts) launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr (review starts) launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
+
+# The fork warning is the last message before launch on both paths (the fresh
+# path prints it after finish_pr_context, the reuse path after the reuse note).
+pause_pr 1107 feat/pause-order true
+for pause_path in fresh reuse; do
+  launch_reset
+  tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_OUT" "$CWT" pr 1107
+  pause_text=$(tty_text "$PAUSE_OUT")
+  pause_line=$(printf '%s\n' "$pause_text" | grep -nF -- "$PAUSE_PROMPT" | head -1 | cut -d: -f1)
+  last_warning_line=$(printf '%s\n' "$pause_text" | grep -niF 'warning' | tail -1 | cut -d: -f1)
+  if [ "$pause_path" = reuse ]; then
+    check_contains 'pr (reuse) takes the reuse path' 'reusing existing worktree' "$pause_text"
+  fi
+  check_contains "pr ($pause_path) prints the fork warning" 'comes from a fork' "$pause_text"
+  check_contains "pr ($pause_path) prints the skip warning" 'the review was not started automatically' "$pause_text"
+  check "pr ($pause_path) prints the pause prompt after every other warning" \
+    test -n "$pause_line" -a -n "$last_warning_line" -a "${pause_line:-0}" -gt "${last_warning_line:-0}"
+  check 'pr ('"$pause_path"') launches after Enter' test -n "$(launched pwd)"
+done
 
 section 'pr skill-shadowing guard (Req 4b)'
 
@@ -3524,16 +3666,14 @@ shadow_stale_out=$(cwt pr 970 2>&1)
 check_contains 'pr withholds the review prompt when the PR still carries a .agents file the base has since changed' \
   'carries a .agents/.codex tree that differs from origin/main; rebase onto the current base to get the review prompt' "$shadow_stale_out"
 
-# A base branch cwt cannot fetch (renamed/deleted upstream) is withheld with the
-# failed-fetch reason; the guard's own missing-ref reason is covered in
-# 'pr base fetch'.
+# An unfetchable base is withheld with the failed-fetch reason, not the guard's.
 pr_meta 971 feat/shadow-base-missing false
 pr_context_base_missing 971
 launch_reset
 shadow_base_missing_out=$(cwt pr 971 2>&1)
 check_contains 'pr withholds the review prompt when the base branch cannot be fetched from origin' \
   'could not fetch' "$shadow_base_missing_out"
-check 'pr still launches when the base ref cannot be resolved' test -n "$(launched pwd)"
+check 'pr still launches when the base branch cannot be fetched' test -n "$(launched pwd)"
 
 # A symlink the base branch already ships, that the pull request's own diff
 # never touches at all, bypasses both checks above: the diff scan sees no

@@ -98,6 +98,9 @@ request shipping `.agents/skills/pr-review` could otherwise replace the
 review the prompt is about to start. It still launches either way.
 Unless `--no-review`, `cwt pr` first fetches the pull request's base branch
 from origin; if that fetch fails, it withholds the prompt and warns.
+When the review is withheld for any reason and stdin and stderr are both
+terminals, `cwt pr` waits for Enter before launching (Ctrl-D continues,
+Ctrl-C cancels).
 
 It also withholds the prompt when the PR's checked-out `.agents`/`.codex` tree is
 unchanged from its own merge base but has since diverged from the base branch's current
@@ -245,6 +248,19 @@ parse_launch_args() {
   done
 }
 
+# Set by finish_pr_context when a requested review was not started. Initialized
+# here because launch() reads it for every subcommand, under `set -u`.
+PR_REVIEW_SKIPPED=0
+
+# The codex session UI hides everything printed before it starts, so a skip
+# warning is unreadable unless the launch waits. Both streams must be terminals
+# so a redirected stderr never waits on an invisible prompt.
+pause_for_skipped_review() {
+  ((PR_REVIEW_SKIPPED)) && [[ -t 0 && -t 2 ]] || return 0
+  printf '%s: press Enter to open the session without the review (Ctrl-C to cancel)... ' "$PROGRAM" >&2
+  read -r _ || printf '\n' >&2
+}
+
 # The whole point of the tool: make the operating-system process cwd correct by
 # construction. Codex has a `-C` flag, but cd plus exec also roots startup hooks
 # and child processes in the target before Codex parses any arguments.
@@ -257,6 +273,8 @@ launch() {
   local -a argv=()
 
   command -v codex >/dev/null 2>&1 || die 'codex not found on PATH'
+
+  pause_for_skipped_review
 
   if ((LAUNCH_YOLO)); then
     argv+=(--yolo)
@@ -1539,6 +1557,7 @@ pr_review_withheld() {
 finish_pr_context() {
   local no_review=$1 number=$2 ctx_ok=$3 target=$4 base_ref=$5 head_oid=$6
   local msg="${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
+  PR_REVIEW_SKIPPED=0
   if ((no_review)); then
     ((ctx_ok)) || warn "$msg"
     return 0
@@ -1546,6 +1565,7 @@ finish_pr_context() {
   ((ctx_ok)) || die "$msg; run 'cwt pr $number --no-review' to skip it"
   if pr_review_withheld "$target" "$base_ref" "$head_oid"; then
     warn "pull request #$number ${PR_SHADOW_REASON:-touches a path under .agents or .codex} — the review was not started automatically"
+    PR_REVIEW_SKIPPED=1
     return 0
   fi
   # `--` fences the prompt from any variadic option already sitting at the
