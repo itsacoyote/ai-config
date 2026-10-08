@@ -3138,14 +3138,16 @@ check_equals 'pr sends the review prompt for a bot-authored PR (app/<name> autho
 
 section 'pr base fetch'
 
-# The .claude shadowing guard reads the LOCAL refs/remotes/origin/<base>; before
-# the base was fetched, a missing or stale ref made it fail closed and the
-# session opened without the review. Every fixture here gets its own release/*
-# base created on $REMOTE only (never main: the shadowing section after this one
-# force-pushes main and later fixtures depend on what it leaves there), and a
-# per-PR baseRefName via pr_base. Each test asserts its fixture's shape first —
-# several helpers above fetch into $PRIMARY themselves and would otherwise
-# create the very ref under test.
+# Never use main as a base here: the shadowing section after this one
+# force-pushes it. Each fixture gets its own release/* base on $REMOTE only, and
+# asserts its shape first because some helpers above fetch into $PRIMARY
+# themselves and would create the very ref under test.
+
+# child_commit <parent> <msg> — a same-tree commit on <parent> in the scratch
+# clone; prints its sha.
+child_commit() {
+  git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse "$1^{tree}")" -p "$1" -m "$2"
+}
 
 # release_base <name> [<parent-sha>] — pushes a commit as refs/heads/<name> on
 # $REMOTE from the scratch clone (never $PRIMARY) and prints its sha.
@@ -3153,8 +3155,7 @@ release_base() {
   local name=$1 parent=${2:-} sha
   ensure_scratch_push
   [ -n "$parent" ] || parent=$(git -C "$SCRATCH_PUSH" rev-parse HEAD)
-  sha=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse "$parent^{tree}")" \
-    -p "$parent" -m "base $name ($RANDOM$RANDOM)")
+  sha=$(child_commit "$parent" "base $name ($RANDOM$RANDOM)")
   push_and_print "$name" "$sha"
 }
 
@@ -3172,9 +3173,16 @@ base_pr() {
   pr_base "$1" "$3"
 }
 
+# assert_review_skipped <number> <condition> — no prompt was sent and the session
+# still launched.
+assert_review_skipped() {
+  check_equals "pr sends no review prompt $2" "--name PR-$1" "$(launched args)"
+  check "pr still launches $2" test -n "$(launched pwd)"
+}
+
 review_prompt_for() { printf -- '--\n/pr-review %s %s' "$1" "$(pr_context_path "$2")"; }
 
-# AC1: the base exists on origin only.
+the base exists on origin only.
 bf_base=$(release_base release/v0.3)
 base_pr 1001 feat/bf-missing release/v0.3 "$bf_base"
 check_equals 'fixture: the missing-base ref is absent locally before the run' '' "$(local_base_oid release/v0.3)"
@@ -3185,7 +3193,7 @@ check_equals 'pr fetches a base branch that exists on origin but not locally' \
 check_equals 'pr starts the review for a base branch that was missing locally' \
   "$(review_prompt_for 1001 feat-bf-missing)" "$(launched_arg_list | tail -2)"
 
-# AC2: the stale local ref has no .claude, origin's base has gained one. Without
+the stale local ref has no .claude, origin's base has gained one. Without
 # the fetch, the PR (built on the new tip) looks like it adds .claude.
 bf_old=$(release_base release/stale)
 fetch_stale_tracking_ref release/stale
@@ -3205,12 +3213,10 @@ check_equals 'pr starts the review once the stale base is refreshed' \
 
 # The "+" in the refspec: a force-pushed base is not a fast-forward.
 bf_root=$(release_base release/rewritten)
-bf_before=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse "$bf_root^{tree}")" \
-  -p "$bf_root" -m "rewritten base, before")
+bf_before=$(child_commit "$bf_root" "rewritten base, before")
 push_and_print release/rewritten "$bf_before" >/dev/null
 fetch_stale_tracking_ref release/rewritten
-bf_after=$(git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse "$bf_root^{tree}")" \
-  -p "$bf_root" -m "rewritten base, after")
+bf_after=$(child_commit "$bf_root" "rewritten base, after")
 push_and_print release/rewritten "$bf_after" >/dev/null
 base_pr 1003 feat/bf-rewritten release/rewritten "$bf_after"
 check_equals 'fixture: the local base still holds the pre-rewrite tip' \
@@ -3223,7 +3229,7 @@ check_equals 'pr refreshes a base that was rewritten upstream' "$bf_after" "$(lo
 check_equals 'pr starts the review for a base that was rewritten upstream' \
   "$(review_prompt_for 1003 feat-bf-rewritten)" "$(launched_arg_list | tail -2)"
 
-# AC3: the base is gone from origin but a stale local ref survives. That ref is
+the base is gone from origin but a stale local ref survives. That ref is
 # the PR's own parent with an identical .claude, so the guard would ACCEPT it:
 # only returning before the guard keeps the review from starting.
 bf_gone=$(release_base release/gone)
@@ -3237,30 +3243,24 @@ launch_reset
 bf_gone_out=$(clwt pr 1004 2>&1)
 check_contains 'pr names the failed fetch when the base is gone from origin' 'could not fetch' "$bf_gone_out"
 check_contains 'the failed-fetch reason names the base ref' 'origin/release/gone' "$bf_gone_out"
-check_equals 'pr sends no review prompt when the base fetch fails, even with a stale local ref' \
-  '--name PR-1004' "$(launched args)"
-check 'pr still launches when the base fetch fails' test -n "$(launched pwd)"
+assert_review_skipped 1004 "when the base fetch fails, even with a stale local ref"
 
 # A base name git rejects as a refspec (it passes check-ref-format --branch only
 # when $PRIMARY has a previous checkout) must skip, not crash.
 git -C "$PRIMARY" switch -q -c bf-previous-checkout
 git -C "$PRIMARY" switch -q -
 git -C "$PRIMARY" branch -q -D bf-previous-checkout
-if git -C "$PRIMARY" check-ref-format --branch '@{-1}' >/dev/null 2>&1; then
-  ok 'fixture: @{-1} passes check-ref-format in the primary clone'
-else
-  not_ok 'fixture: @{-1} passes check-ref-format in the primary clone'
-fi
+check 'fixture: @{-1} passes check-ref-format in the primary clone' \
+  git -C "$PRIMARY" check-ref-format --branch '@{-1}'
 bf_prev=$(release_base release/prev)
 base_pr 1005 feat/bf-at-prev '@{-1}' "$bf_prev"
 launch_reset
 bf_prev_out=$(clwt pr 1005 2>&1)
 check_contains 'pr skips the review with the fetch reason when the base name is not fetchable' \
   'could not fetch' "$bf_prev_out"
-check_equals 'pr sends no review prompt for an unfetchable base name' '--name PR-1005' "$(launched args)"
-check 'pr still launches for an unfetchable base name' test -n "$(launched pwd)"
+assert_review_skipped 1005 "for an unfetchable base name"
 
-# AC5: --no-review never fetches. A stale local ref with a newer origin tip
+--no-review never fetches. A stale local ref with a newer origin tip
 # distinguishes "no fetch" from "fetch failed"; a fetch would move the ref.
 bf_nr_old=$(release_base release/noreview)
 fetch_stale_tracking_ref release/noreview
@@ -3274,7 +3274,7 @@ check_equals 'pr --no-review leaves the stale local base untouched' \
 check_not_contains 'pr --no-review does not warn about a base fetch' 'could not fetch' "$bf_nr_out"
 check 'pr --no-review still launches' test -n "$(launched pwd)"
 
-# AC6: the guard still runs after a successful fetch. The base is absent
+the guard still runs after a successful fetch. The base is absent
 # locally, so a reason about .claude (not about a missing ref) shows the fetch
 # happened first.
 bf_cl=$(release_base release/claude-pr)
@@ -3287,7 +3287,7 @@ launch_reset
 bf_cl_out=$(clwt pr 1007 2>&1)
 check_contains 'pr still skips the review when the PR itself changes .claude' \
   'touches a path under .claude' "$bf_cl_out"
-check_equals 'pr sends no review prompt when the PR itself changes .claude' '--name PR-1007' "$(launched args)"
+assert_review_skipped 1007 "when the PR itself changes .claude"
 
 # The fetch succeeds and only the guard's own rev-parse fails, so the guard's
 # "cannot resolve the base ref" branch keeps coverage now that a missing base
@@ -3301,7 +3301,7 @@ rm -f "$FAILGIT/git"
 check_contains 'pr skips the review when the guard cannot resolve the fetched base' \
   'could verify' "$bf_gd_out"
 check_not_contains 'a guard rev-parse failure is not reported as a failed fetch' 'could not fetch' "$bf_gd_out"
-check_equals 'pr sends no review prompt when the guard cannot resolve the base' '--name PR-1008' "$(launched args)"
+assert_review_skipped 1008 "when the guard cannot resolve the base"
 
 # The fetch goes through remote_git (ssh fail-fast options) with
 # GIT_TERMINAL_PROMPT=0 on that call only: a prompting https credential helper
@@ -3335,6 +3335,20 @@ check_contains 'the base fetch runs through remote_git (ssh BatchMode)' 'BatchMo
 check_equals 'GIT_TERMINAL_PROMPT does not reach the launched session' '<unset>' "$(launched GIT_TERMINAL_PROMPT)"
 check_equals 'the env-check PR still gets its review prompt' \
   "$(review_prompt_for 1009 feat-bf-env)" "$(launched_arg_list | tail -2)"
+
+# The reused-worktree path fetches the base too. --no-review creates the
+# worktree without fetching, so the base ref is still absent before the reuse.
+bf_reuse=$(release_base release/reuse)
+base_pr 1010 feat/bf-reuse release/reuse "$bf_reuse"
+launch_reset
+clwt pr 1010 --no-review >/dev/null 2>&1
+check_equals 'fixture: the base is still absent after the --no-review checkout' '' "$(local_base_oid release/reuse)"
+launch_reset
+bf_reuse_out=$(clwt pr 1010 2>&1)
+check_contains 'fixture: the second run reuses the worktree' 'reusing existing worktree' "$bf_reuse_out"
+check_equals 'pr fetches the base on a reused worktree' "$bf_reuse" "$(local_base_oid release/reuse)"
+check_equals 'pr starts the review on a reused worktree once the base is fetched' \
+  "$(review_prompt_for 1010 feat-bf-reuse)" "$(launched_arg_list | tail -2)"
 
 section 'pr .claude shadowing guard'
 
@@ -3490,13 +3504,8 @@ shadow_stale_out=$(clwt pr 970 2>&1)
 check_contains 'pr withholds the review prompt when the PR still carries a .claude file the base has since changed' \
   'carries a .claude tree that differs from origin/main; rebase onto the current base to get the review prompt' "$shadow_stale_out"
 
-# A base branch that does not exist on origin (renamed or deleted upstream)
-# cannot be fetched, so the review is skipped with the fetch-failure reason.
-# Retargeted from "origin/<base> cannot be resolved": clwt now fetches the base
-# before the guard, so this fixture never reaches the guard's own resolve
-# check, and the old substring (the base's name) would also match the fetch
-# reason without proving which reason fired. The guard's resolve branch is
-# covered in 'pr base fetch' via a failing rev-parse.
+# The base does not exist on origin, so the fetch fails first and its reason is
+# the one reported; the guard's own resolve branch is covered in 'pr base fetch'.
 pr_meta 971 feat/shadow-base-missing false
 pr_context_base_missing 971
 launch_reset

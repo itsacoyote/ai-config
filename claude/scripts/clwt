@@ -1523,13 +1523,27 @@ pr_shadows_skills() {
   return 1
 }
 
+# Returns 0 (setting PR_SHADOW_REASON) when the review must be withheld. The
+# guard reads the local origin/<base> ref, which a missing or stale ref would
+# make it fail closed or judge old data, and must never run after a failed
+# fetch; git's stderr stays visible to tell an auth failure from a missing base.
+pr_review_withheld() {
+  local target=$1 base_ref=$2 head_oid=$3
+  if ! GIT_TERMINAL_PROMPT=0 remote_git -C "$target" fetch --quiet --no-tags origin \
+    "+refs/heads/$base_ref:refs/remotes/origin/$base_ref"; then
+    PR_SHADOW_REASON="has a base branch clwt could not fetch (origin/$base_ref)"
+    return 0
+  fi
+  pr_shadows_skills "$target" "$base_ref" "$head_oid"
+}
+
 # Decides what a `clwt pr` launch does with write_pr_context's outcome — shared
 # by the fresh-checkout and reused-worktree paths so the --no-review contract
 # lives in exactly one place. The softened warn never names --no-review: the
 # flag is already in effect. Symlink/containment/mkdir refusals never reach
 # this function — they `die` inside write_pr_context — so --no-review does not
-# soften them. Under --no-review the .claude shadowing guard below is never
-# run: no prompt is sent either way, so there is nothing for it to withhold.
+# soften them. Under --no-review neither the base fetch nor the .claude
+# shadowing guard below is run: no prompt is sent either way.
 finish_pr_context() {
   local no_review=$1 number=$2 ctx_ok=$3 target=$4 base_ref=$5 head_oid=$6
   local msg="${PR_CONTEXT_ERROR:-could not fetch the review context for pull request #$number}"
@@ -1538,22 +1552,15 @@ finish_pr_context() {
     return 0
   fi
   ((ctx_ok)) || die "$msg; run 'clwt pr $number --no-review' to skip it"
-  # pr_shadows_skills reads the local refs/remotes/origin/<base>; a missing or
-  # stale ref made it fail closed or judge old data. It must not run after a
-  # failed fetch: a stale ref could still pass it. stderr stays visible, since
-  # git's message tells an auth failure from a missing base.
-  if ! GIT_TERMINAL_PROMPT=0 remote_git -C "$target" fetch --quiet --no-tags origin \
-    "+refs/heads/$base_ref:refs/remotes/origin/$base_ref"; then
-    PR_SHADOW_REASON="has a base branch clwt could not fetch (origin/$base_ref)"
-  elif ! pr_shadows_skills "$target" "$base_ref" "$head_oid"; then
-    # `--` fences the prompt from any variadic option already sitting at the end
-    # of LAUNCH_ARGS (a developer's own passthrough `--add-dir`, `--allowedTools`,
-    # etc.) so it is never read as one more value for that option instead of its
-    # own argument.
-    LAUNCH_ARGS+=(--add-dir "$SESSION_FOLDER" -- "/pr-review $number $SESSION_FOLDER/pr-context.md")
+  if pr_review_withheld "$target" "$base_ref" "$head_oid"; then
+    warn "pull request #$number ${PR_SHADOW_REASON:-touches a path under .claude} — the review was not started automatically"
     return 0
   fi
-  warn "pull request #$number ${PR_SHADOW_REASON:-touches a path under .claude} — the review was not started automatically"
+  # `--` fences the prompt from any variadic option already sitting at the end
+  # of LAUNCH_ARGS (a developer's own passthrough `--add-dir`, `--allowedTools`,
+  # etc.) so it is never read as one more value for that option instead of its
+  # own argument.
+  LAUNCH_ARGS+=(--add-dir "$SESSION_FOLDER" -- "/pr-review $number $SESSION_FOLDER/pr-context.md")
 }
 
 reuse_pr_or_refuse() {
