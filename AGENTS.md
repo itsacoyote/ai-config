@@ -147,6 +147,11 @@ Recurring causes, each worth checking directly:
   it matches, git dies of SIGPIPE, and the pipeline reports failure — so a `check_fails`
   "is not registered" assertion passed while the worktree was still there. Capture the
   output first, then match.
+- **An assertion inside a pipeline.** Every side of a pipeline runs in a subshell, so a
+  `check` there updates counters that are thrown away — a failure prints but the suite
+  stays green. The `pr` pause tests' writer (`writer | script …`) only records what it saw
+  to a file; the main shell asserts afterward. The same suites `exec </dev/null` at the
+  top, since a CLI that can wait for input would otherwise hang a run from a terminal.
 
 When an assertion exists to catch a specific regression, say so in a comment — including
 what it would *fail* to catch.
