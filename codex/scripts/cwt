@@ -90,17 +90,18 @@ context-fetch failure then only warns instead of refusing to launch. A symlink, 
 session folder itself stays fatal either way — that signals tampering, not a
 transient fetch failure.
 
+Unless `--no-review`, `cwt pr` first fetches the pull request's base branch
+from origin; if that fetch fails, it withholds the prompt and warns.
+When the review is withheld for any reason and stdin and stderr are both
+terminals, `cwt pr` waits for Enter before launching (Ctrl-D continues,
+Ctrl-C cancels).
+
 `cwt pr` also withholds the prompt (and warns instead) when the pull
 request's own checked-out diff touches a path under `.agents` or `.codex`
 relative to its merge base with the base branch: unlike Claude, Codex does
 not rank a personal skill above a project one on a name collision, so a pull
 request shipping `.agents/skills/pr-review` could otherwise replace the
 review the prompt is about to start. It still launches either way.
-Unless `--no-review`, `cwt pr` first fetches the pull request's base branch
-from origin; if that fetch fails, it withholds the prompt and warns.
-When the review is withheld for any reason and stdin and stderr are both
-terminals, `cwt pr` waits for Enter before launching (Ctrl-D continues,
-Ctrl-C cancels).
 
 It also withholds the prompt when the PR's checked-out `.agents`/`.codex` tree is
 unchanged from its own merge base but has since diverged from the base branch's current

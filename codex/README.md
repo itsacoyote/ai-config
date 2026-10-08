@@ -62,7 +62,7 @@ current process with a new Codex session.
 
 **Prerequisites:** stock macOS Bash 3.2 or newer and Git. Authenticated `gh` is required
 only for `cwt pr` and `cwt prune`. The repository must have an `origin` remote. The network
-steps of `cwt new` and `cwt branch` over an SSH remote run ssh in batch mode with a connect
+steps of `cwt new` and `cwt branch`, and `cwt pr`'s base-branch fetch, over an SSH remote run ssh in batch mode with a connect
 timeout, so an unreachable remote fails with git's own error instead of hanging; batch mode
 also means ssh cannot ask for a key passphrase or accept a new host key, so load your key
 with `ssh-add` and connect once with plain `ssh` first. A custom ssh command

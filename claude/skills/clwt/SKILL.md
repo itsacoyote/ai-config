@@ -89,8 +89,7 @@ failure then only warns instead of refusing to launch. Unless `--no-review`, `cl
 first fetches the pull request's base branch from origin; if that fetch fails, it withholds
 the prompt and warns. When the review is withheld for any reason and stdin and stderr are
 both terminals, `clwt pr` waits for Enter before launching (Ctrl-D continues, Ctrl-C
-cancels) — so an agent cannot run `clwt pr` unattended and should recommend it to the
-developer. Claude ranks a project subagent
+cancels). Claude ranks a project subagent
 (`.claude/agents/<name>.md`) ABOVE a personal one of the same name — the opposite of its
 skill precedence — so a PR shipping its own `.claude/agents/pr-security.md` (or any other
 pass's subagent) could otherwise replace that pass of the review silently. `clwt pr`

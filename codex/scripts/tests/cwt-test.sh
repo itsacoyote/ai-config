@@ -3673,6 +3673,8 @@ launch_reset
 shadow_base_missing_out=$(cwt pr 971 2>&1)
 check_contains 'pr withholds the review prompt when the base branch cannot be fetched from origin' \
   'could not fetch' "$shadow_base_missing_out"
+check_contains 'the fetch-failure reason names the missing base' \
+  'origin/feat/this-base-branch-does-not-exist' "$shadow_base_missing_out"
 check 'pr still launches when the base branch cannot be fetched' test -n "$(launched pwd)"
 
 # A symlink the base branch already ships, that the pull request's own diff
