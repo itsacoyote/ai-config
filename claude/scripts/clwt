@@ -94,6 +94,9 @@ transient fetch failure.
 
 Unless `--no-review`, `clwt pr` first fetches the pull request's base branch
 from origin; if that fetch fails, it withholds the prompt and warns.
+When the review is withheld for any reason and stdin and stderr are both
+terminals, `clwt pr` waits for Enter before launching (Ctrl-D continues,
+Ctrl-C cancels).
 
 `clwt pr` also withholds the prompt (and warns instead) when the pull
 request's own checked-out diff touches the top-level `.claude` directory
@@ -262,9 +265,8 @@ parse_launch_args() {
 PR_REVIEW_SKIPPED=0
 
 # The claude session UI hides everything printed before it starts, so a skip
-# warning is unreadable unless the launch waits. Needs both streams on a
-# terminal: with stderr redirected the prompt would be invisible. Ctrl-D
-# continues; Ctrl-C exits through the EXIT trap and launches nothing.
+# warning is unreadable unless the launch waits. Both streams must be terminals
+# so a redirected stderr never waits on an invisible prompt.
 pause_for_skipped_review() {
   ((PR_REVIEW_SKIPPED)) && [[ -t 0 && -t 2 ]] || return 0
   printf '%s: press Enter to open the session without the review (Ctrl-C to cancel)... ' "$PROGRAM" >&2

@@ -3186,7 +3186,7 @@ assert_review_skipped() {
 
 review_prompt_for() { printf -- '--\n/pr-review %s %s' "$1" "$(pr_context_path "$2")"; }
 
-the base exists on origin only.
+# the base exists on origin only.
 bf_base=$(release_base release/v0.3)
 base_pr 1001 feat/bf-missing release/v0.3 "$bf_base"
 check_equals 'fixture: the missing-base ref is absent locally before the run' '' "$(local_base_oid release/v0.3)"
@@ -3197,7 +3197,7 @@ check_equals 'pr fetches a base branch that exists on origin but not locally' \
 check_equals 'pr starts the review for a base branch that was missing locally' \
   "$(review_prompt_for 1001 feat-bf-missing)" "$(launched_arg_list | tail -2)"
 
-the stale local ref has no .claude, origin's base has gained one. Without
+# the stale local ref has no .claude, origin's base has gained one. Without
 # the fetch, the PR (built on the new tip) looks like it adds .claude.
 bf_old=$(release_base release/stale)
 fetch_stale_tracking_ref release/stale
@@ -3233,7 +3233,7 @@ check_equals 'pr refreshes a base that was rewritten upstream' "$bf_after" "$(lo
 check_equals 'pr starts the review for a base that was rewritten upstream' \
   "$(review_prompt_for 1003 feat-bf-rewritten)" "$(launched_arg_list | tail -2)"
 
-the base is gone from origin but a stale local ref survives. That ref is
+# the base is gone from origin but a stale local ref survives. That ref is
 # the PR's own parent with an identical .claude, so the guard would ACCEPT it:
 # only returning before the guard keeps the review from starting.
 bf_gone=$(release_base release/gone)
@@ -3264,7 +3264,7 @@ check_contains 'pr skips the review with the fetch reason when the base name is 
   'could not fetch' "$bf_prev_out"
 assert_review_skipped 1005 "for an unfetchable base name"
 
---no-review never fetches. A stale local ref with a newer origin tip
+# --no-review never fetches. A stale local ref with a newer origin tip
 # distinguishes "no fetch" from "fetch failed"; a fetch would move the ref.
 bf_nr_old=$(release_base release/noreview)
 fetch_stale_tracking_ref release/noreview
@@ -3278,7 +3278,7 @@ check_equals 'pr --no-review leaves the stale local base untouched' \
 check_not_contains 'pr --no-review does not warn about a base fetch' 'could not fetch' "$bf_nr_out"
 check 'pr --no-review still launches' test -n "$(launched pwd)"
 
-the guard still runs after a successful fetch. The base is absent
+# the guard still runs after a successful fetch. The base is absent
 # locally, so a reason about .claude (not about a missing ref) shows the fetch
 # happened first.
 bf_cl=$(release_base release/claude-pr)
@@ -3356,16 +3356,12 @@ check_equals 'pr starts the review on a reused worktree once the base is fetched
 
 section 'pr skipped-review pause'
 
-# Every pause test runs clwt on a pseudo-terminal (BSD `script`), the only way a
-# test can make stdin and stderr real terminals. The writer feeding the pty runs
-# in a pipeline subshell, so it asserts nothing: it records what it saw to a
-# file and the main shell asserts afterwards.
+# The pause tests run clwt on a pseudo-terminal (BSD `script`). The writer runs in
+# a pipeline subshell, so it asserts nothing: it records to a file and the main
+# shell asserts afterwards.
 PAUSE_PROMPT='press Enter to open the session without the review'
 
-# tty_writer <rec> <mode> <watch-file> — waits until the prompt shows up in
-# <watch-file> or the stub claude has launched, records which came first and how
-# many lines the launch log had at that moment, then sends Enter (mode enter) or
-# just closes the pipe, which script turns into Ctrl-D (mode eof).
+# Closing the pipe without a newline (mode eof) becomes Ctrl-D under script.
 tty_writer() {
   local rec=$1 mode=$2 watch=$3 i=0 seen=0 timeout=1 lines
   while [ "$i" -lt 100 ]; do
@@ -3379,8 +3375,6 @@ tty_writer() {
   if [ "$mode" = enter ]; then printf '\n'; fi
 }
 
-# tty_run <rec> <out> <mode> <watch-file> <command...> — runs the command with a
-# terminal for stdin, stdout and stderr; <out> gets the terminal's output.
 tty_run() {
   local rec=$1 out=$2 mode=$3 watch=$4
   shift 4
@@ -3389,7 +3383,6 @@ tty_run() {
   (cd "$PRIMARY" && tty_writer "$rec" "$mode" "$watch" | /usr/bin/script -q /dev/null "$@" >"$out" 2>&1)
 }
 
-# tty_text <file> — terminal output without carriage returns and the echoed ^D.
 tty_text() { tr -d '\r\010' <"$1" | sed 's/\^D//g'; }
 rec_value() { sed -n "s/^$2=//p" "$1" | tail -1; }
 
@@ -3414,7 +3407,7 @@ check_equals 'pr shows the pause prompt on a terminal when the review is skipped
 check_equals 'pr has not launched while it waits for Enter' 0 "$(rec_value "$PAUSE_REC" log_lines)"
 check_contains 'pr launches once Enter is sent' "pwd=$MANAGED/feat-pause-enter" "$(cat "$CLWT_TEST_LOG")"
 check_equals 'pr launches without the review prompt after Enter' '--name PR-1101' "$(launched args)"
-check_contains 'the skip warning is on the terminal before the prompt' \
+check_contains 'the skip warning is printed on the terminal' \
   'the review was not started automatically' "$(tty_text "$PAUSE_OUT")"
 
 pause_pr 1102 feat/pause-eof false
@@ -3453,6 +3446,8 @@ check_equals 'pr does not pause when stderr is not a terminal' 0 "$(rec_value "$
 check_not_contains 'pr does not print the pause prompt when stderr is not a terminal' \
   "$PAUSE_PROMPT" "$(cat "$PAUSE_ERR")"
 check_equals 'pr launched without any input when stderr is not a terminal' '--name PR-1104' "$(launched args)"
+check_equals 'pr (stderr not a terminal) launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr (stderr not a terminal) launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
 
 # The PR would be skipped if reviewed (it adds .claude); --no-review must not
 # turn that into a pause.
@@ -3463,6 +3458,8 @@ check_equals 'pr --no-review does not pause on a terminal' 0 "$(rec_value "$PAUS
 check_not_contains 'pr --no-review does not print the pause prompt on a terminal' \
   "$PAUSE_PROMPT" "$(tty_text "$PAUSE_OUT")"
 check_equals 'pr --no-review launched without any input on a terminal' '--name PR-1105' "$(launched args)"
+check_equals 'pr --no-review launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr --no-review launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
 
 pr_meta 1106 feat/pause-review false
 launch_reset
@@ -3472,6 +3469,8 @@ check_not_contains 'pr does not print the pause prompt when the review starts' \
   "$PAUSE_PROMPT" "$(tty_text "$PAUSE_OUT")"
 check_equals 'pr passes the review prompt when it does not pause' \
   "$(review_prompt_for 1106 feat-pause-review)" "$(launched_arg_list | tail -2)"
+check_equals 'pr (review starts) launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr (review starts) launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
 
 # The fork warning is the last message before launch on both paths (the fresh
 # path prints it after finish_pr_context, the reuse path after the reuse note).
@@ -3482,6 +3481,9 @@ for pause_path in fresh reuse; do
   pause_text=$(tty_text "$PAUSE_OUT")
   pause_line=$(printf '%s\n' "$pause_text" | grep -nF -- "$PAUSE_PROMPT" | head -1 | cut -d: -f1)
   last_warning_line=$(printf '%s\n' "$pause_text" | grep -niF 'warning' | tail -1 | cut -d: -f1)
+  if [ "$pause_path" = reuse ]; then
+    check_contains 'pr (reuse) takes the reuse path' 'reusing existing worktree' "$pause_text"
+  fi
   check_contains "pr ($pause_path) prints the fork warning" 'comes from a fork' "$pause_text"
   check_contains "pr ($pause_path) prints the skip warning" 'the review was not started automatically' "$pause_text"
   check "pr ($pause_path) prints the pause prompt after every other warning" \
