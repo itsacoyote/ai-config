@@ -6,8 +6,8 @@ Skills under `agents/skills/`. Codex, Pi, and Claude Code (2.1.277 or later) rea
 natively; there is no `CLAUDE.md` in this repo. This file documents how to maintain the
 libraries — it does **not** travel to other projects.
 
-For the catalog of skills/agents, see [docs/catalog.md](docs/catalog.md); for the feature workflow they
-implement, see [docs/workflow.md](docs/workflow.md).
+For the catalog of skills/agents, see [docs/catalog.md](docs/catalog.md); for the feature
+workflow they implement, see [docs/workflow.md](docs/workflow.md).
 
 ## What lives where
 
