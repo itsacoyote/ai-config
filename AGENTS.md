@@ -6,8 +6,8 @@ Skills under `agents/skills/`. Codex, Pi, and Claude Code (2.1.277 or later) rea
 natively; there is no `CLAUDE.md` in this repo. This file documents how to maintain the
 libraries — it does **not** travel to other projects.
 
-For the catalog of skills/agents and the feature workflow they implement, see
-[README.md](README.md).
+For the catalog of skills/agents, see [docs/catalog.md](docs/catalog.md); for the feature workflow they
+implement, see [docs/workflow.md](docs/workflow.md).
 
 ## What lives where
 
@@ -82,6 +82,8 @@ When creating or editing skills, follow the `writing-skills` skill, and:
   implementation, discover vs. prescribe) point to each other instead of overlapping.
 - **Scope down.** Include a "When NOT to use" so a skill isn't over-applied to trivial work.
 - **No dead links.** Every referenced skill/agent/file must exist. Verify before committing.
+- **Keep the catalog in sync.** Adding or removing a skill or agent updates both
+  `docs/catalog.md` and the README "What's inside" section.
 - **Avoid name collisions with built-in commands.** (Claude-specific.) Built-ins include
   `code-review`, `security-review`, `review`, `verify`, `init`, `run`. (That's why this
   repo uses `senior-review` and `security-scan`.)
