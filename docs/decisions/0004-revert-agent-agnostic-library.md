@@ -9,6 +9,9 @@ Supersedes: [ADR 0003](0003-agent-agnostic-library.md)
 Amended by: [ADR 0006](0006-per-harness-config-trees.md) — reintroduces per-harness trees
 as unsynced duplicates; the rejection of sync machinery stands.
 
+Amended by: [ADR 0015](0015-readme-overview-docs-topics.md) — topic detail moves to
+docs/; the workflow table and catalog names stay in the README.
+
 Tracking: beads epic `ai-config-vzg`
 
 ## Context

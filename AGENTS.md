@@ -6,8 +6,8 @@ Skills under `agents/skills/`. Codex, Pi, and Claude Code (2.1.277 or later) rea
 natively; there is no `CLAUDE.md` in this repo. This file documents how to maintain the
 libraries — it does **not** travel to other projects.
 
-For the catalog of skills/agents and the feature workflow they implement, see
-[README.md](README.md).
+For the catalog of skills/agents, see [docs/catalog.md](docs/catalog.md); for the feature
+workflow they implement, see [docs/workflow.md](docs/workflow.md).
 
 ## What lives where
 
@@ -41,7 +41,8 @@ For the catalog of skills/agents and the feature workflow they implement, see
 - `agents/skills/<name>/SKILL.md` — portable Open Agent Skills shared by Codex and Pi.
   New cross-harness skills belong here; harness-specific behavior stays in its own tree.
 - `codex/`, `pi/` — harness-specific configuration and guidance. See `codex/README.md`,
-  `pi/README.md`, and the root README's distribution section.
+  `pi/README.md`, and the [installation guide](docs/install.md).
+- `docs/*.md` — topic reference split out of the README, which stays the index.
 - `docs/decisions/` — architectural decisions and their rationale.
 
 Decide by intent: a discoverable technique → **skill**; an always-on convention →
@@ -81,6 +82,8 @@ When creating or editing skills, follow the `writing-skills` skill, and:
   implementation, discover vs. prescribe) point to each other instead of overlapping.
 - **Scope down.** Include a "When NOT to use" so a skill isn't over-applied to trivial work.
 - **No dead links.** Every referenced skill/agent/file must exist. Verify before committing.
+- **Keep the catalog in sync.** Adding or removing a skill or agent updates both
+  `docs/catalog.md` and the README "What's inside" section.
 - **Avoid name collisions with built-in commands.** (Claude-specific.) Built-ins include
   `code-review`, `security-review`, `review`, `verify`, `init`, `run`. (That's why this
   repo uses `senior-review` and `security-scan`.)

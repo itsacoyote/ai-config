@@ -5630,26 +5630,42 @@ else
 fi
 
 README="$REPO_ROOT/README.md"
-check 'the README has a clwt section' grep -qiE '^#+ .*clwt' "$README"
+CLWT_DOC="$REPO_ROOT/docs/clwt.md"
+# The README keeps only a stub; each file must keep its own clwt heading. Backticks
+# required: the fenced-heading check below matches only `clwt`, so a looser test here
+# would let that guard go inert.
+check 'the README has a clwt section' grep -qE '^#+ .*`clwt`' "$README"
+check 'docs/clwt.md has a clwt section' grep -qE '^#+ .*`clwt`' "$CLWT_DOC"
 
 # The clwt section was originally inserted *inside* an existing ```markdown fence,
 # so it rendered as a code sample and unbalanced every fence after it — while all
-# the line-based greps below passed happily. Count fences, and confirm the section
-# heading is not swallowed by one.
-fences=$(grep -c '^```' "$README")
-if [ $((fences % 2)) -eq 0 ]; then
-  ok 'the README code fences are balanced'
-else
-  not_ok "the README code fences are balanced (found $fences)"
-fi
-if python3 - "$README" <<'PY'
+# the line-based greps below passed happily. Count fences in both files, and confirm
+# no clwt heading is swallowed by one. Parity alone still passes a file with two
+# misplaced fences (the heading check below covers that); a missing file's empty count
+# reads as 0, hence the existence guard.
+for entry in "the README:$README" "docs/clwt.md:$CLWT_DOC"; do
+  if [ ! -f "${entry#*:}" ]; then
+    not_ok "${entry%%:*} code fences are balanced (file missing)"
+    continue
+  fi
+  fences=$(grep -c '^```' "${entry#*:}")
+  if [ $((fences % 2)) -eq 0 ]; then
+    ok "${entry%%:*} code fences are balanced"
+  else
+    not_ok "${entry%%:*} code fences are balanced (found $fences)"
+  fi
+done
+# Matches any heading level: docs/clwt.md opens with an H1, which a `## ` prefix test
+# would never flag.
+if python3 - "$README" "$CLWT_DOC" <<'PY'
 import sys
-inside = False
-for line in open(sys.argv[1]):
-    if line.startswith('```'):
-        inside = not inside
-    elif line.startswith('## `clwt`') and inside:
-        sys.exit(1)
+for path in sys.argv[1:]:
+    inside = False
+    for line in open(path):
+        if line.startswith('```'):
+            inside = not inside
+        elif '`clwt`' in line and line.startswith('#') and inside:
+            sys.exit(1)
 sys.exit(0)
 PY
 then
@@ -5658,46 +5674,46 @@ else
   not_ok 'the clwt section is a real heading, not inside a code fence'
 fi
 
-readme_missing=''
+doc_missing=''
 for sub in new branch open pr root list remove prune install help; do
-  grep -qE "clwt $sub" "$README" || readme_missing="$readme_missing $sub"
+  grep -qE "clwt $sub" "$CLWT_DOC" || doc_missing="$doc_missing $sub"
 done
-if [ -z "$readme_missing" ]; then
-  ok 'the README documents all ten subcommands'
+if [ -z "$doc_missing" ]; then
+  ok 'docs/clwt.md documents all ten subcommands'
 else
-  not_ok "the README documents all ten subcommands (missing:$readme_missing)"
+  not_ok "docs/clwt.md documents all ten subcommands (missing:$doc_missing)"
 fi
 
-check 'the README documents the managed root layout' \
-  grep -qF '.worktrees' "$README"
-check 'the README documents CLWT_REPO_ROOT' grep -qF 'CLWT_REPO_ROOT' "$README"
-check 'the README documents the --yolo shorthand' grep -qF -- '--yolo' "$README"
-check 'the README documents clwt session naming' \
-  grep -qF 'naming the session' "$README"
-check 'the README says what --yolo bypasses' \
-  grep -qF -- '--dangerously-skip-permissions' "$README"
-check 'the README documents the pr --force flag' grep -qF -- '--force' "$README"
+check 'docs/clwt.md documents the managed root layout' \
+  grep -qF '.worktrees' "$CLWT_DOC"
+check 'docs/clwt.md documents CLWT_REPO_ROOT' grep -qF 'CLWT_REPO_ROOT' "$CLWT_DOC"
+check 'docs/clwt.md documents the --yolo shorthand' grep -qF -- '--yolo' "$CLWT_DOC"
+check 'docs/clwt.md documents clwt session naming' \
+  grep -qF 'naming the session' "$CLWT_DOC"
+check 'docs/clwt.md says what --yolo bypasses' \
+  grep -qF -- '--dangerously-skip-permissions' "$CLWT_DOC"
+check 'docs/clwt.md documents the pr --force flag' grep -qF -- '--force' "$CLWT_DOC"
 check 'the clwt skill documents the pr --force flag' grep -qF -- '--force' "$SKILL"
-check 'the README documents the pr --no-review flag' grep -qF -- '--no-review' "$README"
+check 'docs/clwt.md documents the pr --no-review flag' grep -qF -- '--no-review' "$CLWT_DOC"
 check 'the clwt skill documents the pr --no-review flag' grep -qF -- '--no-review' "$SKILL"
-check 'the README documents verified refresh of reused PR worktrees' \
-  grep -qF 'last head that `clwt` verified' "$README"
+check 'docs/clwt.md documents verified refresh of reused PR worktrees' \
+  grep -qF 'last head that `clwt` verified' "$CLWT_DOC"
 check 'the clwt skill says --force cannot bypass PR reuse checks' \
   grep -qF '`--force` never bypasses these reuse checks' "$SKILL"
 check 'the clwt skill documents ignored local-file preservation' \
   grep -qF 'files such as `.env` survive' "$SKILL"
 check 'the clwt skill documents markerless legacy rewrite refusal' \
   grep -qF 'older markerless PR worktree' "$SKILL"
-check 'the README documents the worktreeinclude and beads behavior' \
-  grep -qF '.worktreeinclude' "$README"
-check 'the README documents how to run the test suite' \
-  grep -qF 'clwt-test.sh' "$README"
+check 'docs/clwt.md documents the worktreeinclude and beads behavior' \
+  grep -qF '.worktreeinclude' "$CLWT_DOC"
+check 'docs/clwt.md documents how to run the test suite' \
+  grep -qF 'clwt-test.sh' "$CLWT_DOC"
 # Newlines collapsed first: the claim spans a line break in the prose, and grep is
 # line-based. The assertion is about what the document says, not how it wraps.
-if tr '\n' ' ' <"$README" | grep -qiE 'cannot relaunch *itself|must be run by'; then
-  ok 'the README says launching subcommands are run by the developer'
+if tr '\n' ' ' <"$CLWT_DOC" | grep -qiE 'cannot relaunch *itself|must be run by'; then
+  ok 'docs/clwt.md says launching subcommands are run by the developer'
 else
-  not_ok 'the README says launching subcommands are run by the developer'
+  not_ok 'docs/clwt.md says launching subcommands are run by the developer'
 fi
 
 check 'the reground skill recommends clwt' grep -qF 'clwt' "$REGROUND"
