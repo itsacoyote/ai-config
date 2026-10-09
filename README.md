@@ -1,9 +1,25 @@
 # AI Config
 
+## What this is
+
 A portable library of [Claude Code](https://docs.claude.com/en/docs/claude-code) **skills, agents, rules, and references**. It gives Claude a structured, manual feature-development workflow — **Define → Research → Plan → Implement → Validate → Document** — plus a deep bench of engineering-quality skills (testing, security, API design, frontend, git, docs).
 
 Run `link.sh` once and every project on the machine gets the workflow; after that,
 `git pull` is the update (see [Installing the library](docs/install.md#installing-the-library)).
+
+---
+
+## Quick start
+
+```bash
+bash link.sh --dry-run   # preview every link and delete
+bash link.sh             # link the library into the harness homes
+/define                  # in Claude Code: start your first feature
+```
+
+**Before `bash link.sh`:** it deletes what it did not link inside the managed directories. Archive your existing harness homes and read every `delete` line of the dry run first. See [Before the first run](docs/install.md#before-the-first-run).
+
+Run `link.sh` from the primary checkout, on `main`.
 
 ---
 
@@ -47,20 +63,20 @@ Descriptions for each, and what `/cmd` marks, are in the [catalog](docs/catalog.
 
 ---
 
-## `clwt` — worktree CLI
+## Worktree CLIs
+
+### `clwt` — worktree CLI
 
 `claude/scripts/clwt` manages this repository's git worktrees and launches Claude Code
 sessions in them. Install, commands, and behavior are in [docs/clwt.md](docs/clwt.md).
 
----
-
-## `cwt` — Codex worktree CLI
+### `cwt` — Codex worktree CLI
 
 `codex/scripts/cwt` is an independent Codex port of `clwt` with the same ten commands and
 managed worktree root. Run it from your shell, not from inside a Codex session. See the
 [Codex cwt guide](codex/README.md#cwt--worktree-cli) and [docs/harnesses.md](docs/harnesses.md).
 
-## `pwt` — Pi worktree CLI
+### `pwt` — Pi worktree CLI
 
 `pi/scripts/pwt` is the developer-facing Pi launcher for the same ten-command worktree
 lifecycle. Run it from your shell, not from inside a Pi session. See the
@@ -101,8 +117,20 @@ agents/
 └── skills/                # shared portable skills, linked into ~/.agents/skills
 codex/             # Codex guidance and rules plus cwt, completion, and tests
 pi/                # Pi personal global context plus pwt, completion, tests, and guide
+docs/              # topic detail: workflow, catalog, install, clwt, harnesses, decisions
 archive/           # the previous automated pipeline, kept for reference
 AGENTS.md          # how to work IN this repo (read natively by all three harnesses)
 ```
 
 The `archive/` directory holds the previous fully-automated pipeline (the `/feature` orchestrator, `context.yaml`, step agents) — preserved for reference while the workflow is rebuilt manually.
+
+---
+
+## Docs
+
+- [docs/workflow.md](docs/workflow.md) — the workflow in detail, autorun, a CLAUDE.md snippet
+- [docs/catalog.md](docs/catalog.md) — descriptions for every skill, agent, rule, and reference
+- [docs/install.md](docs/install.md) — installing the library, the private directory, hooks, MCP servers
+- [docs/clwt.md](docs/clwt.md) — the `clwt` worktree CLI
+- [docs/harnesses.md](docs/harnesses.md) — Claude, Codex, Pi, and the shared `agents/` skills
+- [docs/decisions/](docs/decisions/) — architectural decisions and their rationale
