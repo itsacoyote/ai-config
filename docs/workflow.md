@@ -10,12 +10,12 @@ State and tasks flow through **[beads](https://github.com/gastownhall/beads)** (
 
 Run the **`setup-beads`** skill to install `bd` and initialize an isolated local database (nothing committed by default). The session-start gate hook (`claude/hooks/beads-gate.sh`, installed to `~/.claude/hooks`) stays silent where beads is absent and injects current task context where it's present.
 
+## Example: paste into your project's `CLAUDE.md`
+
 To orient Claude to the workflow in a target project, paste the snippet below into that
 project's `CLAUDE.md` and adapt it. Optionally copy `.mcp.json` (see
 [MCP servers](install.md#mcp-servers)); then start with `/define` (or read `feature-workflow`
 first).
-
-## Example: paste into your project's `CLAUDE.md`
 
 ```markdown
 ## Development workflow

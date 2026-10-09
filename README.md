@@ -11,15 +11,16 @@ Run `link.sh` once and every project on the machine gets the workflow; after tha
 
 ## Quick start
 
+**Before `bash link.sh`:** it deletes what it did not link inside the managed directories. Archive your existing harness homes and read every `delete` line of the dry run first. See [Before the first run](docs/install.md#before-the-first-run).
+
+Run `link.sh` from the primary checkout, on `main`:
+
 ```bash
 bash link.sh --dry-run   # preview every link and delete
 bash link.sh             # link the library into the harness homes
-/define                  # in Claude Code: start your first feature
 ```
 
-**Before `bash link.sh`:** it deletes what it did not link inside the managed directories. Archive your existing harness homes and read every `delete` line of the dry run first. See [Before the first run](docs/install.md#before-the-first-run).
-
-Run `link.sh` from the primary checkout, on `main`.
+Then, in Claude Code, run `/define` to start your first feature.
 
 ---
 
@@ -68,18 +69,20 @@ Descriptions for each, and what `/cmd` marks, are in the [catalog](docs/catalog.
 ### `clwt` — worktree CLI
 
 `claude/scripts/clwt` manages this repository's git worktrees and launches Claude Code
-sessions in them. Install, commands, and behavior are in [docs/clwt.md](docs/clwt.md).
+sessions in them. **You run it from your shell, not from inside Claude.** Install,
+commands, and behavior are in [docs/clwt.md](docs/clwt.md).
 
 ### `cwt` — Codex worktree CLI
 
 `codex/scripts/cwt` is an independent Codex port of `clwt` with the same ten commands and
-managed worktree root. Run it from your shell, not from inside a Codex session. See the
+managed worktree root. Run its launching commands from your shell, not from inside a Codex
+session. See the
 [Codex cwt guide](codex/README.md#cwt--worktree-cli) and [docs/harnesses.md](docs/harnesses.md).
 
 ### `pwt` — Pi worktree CLI
 
 `pi/scripts/pwt` is the developer-facing Pi launcher for the same ten-command worktree
-lifecycle. Run it from your shell, not from inside a Pi session. See the
+lifecycle. Run its launching commands from your shell, not from inside a Pi session. See the
 [Pi pwt guide](pi/README.md#pwt--worktree-cli) and [docs/harnesses.md](docs/harnesses.md).
 
 ---

@@ -11,9 +11,9 @@ Tracking: beads epic `ai-config-ewp`
 
 ## Context
 
-The README grew to 603 lines, mostly `clwt` flag behavior and install internals. The
-overview was hard to find, and a reader could not link to one topic without linking to the
-whole file.
+The README grew to 603 lines, nearly half of it `clwt` flag behavior and install
+internals. The overview was hard to find, and a reader could not link to one topic without
+linking to the whole file.
 
 [ADR 0004](0004-revert-agent-agnostic-library.md) (lines 35-39) called an earlier move of
 the catalog and workflow orientation into `docs/technical-guide.md` a front-door
