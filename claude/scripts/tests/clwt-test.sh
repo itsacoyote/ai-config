@@ -5631,15 +5631,18 @@ fi
 
 README="$REPO_ROOT/README.md"
 CLWT_DOC="$REPO_ROOT/docs/clwt.md"
-# The README keeps only a stub; each file must keep its own clwt heading.
-check 'the README has a clwt section' grep -qiE '^#+ .*clwt' "$README"
-check 'docs/clwt.md has a clwt section' grep -qiE '^#+ .*clwt' "$CLWT_DOC"
+# The README keeps only a stub; each file must keep its own clwt heading. Backticks
+# required: the fenced-heading check below matches only `clwt`, so a looser test here
+# would let that guard go inert.
+check 'the README has a clwt section' grep -qE '^#+ .*`clwt`' "$README"
+check 'docs/clwt.md has a clwt section' grep -qE '^#+ .*`clwt`' "$CLWT_DOC"
 
 # The clwt section was originally inserted *inside* an existing ```markdown fence,
 # so it rendered as a code sample and unbalanced every fence after it — while all
 # the line-based greps below passed happily. Count fences in both files, and confirm
 # no clwt heading is swallowed by one. Parity alone still passes a file with two
-# misplaced fences, and an empty count reads as 0 — hence the existence guard.
+# misplaced fences (the heading check below covers that); a missing file's empty count
+# reads as 0, hence the existence guard.
 for entry in "the README:$README" "docs/clwt.md:$CLWT_DOC"; do
   if [ ! -f "${entry#*:}" ]; then
     not_ok "${entry%%:*} code fences are balanced (file missing)"
