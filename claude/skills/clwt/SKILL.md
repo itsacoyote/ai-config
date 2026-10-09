@@ -102,8 +102,8 @@ prints at launch is the only signal of that, so treat a fork PR's own `pr <n>` l
 the same caution as running any of its code.
 
 Tab completion autoloads in bash but not in zsh. If a zsh developer reports that `clwt <Tab>`
-does nothing, the fix is two lines in their `~/.zshrc` (see `docs/clwt.md` in the ai-config repo) — `~/.zshrc` is
-theirs to edit, so hand them the snippet rather than editing it.
+does nothing, the fix is two lines in their `~/.zshrc` (see `docs/clwt.md` in the ai-config
+repo) — `~/.zshrc` is theirs to edit, so hand them the snippet rather than editing it.
 
 ## What to recommend, when
 

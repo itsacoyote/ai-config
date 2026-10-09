@@ -5631,16 +5631,20 @@ fi
 
 README="$REPO_ROOT/README.md"
 CLWT_DOC="$REPO_ROOT/docs/clwt.md"
-# One check per file: the README keeps a stub and the reference lives in docs/clwt.md,
-# so a check on only one file would miss the other losing its heading.
+# The README keeps only a stub; each file must keep its own clwt heading.
 check 'the README has a clwt section' grep -qiE '^#+ .*clwt' "$README"
 check 'docs/clwt.md has a clwt section' grep -qiE '^#+ .*clwt' "$CLWT_DOC"
 
 # The clwt section was originally inserted *inside* an existing ```markdown fence,
 # so it rendered as a code sample and unbalanced every fence after it — while all
 # the line-based greps below passed happily. Count fences in both files, and confirm
-# no clwt heading is swallowed by one.
+# no clwt heading is swallowed by one. Parity alone still passes a file with two
+# misplaced fences, and an empty count reads as 0 — hence the existence guard.
 for entry in "the README:$README" "docs/clwt.md:$CLWT_DOC"; do
+  if [ ! -f "${entry#*:}" ]; then
+    not_ok "${entry%%:*} code fences are balanced (file missing)"
+    continue
+  fi
   fences=$(grep -c '^```' "${entry#*:}")
   if [ $((fences % 2)) -eq 0 ]; then
     ok "${entry%%:*} code fences are balanced"
@@ -5657,7 +5661,7 @@ for path in sys.argv[1:]:
     for line in open(path):
         if line.startswith('```'):
             inside = not inside
-        elif 'clwt' in line and line.startswith('#') and inside:
+        elif '`clwt`' in line and line.startswith('#') and inside:
             sys.exit(1)
 sys.exit(0)
 PY
@@ -5667,14 +5671,14 @@ else
   not_ok 'the clwt section is a real heading, not inside a code fence'
 fi
 
-readme_missing=''
+doc_missing=''
 for sub in new branch open pr root list remove prune install help; do
-  grep -qE "clwt $sub" "$CLWT_DOC" || readme_missing="$readme_missing $sub"
+  grep -qE "clwt $sub" "$CLWT_DOC" || doc_missing="$doc_missing $sub"
 done
-if [ -z "$readme_missing" ]; then
+if [ -z "$doc_missing" ]; then
   ok 'docs/clwt.md documents all ten subcommands'
 else
-  not_ok "docs/clwt.md documents all ten subcommands (missing:$readme_missing)"
+  not_ok "docs/clwt.md documents all ten subcommands (missing:$doc_missing)"
 fi
 
 check 'docs/clwt.md documents the managed root layout' \
