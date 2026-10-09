@@ -62,7 +62,7 @@ current process with a new Codex session.
 
 **Prerequisites:** stock macOS Bash 3.2 or newer and Git. Authenticated `gh` is required
 only for `cwt pr` and `cwt prune`. The repository must have an `origin` remote. The network
-steps of `cwt new` and `cwt branch` over an SSH remote run ssh in batch mode with a connect
+steps of `cwt new` and `cwt branch`, and `cwt pr`'s base-branch fetch, over an SSH remote run ssh in batch mode with a connect
 timeout, so an unreachable remote fails with git's own error instead of hanging; batch mode
 also means ssh cannot ask for a key passphrase or accept a new host key, so load your key
 with `ssh-add` and connect once with plain `ssh` first. A custom ssh command
@@ -132,8 +132,11 @@ exists yet.
 alongside the worktree (never inside it, so it never shows in `git status`); unless
 `--no-review`, it also sends a one-line `$pr-review <n> <path>` startup prompt, so the
 session opens already reviewing. `--no-review` skips the prompt but still writes the file;
-a context-fetch failure then only warns instead of refusing to launch. `cwt remove`/`cwt
-prune` delete the session folder with the worktree. Unlike Claude, Codex does not rank a personal skill above a
+a context-fetch failure then only warns instead of refusing to launch. Unless `--no-review`,
+`cwt pr` first fetches the PR's base branch from origin; if that fetch fails, it withholds
+the prompt and warns. When the review is withheld for any reason and stdin and stderr are
+both terminals, `cwt pr` waits for Enter before launching (Ctrl-D continues, Ctrl-C
+cancels). `cwt remove`/`cwt prune` delete the session folder with the worktree. Unlike Claude, Codex does not rank a personal skill above a
 project one on a name collision, so `cwt pr` additionally withholds the prompt (warning
 instead, still launching) when the checked-out PR's diff against its merge base touches a
 path under `.agents` or `.codex` — a pull request could otherwise ship its own

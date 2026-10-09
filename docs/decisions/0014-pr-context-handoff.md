@@ -116,3 +116,13 @@ this order; readers find sections by these exact headings.
   PR could ship a same-named file.
 - **Put the context directly in the prompt.** Rejected: large diffs exceed argv limits and
   flood the first message.
+
+## Addendum (2026-10-08)
+
+- `clwt pr` and `cwt pr` now fetch the pull request's base branch from origin before they
+  decide whether to start the review, unless `--no-review`.
+- A failed base-branch fetch is a new skip reason: the prompt is withheld with a warning,
+  and the session still launches.
+- A skip, for any reason, now also pauses for Enter before launch when stdin and stderr are
+  both terminals (Ctrl-D continues, Ctrl-C cancels), so the warning is not lost when the
+  harness takes over the screen.

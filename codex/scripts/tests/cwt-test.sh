@@ -84,6 +84,10 @@ section() {
 
 # ---------------------------------------------------------------- world setup
 
+# A run from a terminal must never block on a read: cwt pauses for Enter when it
+# skips a requested review. The pause tests give cwt a pty of their own.
+exec </dev/null
+
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/cwt-test.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -95,7 +99,7 @@ printf '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBran
 
 # A caller's own ssh configuration must never leak into what the ssh-transport
 # cases below observe — each one sets what it needs on the one call under test.
-unset GIT_SSH_COMMAND GIT_SSH GIT_SSH_VARIANT
+unset GIT_SSH_COMMAND GIT_SSH GIT_SSH_VARIANT GIT_TERMINAL_PROMPT
 
 # HOME is deliberately left UNRESOLVED here. Pre-resolving it hid a real bug:
 # managed_root was built from a raw $HOME while every path compared against it was
@@ -133,6 +137,7 @@ cat >"$BIN/codex" <<'STUB'
   printf 'pwd=%s\n' "$PWD"
   printf 'CWT_REPO_ROOT=%s\n' "${CWT_REPO_ROOT-<unset>}"
   printf 'GIT_SSH_COMMAND=%s\n' "${GIT_SSH_COMMAND-<unset>}"
+  printf 'GIT_TERMINAL_PROMPT=%s\n' "${GIT_TERMINAL_PROMPT-<unset>}"
   printf 'argc=%s\n' "$#"
   printf 'args=%s\n' "$*"
   # One line per argument, not just the joined "args=" line: asserting a
@@ -244,6 +249,9 @@ gh_pr_view_context() {
   fi
   if [ -f "$CWT_GH_PRS/$number.context-author-app-malformed" ]; then
     author='foo/bar'
+  fi
+  if [ -f "$CWT_GH_PRS/$number.base" ]; then
+    base=$(cat "$CWT_GH_PRS/$number.base")
   fi
   if [ -f "$CWT_GH_PRS/$number.context-base-invalid" ]; then
     base='-bad..base'
@@ -738,6 +746,9 @@ pr_context_author_app() { : >"$CWT_GH_PRS/$1.context-author-app"; }
 # NOT the `app/<name>` shape, proving the author check isn't loosened to
 # accept any slash.
 pr_context_author_app_malformed() { : >"$CWT_GH_PRS/$1.context-author-app-malformed"; }
+# pr_base <number> <name> — the combined view call reports <name> as the base
+# branch instead of main.
+pr_base() { printf '%s' "$2" >"$CWT_GH_PRS/$1.base"; }
 # pr_context_base_invalid <number> — the combined view call reports a base
 # branch name that fails git check-ref-format --branch.
 pr_context_base_invalid() { : >"$CWT_GH_PRS/$1.context-base-invalid"; }
@@ -3120,6 +3131,383 @@ check_equals 'pr sends the review prompt for a bot-authored PR (app/<name> autho
 \$pr-review 907 $(pr_context_path feat-review-prompt-bot-author)" \
   "$(launched_arg_list | tail -2)"
 
+section 'pr base fetch'
+
+# Never use main as a base here: the shadowing section after this one
+# force-pushes it. Each fixture gets its own release/* base on $REMOTE only, and
+# asserts its shape first because some helpers above fetch into $PRIMARY
+# themselves and would create the very ref under test.
+
+# child_commit <parent> <msg> — a same-tree commit on <parent> in the scratch
+# clone; prints its sha.
+child_commit() {
+  git -C "$SCRATCH_PUSH" commit-tree "$(git -C "$SCRATCH_PUSH" rev-parse "$1^{tree}")" -p "$1" -m "$2"
+}
+
+# release_base <name> [<parent-sha>] — pushes a commit as refs/heads/<name> on
+# $REMOTE from the scratch clone (never $PRIMARY) and prints its sha.
+release_base() {
+  local name=$1 parent=${2:-} sha
+  ensure_scratch_push
+  [ -n "$parent" ] || parent=$(git -C "$SCRATCH_PUSH" rev-parse HEAD)
+  sha=$(child_commit "$parent" "base $name ($RANDOM$RANDOM)")
+  push_and_print "$name" "$sha"
+}
+
+# local_base_oid <name> — $PRIMARY's refs/remotes/origin/<name>, empty if absent.
+local_base_oid() {
+  git -C "$PRIMARY" rev-parse --verify --quiet "refs/remotes/origin/$1^{commit}" || true
+}
+
+# base_pr <number> <head-ref> <base-name> <parent-sha> — a PR whose head adds an
+# unrelated file on <parent-sha>, with <base-name> as its reported base.
+base_pr() {
+  local oid
+  oid=$(push_pr_head_from_sha "$2" "$4") || return 1
+  write_pr_meta "$1" "$2" false "$oid"
+  pr_base "$1" "$3"
+}
+
+# assert_review_skipped <condition> — no prompt was sent and the session still
+# launched.
+assert_review_skipped() {
+  check_equals "pr sends no review prompt $1" '' "$(launched args)"
+  check "pr still launches $1" test -n "$(launched pwd)"
+}
+
+review_prompt_for() { printf -- '--\n$pr-review %s %s' "$1" "$(pr_context_path "$2")"; }
+
+# The base exists on origin only.
+bf_base=$(release_base release/v0.3)
+base_pr 1001 feat/bf-missing release/v0.3 "$bf_base"
+check_equals 'fixture: the missing-base ref is absent locally before the run' '' "$(local_base_oid release/v0.3)"
+launch_reset
+cwt pr 1001 >/dev/null 2>&1
+check_equals 'pr fetches a base branch that exists on origin but not locally' \
+  "$bf_base" "$(local_base_oid release/v0.3)"
+check_equals 'pr starts the review for a base branch that was missing locally' \
+  "$(review_prompt_for 1001 feat-bf-missing)" "$(launched_arg_list | tail -2)"
+
+# The stale local ref has no .agents, origin's base has gained one. Without
+# the fetch, the PR (built on the new tip) looks like it adds .agents.
+bf_old=$(release_base release/stale)
+fetch_stale_tracking_ref release/stale
+bf_new=$(commit_adding_path "$bf_old" '.agents/skills/existing/SKILL.md' 'pre-existing skill')
+push_and_print release/stale "$bf_new" >/dev/null
+base_pr 1002 feat/bf-stale release/stale "$bf_new"
+check_equals 'fixture: the stale local base is behind origin' "$bf_old" "$(local_base_oid release/stale)"
+check_fails 'fixture: the stale local base has no .agents' \
+  git -C "$PRIMARY" rev-parse --verify --quiet "refs/remotes/origin/release/stale:.agents"
+check 'fixture: origin base has a .agents the stale ref lacks' \
+  git -C "$SCRATCH_PUSH" rev-parse --verify --quiet "$bf_new:.agents"
+launch_reset
+cwt pr 1002 >/dev/null 2>&1
+check_equals 'pr refreshes a stale local base' "$bf_new" "$(local_base_oid release/stale)"
+check_equals 'pr starts the review once the stale base is refreshed' \
+  "$(review_prompt_for 1002 feat-bf-stale)" "$(launched_arg_list | tail -2)"
+
+# The "+" in the refspec: a force-pushed base is not a fast-forward.
+bf_root=$(release_base release/rewritten)
+bf_before=$(child_commit "$bf_root" "rewritten base, before")
+push_and_print release/rewritten "$bf_before" >/dev/null
+fetch_stale_tracking_ref release/rewritten
+bf_after=$(child_commit "$bf_root" "rewritten base, after")
+push_and_print release/rewritten "$bf_after" >/dev/null
+base_pr 1003 feat/bf-rewritten release/rewritten "$bf_after"
+check_equals 'fixture: the local base still holds the pre-rewrite tip' \
+  "$bf_before" "$(local_base_oid release/rewritten)"
+check_fails 'fixture: the pre-rewrite tip is not an ancestor of the rewritten one' \
+  git -C "$SCRATCH_PUSH" merge-base --is-ancestor "$bf_before" "$bf_after"
+launch_reset
+cwt pr 1003 >/dev/null 2>&1
+check_equals 'pr refreshes a base that was rewritten upstream' "$bf_after" "$(local_base_oid release/rewritten)"
+check_equals 'pr starts the review for a base that was rewritten upstream' \
+  "$(review_prompt_for 1003 feat-bf-rewritten)" "$(launched_arg_list | tail -2)"
+
+# The base is gone from origin but a stale local ref survives. That ref is the
+# PR's own parent with an identical .agents, so the guard would ACCEPT it: only
+# returning before the guard keeps the review from starting.
+bf_gone=$(release_base release/gone)
+fetch_stale_tracking_ref release/gone
+base_pr 1004 feat/bf-gone release/gone "$bf_gone"
+git -C "$SCRATCH_PUSH" push -q origin :refs/heads/release/gone
+check_equals 'fixture: a guard-acceptable stale local base survives' "$bf_gone" "$(local_base_oid release/gone)"
+check_equals 'fixture: the base is gone from origin' '' \
+  "$(git -C "$PRIMARY" ls-remote origin refs/heads/release/gone | cut -f1)"
+launch_reset
+bf_gone_out=$(cwt pr 1004 2>&1)
+check_contains 'pr names the failed fetch when the base is gone from origin' 'could not fetch' "$bf_gone_out"
+check_contains 'the failed-fetch reason names the base ref' 'origin/release/gone' "$bf_gone_out"
+assert_review_skipped "when the base fetch fails, even with a stale local ref"
+
+# A base name git rejects as a refspec (it passes check-ref-format --branch only
+# when $PRIMARY has a previous checkout) must skip, not crash.
+git -C "$PRIMARY" switch -q -c bf-previous-checkout
+git -C "$PRIMARY" switch -q -
+git -C "$PRIMARY" branch -q -D bf-previous-checkout
+check 'fixture: @{-1} passes check-ref-format in the primary clone' \
+  git -C "$PRIMARY" check-ref-format --branch '@{-1}'
+bf_prev=$(release_base release/prev)
+base_pr 1005 feat/bf-at-prev '@{-1}' "$bf_prev"
+launch_reset
+bf_prev_out=$(cwt pr 1005 2>&1)
+check_contains 'pr skips the review with the fetch reason when the base name is not fetchable' \
+  'could not fetch' "$bf_prev_out"
+assert_review_skipped "for an unfetchable base name"
+
+# --no-review never fetches. A stale local ref with a newer origin tip
+# distinguishes "no fetch" from "fetch failed"; a fetch would move the ref.
+bf_nr_old=$(release_base release/noreview)
+fetch_stale_tracking_ref release/noreview
+bf_nr_new=$(release_base release/noreview "$bf_nr_old")
+base_pr 1006 feat/bf-no-review release/noreview "$bf_nr_new"
+check_equals 'fixture: the local base is behind origin' "$bf_nr_old" "$(local_base_oid release/noreview)"
+launch_reset
+bf_nr_out=$(cwt pr 1006 --no-review 2>&1)
+check_equals 'pr --no-review leaves the stale local base untouched' \
+  "$bf_nr_old" "$(local_base_oid release/noreview)"
+check_not_contains 'pr --no-review does not warn about a base fetch' 'could not fetch' "$bf_nr_out"
+check 'pr --no-review still launches' test -n "$(launched pwd)"
+
+# The guard still runs after a successful fetch. The base is absent locally, so
+# a reason about .agents (not about a missing ref) shows the fetch happened first.
+bf_cl=$(release_base release/agents-pr)
+bf_cl_head=$(commit_adding_path "$bf_cl" '.agents/skills/pr-review/SKILL.md' 'malicious skill')
+push_and_print feat/bf-agents "$bf_cl_head" >/dev/null
+write_pr_meta 1007 feat/bf-agents false "$bf_cl_head"
+pr_base 1007 release/agents-pr
+check_equals 'fixture: the agents-pr base is absent locally' '' "$(local_base_oid release/agents-pr)"
+launch_reset
+bf_cl_out=$(cwt pr 1007 2>&1)
+check_contains 'pr still skips the review when the PR itself changes .agents' \
+  'touches a path under .agents' "$bf_cl_out"
+assert_review_skipped "when the PR itself changes .agents"
+
+# The fetch succeeds and only the guard's own rev-parse fails, so the guard's
+# "cannot resolve the base ref" branch keeps coverage now that a missing base
+# normally reaches the fetch-failure reason first.
+bf_gd=$(release_base release/guard-revparse)
+base_pr 1008 feat/bf-guard-revparse release/guard-revparse "$bf_gd"
+make_failing_git 'refs/remotes/origin/release/guard-revparse^{commit}'
+launch_reset
+bf_gd_out=$(cwt_with_failing_git pr 1008 2>&1)
+rm -f "$FAILGIT/git"
+check_contains 'pr skips the review when the guard cannot resolve the fetched base' \
+  'could verify' "$bf_gd_out"
+check_not_contains 'a guard rev-parse failure is not reported as a failed fetch' 'could not fetch' "$bf_gd_out"
+assert_review_skipped "when the guard cannot resolve the base"
+
+# The fetch goes through remote_git (ssh fail-fast options) with
+# GIT_TERMINAL_PROMPT=0 on that call only: a prompting https credential helper
+# would otherwise block the launch.
+ENVGIT="$TMP/envgit"
+BASE_FETCH_LOG="$TMP/base-fetch-env.log"
+mkdir -p "$ENVGIT"
+cat >"$ENVGIT/git" <<STUB
+#!/usr/bin/env bash
+is_fetch=0 is_base=0
+for a in "\$@"; do
+  [ "\$a" = fetch ] && is_fetch=1
+  case \$a in *refs/remotes/origin/release/env-check) is_base=1 ;; esac
+done
+if [ "\$is_fetch" = 1 ] && [ "\$is_base" = 1 ]; then
+  {
+    printf 'GIT_TERMINAL_PROMPT=%s\n' "\${GIT_TERMINAL_PROMPT-<unset>}"
+    printf 'GIT_SSH_COMMAND=%s\n' "\${GIT_SSH_COMMAND-<unset>}"
+  } >>"$BASE_FETCH_LOG"
+fi
+exec $(command -v git) "\$@"
+STUB
+chmod +x "$ENVGIT/git"
+bf_env=$(release_base release/env-check)
+base_pr 1009 feat/bf-env release/env-check "$bf_env"
+: >"$BASE_FETCH_LOG"
+launch_reset
+PATH="$ENVGIT:$PATH" cwt_in "$PRIMARY" pr 1009 >/dev/null 2>&1
+check_contains 'the base fetch runs with GIT_TERMINAL_PROMPT=0' 'GIT_TERMINAL_PROMPT=0' "$(cat "$BASE_FETCH_LOG")"
+check_contains 'the base fetch runs through remote_git (ssh BatchMode)' 'BatchMode=yes' "$(cat "$BASE_FETCH_LOG")"
+check_equals 'GIT_TERMINAL_PROMPT does not reach the launched session' '<unset>' "$(launched GIT_TERMINAL_PROMPT)"
+check_equals 'the env-check PR still gets its review prompt' \
+  "$(review_prompt_for 1009 feat-bf-env)" "$(launched_arg_list | tail -2)"
+
+# A relative core.hooksPath resolves against the working tree git runs in, so a
+# base fetch run from the PR's worktree would execute the PR's own hook. The
+# hook logs every ref update it sees; checkout steps may legitimately log other
+# refs, so the assertion is that none of them is the base ref.
+_fixture_add_exec_hook() {
+  local idx=$1 blob
+  blob=$(printf '#!/bin/sh\ncat >>"%s"\n' "$HOOK_LOG" | git -C "$SCRATCH_PUSH" hash-object -w --stdin)
+  GIT_INDEX_FILE="$idx" git -C "$SCRATCH_PUSH" update-index --add --cacheinfo "100755,$blob,.prhooks/reference-transaction"
+}
+HOOK_LOG="$TMP/pr-tree-hook.log"
+bf_hk=$(release_base release/hooks)
+bf_hk_head=$(with_fixture_tree "$bf_hk" 'add pr hook' _fixture_add_exec_hook)
+push_and_print feat/bf-hooks "$bf_hk_head" >/dev/null
+write_pr_meta 1011 feat/bf-hooks false "$bf_hk_head"
+pr_base 1011 release/hooks
+: >"$HOOK_LOG"
+git -C "$PRIMARY" config core.hooksPath .prhooks
+launch_reset
+cwt pr 1011 >/dev/null 2>&1
+git -C "$PRIMARY" config --unset core.hooksPath
+check_equals 'the base fetch updated the base ref' "$bf_hk" "$(local_base_oid release/hooks)"
+check_not_contains "pr's base fetch does not run hooks from the pull request's tree" \
+  'refs/remotes/origin/release/hooks' "$(cat "$HOOK_LOG")"
+check_equals 'the hooks PR still gets its review prompt' \
+  "$(review_prompt_for 1011 feat-bf-hooks)" "$(launched_arg_list | tail -2)"
+
+# The reused-worktree path fetches the base too. --no-review creates the
+# worktree without fetching, so the base ref is still absent before the reuse.
+bf_reuse=$(release_base release/reuse)
+base_pr 1010 feat/bf-reuse release/reuse "$bf_reuse"
+launch_reset
+cwt pr 1010 --no-review >/dev/null 2>&1
+check_equals 'fixture: the base is still absent after the --no-review checkout' '' "$(local_base_oid release/reuse)"
+launch_reset
+bf_reuse_out=$(cwt pr 1010 2>&1)
+check_contains 'fixture: the second run reuses the worktree' 'reusing existing worktree' "$bf_reuse_out"
+check_equals 'pr fetches the base on a reused worktree' "$bf_reuse" "$(local_base_oid release/reuse)"
+check_equals 'pr starts the review on a reused worktree once the base is fetched' \
+  "$(review_prompt_for 1010 feat-bf-reuse)" "$(launched_arg_list | tail -2)"
+
+section 'pr skipped-review pause'
+
+# The pause tests run cwt on a pseudo-terminal (BSD `script`). The writer runs in
+# a pipeline subshell, so it asserts nothing: it records to a file and the main
+# shell asserts afterwards.
+PAUSE_PROMPT='press Enter to open the session without the review'
+
+# Closing the pipe without a newline (mode eof) becomes Ctrl-D under script.
+tty_writer() {
+  local rec=$1 mode=$2 watch=$3 i=0 seen=0 timeout=1 lines
+  while [ "$i" -lt 100 ]; do
+    if grep -qF -- "$PAUSE_PROMPT" "$watch" 2>/dev/null; then seen=1 timeout=0; break; fi
+    if [ -s "$CWT_TEST_LOG" ]; then timeout=0; break; fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  lines=$(wc -l <"$CWT_TEST_LOG" | tr -d ' ')
+  printf 'prompt_seen=%s\ntimeout=%s\nlog_lines=%s\n' "$seen" "$timeout" "$lines" >"$rec"
+  if [ "$mode" = enter ]; then printf '\n'; fi
+}
+
+tty_run() {
+  local rec=$1 out=$2 mode=$3 watch=$4
+  shift 4
+  : >"$out"
+  : >"$rec"
+  (cd "$PRIMARY" && tty_writer "$rec" "$mode" "$watch" | /usr/bin/script -q /dev/null "$@" >"$out" 2>&1)
+}
+
+tty_text() { tr -d '\r\010' <"$1" | sed 's/\^D//g'; }
+rec_value() { sed -n "s/^$2=//p" "$1" | tail -1; }
+
+# pause_pr <number> <head-ref> <cross> — a PR the guard withholds the review
+# from (it adds .agents), on a base that exists on origin only.
+pause_pr() {
+  local base head
+  base=$(release_base "release/pause-$1")
+  head=$(commit_adding_path "$base" '.agents/skills/pr-review/SKILL.md' 'shadowing skill')
+  push_and_print "$2" "$head" >/dev/null
+  write_pr_meta "$1" "$2" "$3" "$head"
+  pr_base "$1" "release/pause-$1"
+}
+
+PAUSE_REC="$TMP/pause.rec"
+PAUSE_OUT="$TMP/pause.out"
+
+pause_pr 1101 feat/pause-enter false
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_OUT" "$CWT" pr 1101
+check_equals 'pr waits for Enter on a terminal when the review is skipped' 1 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_equals 'pr has not launched while it waits for Enter' 0 "$(rec_value "$PAUSE_REC" log_lines)"
+check_contains 'pr launches once Enter is sent' "pwd=$MANAGED/feat-pause-enter" "$(cat "$CWT_TEST_LOG")"
+check_equals 'pr launches without the review prompt after Enter' '' "$(launched args)"
+check_contains 'the skip warning is printed on the terminal' \
+  'the review was not started automatically' "$(tty_text "$PAUSE_OUT")"
+
+pause_pr 1102 feat/pause-eof false
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" eof "$PAUSE_OUT" "$CWT" pr 1102
+check_equals 'pr waits at the pause before Ctrl-D' 1 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_equals 'pr has not launched while it waits for Ctrl-D' 0 "$(rec_value "$PAUSE_REC" log_lines)"
+check 'pr launches after Ctrl-D at the pause' test -n "$(launched pwd)"
+check_equals 'pr launches without the review prompt after Ctrl-D' '' "$(launched args)"
+
+# stdin is a non-terminal that never closes, so an ungated `read` would block
+# until the watchdog kills it. stderr is a terminal here, which isolates the
+# stdin half of the gate: with only the stderr check the pause would still run.
+pause_pr 1103 feat/pause-stdin false
+HELD_STDIN="$TMP/held-stdin"
+mkfifo "$HELD_STDIN"
+launch_reset
+: >"$PAUSE_OUT"
+within_scan_budget "$PRIMARY" /usr/bin/script -q /dev/null \
+  bash -c 'exec "$0" pr 1103 <>"$1"' "$CWT" "$HELD_STDIN" >"$PAUSE_OUT" 2>&1 </dev/null
+check 'pr launches without waiting when stdin is not a terminal' test -n "$(launched pwd)"
+check_contains 'the skip warning was printed when stdin is not a terminal' \
+  'the review was not started automatically' "$(tty_text "$PAUSE_OUT")"
+check_not_contains 'pr does not wait when stdin is not a terminal' "$PAUSE_PROMPT" "$(tty_text "$PAUSE_OUT")"
+rm -f "$HELD_STDIN"
+
+# stdout and stdin are terminals, stderr is a file: the prompt would be
+# invisible, so it must not be printed or waited for.
+pause_pr 1104 feat/pause-stderr false
+PAUSE_ERR="$TMP/pause.err"
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_ERR" \
+  bash -c 'exec "$0" pr 1104 2>"$1"' "$CWT" "$PAUSE_ERR"
+check_contains 'the skip warning reached the redirected stderr' \
+  'the review was not started automatically' "$(cat "$PAUSE_ERR")"
+check_equals 'pr does not pause when stderr is not a terminal' 0 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_not_contains 'pr does not print the pause prompt when stderr is not a terminal' \
+  "$PAUSE_PROMPT" "$(cat "$PAUSE_ERR")"
+check 'pr launched without any input when stderr is not a terminal' test -n "$(launched pwd)"
+check_equals 'pr (stderr not a terminal) launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr (stderr not a terminal) launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
+
+# The PR would be skipped if reviewed (it adds .agents); --no-review must not
+# turn that into a pause.
+pause_pr 1105 feat/pause-no-review false
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_OUT" "$CWT" pr 1105 --no-review
+check_equals 'pr --no-review does not pause on a terminal' 0 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_not_contains 'pr --no-review does not print the pause prompt on a terminal' \
+  "$PAUSE_PROMPT" "$(tty_text "$PAUSE_OUT")"
+check 'pr --no-review launched without any input on a terminal' test -n "$(launched pwd)"
+check_equals 'pr --no-review launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr --no-review launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
+
+pr_meta 1106 feat/pause-review false
+launch_reset
+tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_OUT" "$CWT" pr 1106
+check_equals 'pr does not pause on a terminal when the review starts' 0 "$(rec_value "$PAUSE_REC" prompt_seen)"
+check_not_contains 'pr does not print the pause prompt when the review starts' \
+  "$PAUSE_PROMPT" "$(tty_text "$PAUSE_OUT")"
+check_equals 'pr passes the review prompt when it does not pause' \
+  "$(review_prompt_for 1106 feat-pause-review)" "$(launched_arg_list | tail -2)"
+check_equals 'pr (review starts) launched before any input' 0 "$(rec_value "$PAUSE_REC" timeout)"
+check 'pr (review starts) launch log non-empty before input' test "$(rec_value "$PAUSE_REC" log_lines)" -gt 0
+
+# The fork warning is the last message before launch on both paths (the fresh
+# path prints it after finish_pr_context, the reuse path after the reuse note).
+pause_pr 1107 feat/pause-order true
+for pause_path in fresh reuse; do
+  launch_reset
+  tty_run "$PAUSE_REC" "$PAUSE_OUT" enter "$PAUSE_OUT" "$CWT" pr 1107
+  pause_text=$(tty_text "$PAUSE_OUT")
+  pause_line=$(printf '%s\n' "$pause_text" | grep -nF -- "$PAUSE_PROMPT" | head -1 | cut -d: -f1)
+  last_warning_line=$(printf '%s\n' "$pause_text" | grep -niF 'warning' | tail -1 | cut -d: -f1)
+  if [ "$pause_path" = reuse ]; then
+    check_contains 'pr (reuse) takes the reuse path' 'reusing existing worktree' "$pause_text"
+  fi
+  check_contains "pr ($pause_path) prints the fork warning" 'comes from a fork' "$pause_text"
+  check_contains "pr ($pause_path) prints the skip warning" 'the review was not started automatically' "$pause_text"
+  check "pr ($pause_path) prints the pause prompt after every other warning" \
+    test -n "$pause_line" -a -n "$last_warning_line" -a "${pause_line:-0}" -gt "${last_warning_line:-0}"
+  check 'pr ('"$pause_path"') launches after Enter' test -n "$(launched pwd)"
+done
+
 section 'pr skill-shadowing guard (Req 4b)'
 
 # Codex, unlike Claude, does not rank a personal skill above a project one on
@@ -3304,17 +3692,16 @@ shadow_stale_out=$(cwt pr 970 2>&1)
 check_contains 'pr withholds the review prompt when the PR still carries a .agents file the base has since changed' \
   'carries a .agents/.codex tree that differs from origin/main; rebase onto the current base to get the review prompt' "$shadow_stale_out"
 
-# A base branch name cwt cannot resolve to a local refs/remotes/origin/<name>
-# at all (a stale clone, or a base branch renamed/deleted upstream since the
-# last fetch) fails closed exactly like a confirmed match, the same as an
-# unresolvable merge-base.
+# An unfetchable base is withheld with the failed-fetch reason, not the guard's.
 pr_meta 971 feat/shadow-base-missing false
 pr_context_base_missing 971
 launch_reset
 shadow_base_missing_out=$(cwt pr 971 2>&1)
-check_contains 'pr withholds the review prompt when origin/$base_ref cannot be resolved at all' \
-  'this-base-branch-does-not-exist' "$shadow_base_missing_out"
-check 'pr still launches when the base ref cannot be resolved' test -n "$(launched pwd)"
+check_contains 'pr withholds the review prompt when the base branch cannot be fetched from origin' \
+  'could not fetch' "$shadow_base_missing_out"
+check_contains 'the fetch-failure reason names the missing base' \
+  'origin/feat/this-base-branch-does-not-exist' "$shadow_base_missing_out"
+check 'pr still launches when the base branch cannot be fetched' test -n "$(launched pwd)"
 
 # A symlink the base branch already ships, that the pull request's own diff
 # never touches at all, bypasses both checks above: the diff scan sees no

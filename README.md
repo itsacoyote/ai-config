@@ -185,7 +185,7 @@ from inside Claude.**
 **Prerequisites:** stock macOS `bash` 3.2+ and `git`. `gh` (authenticated) is needed only by `clwt pr`
 and `clwt prune` — both fail with a clear message rather than guessing if it is missing
 or logged out. The repository must have an `origin` remote, since the managed paths are
-derived from it. The network steps of `clwt new` and `clwt branch` over an SSH remote
+derived from it. The network steps of `clwt new` and `clwt branch`, and `clwt pr`'s base-branch fetch, over an SSH remote
 run ssh in batch mode with a connect timeout, so an unreachable remote fails with git's
 own error instead of hanging; batch mode also means ssh cannot ask for a key passphrase
 or accept a new host key, so load your key with `ssh-add` and connect once with plain
@@ -267,8 +267,11 @@ since `claude` takes the last value it sees.
 alongside the worktree; unless `--no-review`, it also sends a one-line
 `/pr-review <n> <path>` startup prompt, so the session opens already reviewing.
 `--no-review` skips the prompt but still writes the file (a fetch failure then only warns
-instead of refusing to launch). `clwt remove`/`clwt prune` delete the session folder with
-the worktree. Details, including the residual AGENTS.md/CLAUDE.md risk, are in the
+instead of refusing to launch). Unless `--no-review`, `clwt pr` first fetches the PR's base
+branch from origin; if that fetch fails, it withholds the prompt and warns. When the review
+is withheld for any reason and stdin and stderr are both terminals, `clwt pr` waits for Enter
+before launching (Ctrl-D continues, Ctrl-C cancels). `clwt remove`/`clwt prune` delete the
+session folder with the worktree. Details, including the residual AGENTS.md/CLAUDE.md risk, are in the
 [`clwt` skill](claude/skills/clwt/SKILL.md) and [ADR 0014](docs/decisions/0014-pr-context-handoff.md).
 
 ### Why it's a CLI and not a skill

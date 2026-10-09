@@ -85,7 +85,11 @@ Claude read access to that folder with `--add-dir`; unless `--no-review`, it als
 one-line `/pr-review <n> <path>` startup prompt — the review is already running when the
 session opens, no typing needed. `clwt remove`/`clwt prune` delete the session folder with
 the worktree. `--no-review` skips the prompt but still writes the file; a context-fetch
-failure then only warns instead of refusing to launch. Claude ranks a project subagent
+failure then only warns instead of refusing to launch. Unless `--no-review`, `clwt pr`
+first fetches the pull request's base branch from origin; if that fetch fails, it withholds
+the prompt and warns. When the review is withheld for any reason and stdin and stderr are
+both terminals, `clwt pr` waits for Enter before launching (Ctrl-D continues, Ctrl-C
+cancels). Claude ranks a project subagent
 (`.claude/agents/<name>.md`) ABOVE a personal one of the same name — the opposite of its
 skill precedence — so a PR shipping its own `.claude/agents/pr-security.md` (or any other
 pass's subagent) could otherwise replace that pass of the review silently. `clwt pr`
