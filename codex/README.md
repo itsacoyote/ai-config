@@ -35,7 +35,7 @@ Rules:
 ## Or link the skills once, personally
 
 Codex also discovers skills in `~/.agents/skills` across every project. The repo's human-run
-`link.sh` (see the [root README](../README.md#installing-the-library)) symlinks every shared
+`link.sh` (see the [installation guide](../docs/install.md#installing-the-library)) symlinks every shared
 skill there, links `agents/AGENTS.md` as `~/.codex/AGENTS.md`, and links the command rules
 below into `~/.codex/rules/`. It never touches `~/.codex/config.toml` or auth files.
 

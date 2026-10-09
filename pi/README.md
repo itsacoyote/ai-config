@@ -14,7 +14,7 @@ shared with Codex live separately under [`../agents/skills`](../agents/skills/).
 
 `pi/AGENTS.md` is a personal global file, not a project template. The human-run `link.sh`
 at the repo root symlinks it into `~/.pi/agent/` (see the
-[root README](../README.md#installing-the-library)); never copy it into a shared repository.
+[installation guide](../docs/install.md#installing-the-library)); never copy it into a shared repository.
 [ADR 0008](../docs/decisions/0008-pi-global-only-config.md) records that boundary and
 [ADR 0013](../docs/decisions/0013-link-config-library.md) the link.
 

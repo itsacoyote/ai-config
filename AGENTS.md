@@ -41,7 +41,8 @@ For the catalog of skills/agents and the feature workflow they implement, see
 - `agents/skills/<name>/SKILL.md` — portable Open Agent Skills shared by Codex and Pi.
   New cross-harness skills belong here; harness-specific behavior stays in its own tree.
 - `codex/`, `pi/` — harness-specific configuration and guidance. See `codex/README.md`,
-  `pi/README.md`, and the root README's distribution section.
+  `pi/README.md`, and the [installation guide](docs/install.md).
+- `docs/*.md` — topic reference split out of the README, which stays the index.
 - `docs/decisions/` — architectural decisions and their rationale.
 
 Decide by intent: a discoverable technique → **skill**; an always-on convention →

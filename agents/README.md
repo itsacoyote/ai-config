@@ -14,7 +14,7 @@ agents/skills/<name>/SKILL.md  ->  ~/.agents/skills/<name>/SKILL.md
 Codex and Pi both discover the standard project `.agents/skills/` and personal
 `~/.agents/skills/` locations automatically. The repo's human-run `link.sh` symlinks every
 skill here into `~/.agents/skills/` and removes anything else there except what the
-private directory provides (see the [root README](../README.md#installing-the-library)).
+private directory provides (see the [installation guide](../docs/install.md#installing-the-library)).
 
 For a project-local install, copy the desired skill directories into that project's
 `.agents/skills/` and review conflicts by hand.
