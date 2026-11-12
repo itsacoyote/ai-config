@@ -47,7 +47,7 @@ and `clwt` will decline to manage it later.
 | `clwt` / `clwt list` | list this repository's managed worktrees, flagging unmanaged ones |
 | `clwt new <type>/<slug>` | branch from the *current* origin default, create the worktree, launch |
 | `clwt branch <branch>` | check out an existing local or origin branch, launch |
-| `clwt open <branch>` | launch in an existing managed worktree |
+| `clwt open <branch\|n>` | launch in an existing managed worktree, by branch or pull request number |
 | `clwt pr <number> [--force] [--no-review]` | check a pull request out into a worktree, launch |
 | `clwt root` | launch in the primary checkout |
 | `clwt remove <branch> [--delete-branch]` | remove a clean managed worktree |
@@ -60,8 +60,14 @@ pass through to `claude`: `clwt new feat/x --yolo -- --model opus`.
 `remove <branch> --delete-branch` deletes the branch with `git branch -d` when git sees it as merged (no `gh` needed). Otherwise, if GitHub reports a MERGED pull request for the branch whose head commit equals the local branch tip (a squash merge), it deletes with `git branch -D` and names the PR; this needs an authenticated `gh`. Any other case refuses and removes nothing; drop `--delete-branch` to remove only the worktree. If the branch gains a commit while the check runs, the worktree is still removed but the branch is kept. A pull request merged into a non-default base branch also counts as merged. `clwt` looks pull requests up with `--repo owner/repo`, so it asks github.com, or the host in `GH_HOST`, not the origin host; same-named pull requests from forks are never accepted.
 
 Every launching subcommand also passes `--name` to `claude`, naming the session after the PR
-number, branch, or the primary checkout's current branch for `root` — branch names with
+number (`PR-<n>` for `pr <n>` and `open <n>`), branch, or the primary checkout's current branch for `root` — branch names with
 slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it.
+
+`clwt open <n>` looks up PR #n's head branch with `gh` and launches the worktree that already
+has it checked out; it never fetches or changes the checkout. An all-digit argument is always a
+PR number. It refuses a fork PR (use `clwt pr <n>`), and a worktree recorded for a different PR
+(open it by name with `clwt open <branch>`, or remove it). With no worktree yet, it names the
+`clwt branch <branch>` command to create one.
 
 Worktrees live at `~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/`.
 
@@ -110,7 +116,8 @@ theirs to edit, so hand them the snippet rather than editing it.
 - **Starting unrelated work** while on a mid-flight branch → `clwt new <type>/<slug>`. One
   worktree = one feature; don't recycle.
 - **Returning to existing work** → `clwt branch <branch>`, or `clwt open <branch>` if the
-  worktree already exists.
+  worktree already exists. For the developer's own open PR, `clwt open <n>` works without
+  the branch name.
 - **Branch already checked out somewhere** → `clwt` reuses an ordinary managed branch
   worktree. For a PR it first performs the verified refresh above. It refuses with a distinct
   message when the branch is in the primary checkout (use `clwt root`) or an unmanaged
