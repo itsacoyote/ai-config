@@ -2624,10 +2624,8 @@ opn_refuses 'open <n> refuses a pull request whose fork flag is not true or fals
 
 # Regression: a hostile head ref must be rejected before it reaches git.
 write_pr_meta 1205 bad..ref false aaa111
-opn_run 1205
-check_equals 'open <n> refuses an invalid head branch name: exits non-zero' 2 "$opn_status"
-check_contains 'open <n> refuses an invalid head branch name: names the ref' 'bad..ref' "$opn_out"
-check_equals 'open <n> refuses an invalid head branch name: no launch' '' "$(launched pwd)"
+opn_refuses 'open <n> refuses an invalid head branch name' \
+  'invalid branch name: bad..ref' 1205
 
 write_pr_meta 1206 feat/listed false aaa111
 sed 's|^url=.*|url=http://example.com/owner/project/pull/1206|' "$CLWT_GH_PRS/1206" >"$CLWT_GH_PRS/1206.new"
