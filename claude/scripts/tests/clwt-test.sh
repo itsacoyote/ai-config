@@ -2677,7 +2677,7 @@ opn_uncfg worktree-pr-head
 opn_cfg merge refs/heads/feat/listed
 opn_cfg remote 'https://github.com/other/fork.git'
 opn_refuses 'open <n> refuses an unmarked worktree tracking its branch on another repository' \
-  'feat/listed is a worktree for a different pull request: it tracks feat/listed on a different repository; to open it anyway, run: clwt open feat/listed' 1208
+  'feat/listed is a worktree for a different pull request: it tracks feat/listed on a different repository, so its code may not come from this repository; to open it anyway, run: clwt open feat/listed' 1208
 opn_cfg remote origin
 opn_run 1208
 check_equals 'open <n> accepts an unmarked worktree tracking its branch on origin' \
@@ -2731,9 +2731,17 @@ PATH="$OPN_ALL_GIT:$PATH" clwt open 1201 >/dev/null 2>&1 || true
 check_equals 'open <n> through the logging git wrapper still launches' \
   "$MANAGED/feat-listed" "$(launched pwd)"
 check 'open <n> ran git through the logging wrapper' test -s "$OPN_GIT_LOG"
-# First word only: a substring match on "merge" would trip on `config --get branch.<b>.merge`.
-opn_writes=$(awk '{print $1}' "$OPN_GIT_LOG" | grep -xE 'fetch|checkout|switch|reset|merge|pull' || true)
-check_equals 'open <n> runs no fetch, checkout, switch, reset, merge or pull' '' "$opn_writes"
+# Match the subcommand after any -C/-c globals, not a substring: "merge" also
+# appears in the read `config --get branch.<b>.merge`.
+opn_writes=$(awk '{
+  i = 1
+  while (i <= NF && ($i == "-C" || $i == "-c")) i += 2
+  cmd = $i; next_word = $(i + 1)
+  if (cmd ~ /^(fetch|pull|push|checkout|switch|reset|merge|rebase|commit|branch|update-ref)$/) print $0
+  else if (cmd == "worktree" && next_word != "list") print $0
+  else if (cmd == "config" && next_word !~ /^--get/) print $0
+}' "$OPN_GIT_LOG")
+check_equals 'open <n> runs no git command that writes' '' "$opn_writes"
 sessions_after=$(ls -A "$PRIMARY/.git/clwt/sessions" 2>/dev/null || true)
 check_equals 'open <n> writes no session folder' "$sessions_before" "$sessions_after"
 rm -f "$CLWT_GH_PRS"/12[0-9][0-9]
