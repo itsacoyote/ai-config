@@ -42,7 +42,7 @@ Usage:
   clwt [list]                       list this repository's managed worktrees
   clwt new <branch> [-- <args>]     branch from the origin default, then launch
   clwt branch <branch> [-- <args>]  check out an existing branch, then launch
-  clwt open <branch> [-- <args>]    launch in an existing managed worktree
+  clwt open <branch|n> [-- <args>]  launch in an existing managed worktree
   clwt pr <n> [--force] [--no-review] [-- <args>]
                                     check out a pull request, then launch
   clwt root [-- <args>]             launch in the primary checkout
@@ -57,7 +57,8 @@ Usage:
 Commands:
   new       Create an explicitly named branch from the origin default and launch.
   branch    Check out or reuse an existing local/remote branch and launch.
-  open      Launch in an existing managed worktree by branch name.
+  open      Launch in an existing managed worktree by branch name, or by pull
+            request number (an all-digit argument is always a pull request).
   pr        Check a pull request out into a managed worktree and launch.
   root      Launch in the primary (non-worktree) checkout.
   list      List this repository's managed worktrees.
@@ -113,7 +114,7 @@ to get the prompt back. `--no-review` skips this guard entirely: no prompt is
 sent either way, so there is nothing for it to withhold.
 
 Every launching subcommand passes --name to claude, naming the session: `pr <n>` becomes
-`PR-<n>`; `new`/`branch`/`open` use the branch with slashes as dashes; `root` uses the
+`PR-<n>`, as does `open <n>`; `new`/`branch`/`open <branch>` use the branch with slashes as dashes; `root` uses the
 primary checkout's current branch, also with slashes as dashes, or no name on a
 detached HEAD. A developer's own `--name`/`-n` after `--` overrides it, since claude
 takes the last value it sees.
@@ -2252,13 +2253,72 @@ cmd_new() {
 
 cmd_open() {
   parse_launch_args "$@"
-  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'open requires exactly one branch name'
+  ((${#LAUNCH_POSITIONAL[@]} == 1)) || die 'open requires exactly one branch name or pull request number'
 
-  local branch=${LAUNCH_POSITIONAL[0]} target
-  validate_branch "$branch"
-  LAUNCH_NAME=$(worktree_name_for_branch "$branch")
-  target=$(branch_worktree "$branch") ||
-    die "no worktree checked out for branch: $branch"
+  local arg=${LAUNCH_POSITIONAL[0]} branch target
+  case $arg in
+    '' | *[!0-9]*)
+      branch=$arg
+      validate_branch "$branch"
+      LAUNCH_NAME=$(worktree_name_for_branch "$branch")
+      target=$(branch_worktree "$branch") ||
+        die "no worktree checked out for branch: $branch"
+      require_managed_worktree "$target"
+      launch "$target"
+      ;;
+    0*) die "pull request number must not start with 0: $arg" ;;
+    *) open_pr_worktree "$arg" ;;
+  esac
+}
+
+# Opens the existing worktree for a same-repository pull request. Unlike
+# cmd_pr it never fetches or changes the checkout, so a fork head or a branch
+# that belongs to another pull request must be refused: the name alone would
+# otherwise launch a session under the wrong PR-<n> label.
+open_pr_worktree() {
+  local number=$1 meta head_ref cross pr_url target
+  local marker_url marker_head merge other=''
+  LAUNCH_NAME="PR-$number"
+
+  require_gh open
+
+  meta=$(gh pr view "$number" --json headRefName,isCrossRepository,url \
+    --jq '.headRefName, .isCrossRepository, .url' 2>/dev/null) ||
+    die "cannot resolve pull request #$number"
+  head_ref=$(printf '%s\n' "$meta" | sed -n 1p)
+  cross=$(printf '%s\n' "$meta" | sed -n 2p)
+  pr_url=$(printf '%s\n' "$meta" | sed -n 3p)
+  [[ -n $head_ref ]] || die "pull request #$number has no head branch"
+  validate_branch "$head_ref"
+  [[ $cross == true || $cross == false ]] ||
+    die "cannot determine whether pull request #$number comes from a fork"
+  [[ $cross == false ]] ||
+    die "pull request #$number is from a fork; run: clwt pr $number"
+  pr_url_identity "$pr_url" "$number" ||
+    die "pull request #$number returned an invalid canonical URL"
+
+  target=$(branch_worktree "$head_ref") ||
+    die "no worktree for pull request #$number (branch $head_ref); run: clwt branch $head_ref"
+
+  marker_url=$(git config --get "branch.$head_ref.worktree-pr-url" 2>/dev/null) || marker_url=''
+  marker_head=$(git config --get "branch.$head_ref.worktree-pr-head" 2>/dev/null) || marker_head=''
+  merge=$(git config --get "branch.$head_ref.merge" 2>/dev/null) || merge=''
+  if [[ -n $marker_url && $marker_url != "$pr_url" ]]; then
+    other="it is recorded for $marker_url"
+  elif [[ -n $marker_head && -z $marker_url ]]; then
+    other='it has an incomplete pull request marker'
+  else
+    case $merge in
+      refs/pull/*/head)
+        if [[ $merge != "refs/pull/$number/head" ]]; then
+          other="it merges $merge"
+        fi
+        ;;
+    esac
+  fi
+  [[ -z $other ]] ||
+    die "$head_ref is a worktree for a different pull request: $other; to open it anyway, run: clwt open $head_ref"
+
   require_managed_worktree "$target"
   launch "$target"
 }
