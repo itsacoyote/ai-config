@@ -371,13 +371,53 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
         echo "could not resolve to a pull request with the number of $3" >&2
         exit 1
       fi
-      sed -n 's/^headRefName=//p' "$meta"
-      sed -n 's/^isCrossRepository=//p' "$meta"
-      sed -n 's/^headRepositoryOwner=//p' "$meta"
-      sed -n 's/^headRepository=//p' "$meta"
-      sed -n 's/^url=//p' "$meta"
-      sed -n 's/^headRefOid=//p' "$meta"
-      exit 0
+      meta_fields='' meta_jq='' prev=''
+      for arg in "$@"; do
+        case "$prev" in
+          --json) meta_fields=$arg ;;
+          --jq) meta_jq=$arg ;;
+        esac
+        prev=$arg
+      done
+      if [ -z "$meta_jq" ]; then
+        sed -n 's/^headRefName=//p' "$meta"
+        sed -n 's/^isCrossRepository=//p' "$meta"
+        sed -n 's/^headRepositoryOwner=//p' "$meta"
+        sed -n 's/^headRepository=//p' "$meta"
+        sed -n 's/^url=//p' "$meta"
+        sed -n 's/^headRefOid=//p' "$meta"
+        exit 0
+      fi
+      if ! command -v jq >/dev/null 2>&1; then
+        echo 'gh stub: jq is required for pr view --jq and is not on PATH' >&2
+        exit 96
+      fi
+      # An object of ONLY the --json fields, piped through the real jq, so a
+      # caller reading a field out of order or one it never requested gets
+      # what real gh would give it (a different value, or null).
+      meta_json='' sep=''
+      for field in ${meta_fields//,/ }; do
+        value=$(sed -n "s/^$field=//p" "$meta")
+        case "$field" in
+          headRefName | url | headRefOid) member="\"$field\":\"$(json_escape "$value")\"" ;;
+          isCrossRepository)
+            case "$value" in
+              true | false) member="\"$field\":$value" ;;
+              *) member="\"$field\":\"$(json_escape "$value")\"" ;;
+            esac
+            ;;
+          headRepositoryOwner) member="\"$field\":{\"login\":\"$(json_escape "$value")\"}" ;;
+          headRepository) member="\"$field\":{\"name\":\"$(json_escape "$value")\"}" ;;
+          *)
+            echo "Unknown JSON field: \"$field\"" >&2
+            exit 1
+            ;;
+        esac
+        meta_json="$meta_json$sep$member"
+        sep=','
+      done
+      printf '{%s}' "$meta_json" | jq -r "$meta_jq"
+      exit $?
       ;;
     *)
       # `clwt prune` asking for a branch's merge state.
@@ -592,6 +632,28 @@ write_pr_meta() {
     "$2" "$3" "${5:-owner}" "${6:-project}" \
     "https://github.com/owner/project/pull/$1" "$4" >"$CLWT_GH_PRS/$1"
 }
+# --- gh stub self-check: pr view answers through real jq ---------------------
+# Without these, the stub printed six fixed lines whatever --jq asked for, so a
+# caller reading fields in the wrong order would still pass every test.
+write_pr_meta 1290 feat/stub-check true abc123def
+stub_order=$("$BIN/gh" pr view 1290 --json headRefName,isCrossRepository,url \
+  --jq '.headRefName, .isCrossRepository, .url' 2>&1)
+check_equals 'gh stub prints pr view fields in --jq order' \
+  $'feat/stub-check\ntrue\nhttps://github.com/owner/project/pull/1290' "$stub_order"
+stub_owner=$("$BIN/gh" pr view 1290 --json headRefName,headRepositoryOwner \
+  --jq '.headRepositoryOwner.login' 2>&1)
+check_equals 'gh stub prints the owner login for .headRepositoryOwner.login' \
+  'owner' "$stub_owner"
+stub_unrequested=$("$BIN/gh" pr view 1290 --json headRefName --jq '.url' 2>&1)
+check_equals 'gh stub prints null for a --jq field that --json did not request' \
+  'null' "$stub_unrequested"
+# --json must name headRefName so the call reaches this branch; otherwise it
+# falls through to another stub branch and fails for the wrong reason.
+stub_status=0
+stub_unknown=$("$BIN/gh" pr view 1290 --json headRefName,nope --jq '.headRefName' 2>&1) || stub_status=$?
+check_equals 'gh stub fails on an unknown --json field' '1' "$stub_status"
+check_contains 'gh stub names the unknown --json field on stderr' 'Unknown JSON field: "nope"' "$stub_unknown"
+
 # pr_meta <number> <head-ref> <is-cross-repository> [head-owner] [head-repo] —
 # owner/repo default to the identity clwt derives from $REMOTE
 # ($HOME/remotes/owner/project.git), i.e. "origin is the pull request's own
