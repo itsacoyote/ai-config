@@ -2731,7 +2731,9 @@ PATH="$OPN_ALL_GIT:$PATH" clwt open 1201 >/dev/null 2>&1 || true
 check_equals 'open <n> through the logging git wrapper still launches' \
   "$MANAGED/feat-listed" "$(launched pwd)"
 check 'open <n> ran git through the logging wrapper' test -s "$OPN_GIT_LOG"
-check_not_contains 'open <n> does not fetch' 'fetch' "$(cat "$OPN_GIT_LOG")"
+# First word only: a substring match on "merge" would trip on `config --get branch.<b>.merge`.
+opn_writes=$(awk '{print $1}' "$OPN_GIT_LOG" | grep -xE 'fetch|checkout|switch|reset|merge|pull' || true)
+check_equals 'open <n> runs no fetch, checkout, switch, reset, merge or pull' '' "$opn_writes"
 sessions_after=$(ls -A "$PRIMARY/.git/clwt/sessions" 2>/dev/null || true)
 check_equals 'open <n> writes no session folder' "$sessions_before" "$sessions_after"
 rm -f "$CLWT_GH_PRS"/12[0-9][0-9]

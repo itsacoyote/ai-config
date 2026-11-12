@@ -66,7 +66,7 @@ slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-
 `clwt open <n>` looks up PR #n's head branch with `gh` and launches the worktree that already
 has it checked out; it never fetches or changes the checkout. An all-digit argument is always a
 PR number. It refuses a fork PR (use `clwt pr <n>`), and a worktree recorded for a different PR
-(open it by name with `clwt open <branch>`, or remove it). With no worktree yet, it names the
+(open it by name with `clwt open <branch>`). With no worktree yet, it names the
 `clwt branch <branch>` command to create one.
 
 Worktrees live at `~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/`.
