@@ -633,8 +633,6 @@ write_pr_meta() {
     "https://github.com/owner/project/pull/$1" "$4" >"$CLWT_GH_PRS/$1"
 }
 # --- gh stub self-check: pr view answers through real jq ---------------------
-# Without these, the stub printed six fixed lines whatever --jq asked for, so a
-# caller reading fields in the wrong order would still pass every test.
 write_pr_meta 1290 feat/stub-check true abc123def
 stub_order=$("$BIN/gh" pr view 1290 --json headRefName,isCrossRepository,url \
   --jq '.headRefName, .isCrossRepository, .url' 2>&1)
