@@ -371,13 +371,53 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
         echo "could not resolve to a pull request with the number of $3" >&2
         exit 1
       fi
-      sed -n 's/^headRefName=//p' "$meta"
-      sed -n 's/^isCrossRepository=//p' "$meta"
-      sed -n 's/^headRepositoryOwner=//p' "$meta"
-      sed -n 's/^headRepository=//p' "$meta"
-      sed -n 's/^url=//p' "$meta"
-      sed -n 's/^headRefOid=//p' "$meta"
-      exit 0
+      meta_fields='' meta_jq='' prev=''
+      for arg in "$@"; do
+        case "$prev" in
+          --json) meta_fields=$arg ;;
+          --jq) meta_jq=$arg ;;
+        esac
+        prev=$arg
+      done
+      if [ -z "$meta_jq" ]; then
+        sed -n 's/^headRefName=//p' "$meta"
+        sed -n 's/^isCrossRepository=//p' "$meta"
+        sed -n 's/^headRepositoryOwner=//p' "$meta"
+        sed -n 's/^headRepository=//p' "$meta"
+        sed -n 's/^url=//p' "$meta"
+        sed -n 's/^headRefOid=//p' "$meta"
+        exit 0
+      fi
+      if ! command -v jq >/dev/null 2>&1; then
+        echo 'gh stub: jq is required for pr view --jq and is not on PATH' >&2
+        exit 96
+      fi
+      # An object of ONLY the --json fields, piped through the real jq, so a
+      # caller reading a field out of order or one it never requested gets
+      # what real gh would give it (a different value, or null).
+      meta_json='' sep=''
+      for field in ${meta_fields//,/ }; do
+        value=$(sed -n "s/^$field=//p" "$meta")
+        case "$field" in
+          headRefName | url | headRefOid) member="\"$field\":\"$(json_escape "$value")\"" ;;
+          isCrossRepository)
+            case "$value" in
+              true | false) member="\"$field\":$value" ;;
+              *) member="\"$field\":\"$(json_escape "$value")\"" ;;
+            esac
+            ;;
+          headRepositoryOwner) member="\"$field\":{\"login\":\"$(json_escape "$value")\"}" ;;
+          headRepository) member="\"$field\":{\"name\":\"$(json_escape "$value")\"}" ;;
+          *)
+            echo "Unknown JSON field: \"$field\"" >&2
+            exit 1
+            ;;
+        esac
+        meta_json="$meta_json$sep$member"
+        sep=','
+      done
+      printf '{%s}' "$meta_json" | jq -r "$meta_jq"
+      exit $?
       ;;
     *)
       # `clwt prune` asking for a branch's merge state.
@@ -592,6 +632,26 @@ write_pr_meta() {
     "$2" "$3" "${5:-owner}" "${6:-project}" \
     "https://github.com/owner/project/pull/$1" "$4" >"$CLWT_GH_PRS/$1"
 }
+# --- gh stub self-check: pr view answers through real jq ---------------------
+write_pr_meta 1290 feat/stub-check true abc123def
+stub_order=$("$BIN/gh" pr view 1290 --json headRefName,isCrossRepository,url \
+  --jq '.headRefName, .isCrossRepository, .url' 2>&1)
+check_equals 'gh stub prints pr view fields in --jq order' \
+  $'feat/stub-check\ntrue\nhttps://github.com/owner/project/pull/1290' "$stub_order"
+stub_owner=$("$BIN/gh" pr view 1290 --json headRefName,headRepositoryOwner \
+  --jq '.headRepositoryOwner.login' 2>&1)
+check_equals 'gh stub prints the owner login for .headRepositoryOwner.login' \
+  'owner' "$stub_owner"
+stub_unrequested=$("$BIN/gh" pr view 1290 --json headRefName --jq '.url' 2>&1)
+check_equals 'gh stub prints null for a --jq field that --json did not request' \
+  'null' "$stub_unrequested"
+# --json must name headRefName so the call reaches this branch; otherwise it
+# falls through to another stub branch and fails for the wrong reason.
+stub_status=0
+stub_unknown=$("$BIN/gh" pr view 1290 --json headRefName,nope --jq '.headRefName' 2>&1) || stub_status=$?
+check_equals 'gh stub fails on an unknown --json field' '1' "$stub_status"
+check_contains 'gh stub names the unknown --json field on stderr' 'Unknown JSON field: "nope"' "$stub_unknown"
+
 # pr_meta <number> <head-ref> <is-cross-repository> [head-owner] [head-repo] —
 # owner/repo default to the identity clwt derives from $REMOTE
 # ($HOME/remotes/owner/project.git), i.e. "origin is the pull request's own
@@ -2482,6 +2542,209 @@ check 'the symlink target survives too' test -d "$MANAGED/feat-link-target"
 rm -f "$MANAGED/feat-symlink-prune"
 rm -f "$CLWT_GH_STATES/feat-stray" "$CLWT_GH_STATES/feat-symlink-prune" \
   "$CLWT_GH_STATES/$(printf '%s' "$primary_branch_now" | tr '/' '-')"
+
+section 'open <pr number>'
+
+OPN_URL='https://github.com/owner/project/pull'
+OPN_ALL_GIT="$TMP/opn-allgit"
+OPN_GIT_LOG="$TMP/opn-git.log"
+mkdir -p "$OPN_ALL_GIT"
+cat >"$OPN_ALL_GIT/git" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"$OPN_GIT_LOG"
+exec $(command -v git) "\$@"
+STUB
+chmod +x "$OPN_ALL_GIT/git"
+
+# opn_run <args...> — runs clwt open, sets opn_out and opn_status.
+opn_run() {
+  launch_reset
+  opn_status=0
+  opn_out=$(clwt open "$@" 2>&1) || opn_status=$?
+}
+
+# opn_refuses <label> <exact message> <args...> — the refusal must exit
+# non-zero, print exactly its own message, and leave claude unlaunched.
+opn_refuses() {
+  local label=$1 msg=$2
+  shift 2
+  opn_run "$@"
+  check_equals "$label exits non-zero" 2 "$opn_status"
+  check_equals "$label prints exactly its message" "clwt: $msg" "$opn_out"
+  check_equals "$label does not launch claude" '' "$(launched pwd)"
+}
+
+# opn_cfg <key> <value> / opn_uncfg <key> — set or clear a git config entry on feat/listed.
+opn_cfg() { git -C "$PRIMARY" config "branch.feat/listed.$1" "$2"; }
+opn_uncfg() { git -C "$PRIMARY" config --unset-all "branch.feat/listed.$1"; }
+
+write_pr_meta 1201 feat/listed false aaa111
+opn_run 1201
+check_equals 'open <n> launches claude in the worktree for the pull request'"'"'s head branch' \
+  "$MANAGED/feat-listed" "$(launched pwd)"
+check_equals 'open <n> names the session PR-<n>' '--name PR-1201' "$(launched args)"
+
+launch_reset
+clwt open 1201 -- --name mine >/dev/null 2>&1
+check_equals "open <n> lets a developer's own --name win" \
+  '--name PR-1201 --name mine' "$(launched args)"
+
+launch_reset
+clwt open 1201 --yolo >/dev/null 2>&1
+check_equals 'open <n> --yolo adds --dangerously-skip-permissions' \
+  '--name PR-1201 --dangerously-skip-permissions' "$(launched args)"
+
+# Regression: without require_gh a missing or unauthenticated gh reads as
+# "cannot resolve pull request" (stderr is discarded), hiding the real cause.
+launch_reset
+opn_out=$(clwt_without_gh open 1201 2>&1) || true
+check_equals 'open <n> refuses when gh is not on PATH' \
+  'clwt: open needs gh to reach GitHub, but gh is not on PATH' "$opn_out"
+check_equals 'open <n> refuses when gh is not on PATH: no launch' '' "$(launched pwd)"
+
+touch "$CLWT_GH_UNAVAILABLE"
+opn_run 1201
+rm -f "$CLWT_GH_UNAVAILABLE"
+check_equals 'open <n> refuses when gh is not authenticated' \
+  'clwt: open needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)' "$opn_out"
+check_equals 'open <n> refuses when gh is not authenticated: no launch' '' "$(launched pwd)"
+
+opn_refuses 'open <n> refuses an unknown pull request' \
+  'cannot resolve pull request #1202' 1202
+
+# Regression: a fork head would otherwise match a same-named local branch.
+write_pr_meta 1203 feat/listed true aaa111
+opn_refuses 'open <n> refuses a fork pull request and names clwt pr <n>' \
+  'pull request #1203 is from a fork; run: clwt pr 1203' 1203
+check_not_contains 'the fork refusal is not the no-worktree refusal' 'no worktree' "$opn_out"
+
+# Regression: a non-boolean flag must fail closed, not be read as "not a fork".
+write_pr_meta 1204 feat/listed maybe aaa111
+opn_refuses 'open <n> refuses a pull request whose fork flag is not true or false' \
+  'cannot determine whether pull request #1204 comes from a fork' 1204
+
+# Regression: a hostile head ref must be rejected before it reaches git.
+write_pr_meta 1205 bad..ref false aaa111
+opn_refuses 'open <n> refuses an invalid head branch name' \
+  'invalid branch name: bad..ref' 1205
+
+write_pr_meta 1206 feat/listed false aaa111
+sed 's|^url=.*|url=http://example.com/owner/project/pull/1206|' "$CLWT_GH_PRS/1206" >"$CLWT_GH_PRS/1206.new"
+mv "$CLWT_GH_PRS/1206.new" "$CLWT_GH_PRS/1206"
+opn_refuses 'open <n> refuses an invalid pull request url' \
+  'pull request #1206 returned an invalid canonical URL' 1206
+
+write_pr_meta 1207 feat/no-such-worktree false aaa111
+opn_run 1207
+check_equals 'open <n> refuses when the head branch has no worktree and names clwt branch <branch>: exits non-zero' 2 "$opn_status"
+check_equals 'open <n> refuses when the head branch has no worktree and names clwt branch <branch>: exact message' \
+  'clwt: no worktree for pull request #1207 (branch feat/no-such-worktree); run: clwt branch feat/no-such-worktree' "$opn_out"
+check_equals 'open <n> refuses when the head branch has no worktree and names clwt branch <branch>: no launch' '' "$(launched pwd)"
+
+# Regression: a shell metacharacter in a fork-controlled ref must not reach the
+# copy-pasteable hint unquoted.
+write_pr_meta 1210 'feat/x;y' false aaa111
+opn_refuses 'open <n> quotes a head ref with shell metacharacters in the branch hint' \
+  'no worktree for pull request #1210 (branch feat/x;y); run: clwt branch feat/x\;y' 1210
+
+# Regression: a worktree recorded for another PR must not be launched as this one.
+write_pr_meta 1208 feat/listed false aaa111
+opn_cfg worktree-pr-url "$OPN_URL/1299"
+opn_cfg worktree-pr-head bbb222
+opn_refuses 'open <n> refuses a worktree recorded for a different pull request' \
+  "feat/listed is a worktree for a different pull request: it is recorded for $OPN_URL/1299; to open it anyway, run: clwt open feat/listed" 1208
+
+opn_uncfg worktree-pr-url
+opn_refuses 'open <n> refuses a worktree with only a head marker' \
+  'feat/listed is a worktree for a different pull request: it has an incomplete pull request marker; to open it anyway, run: clwt open feat/listed' 1208
+opn_uncfg worktree-pr-head
+
+opn_cfg merge refs/pull/1299/head
+opn_refuses "open <n> refuses a worktree whose branch merges another pull request's head ref" \
+  'feat/listed is a worktree for a different pull request: it merges refs/pull/1299/head; to open it anyway, run: clwt open feat/listed' 1208
+
+opn_cfg worktree-pr-url "$OPN_URL/1208"
+opn_cfg worktree-pr-head aaa111
+opn_cfg merge refs/pull/1208/head
+opn_run 1208
+check_equals 'open <n> accepts a worktree recorded for the same pull request' \
+  "$MANAGED/feat-listed" "$(launched pwd)"
+opn_uncfg worktree-pr-url
+opn_uncfg worktree-pr-head
+
+# Regression: an unmarked fork checkout (maintainer-can-edit) tracks the branch
+# on the fork, so its name alone must not pass as this PR.
+opn_cfg merge refs/heads/feat/listed
+opn_cfg remote 'https://github.com/other/fork.git'
+opn_refuses 'open <n> refuses an unmarked worktree tracking its branch on another repository' \
+  'feat/listed is a worktree for a different pull request: it tracks feat/listed on a different repository, so its code may not come from this repository; to open it anyway, run: clwt open feat/listed' 1208
+opn_cfg remote origin
+opn_run 1208
+check_equals 'open <n> accepts an unmarked worktree tracking its branch on origin' \
+  "$MANAGED/feat-listed" "$(launched pwd)"
+opn_uncfg remote
+opn_run 1208
+check_equals 'open <n> accepts an unmarked worktree with no upstream remote' \
+  "$MANAGED/feat-listed" "$(launched pwd)"
+opn_uncfg merge
+
+# Regression: a metacharacter ref must be shell-quoted in the open hint, and an
+# all-digit ref (which open would read as a PR number) must not get one.
+git -C "$PRIMARY" worktree add -q -b 'feat/q;z' "$MANAGED/feat-q-z" HEAD
+git -C "$PRIMARY" config 'branch.feat/q;z.merge' refs/pull/1299/head
+write_pr_meta 1211 'feat/q;z' false aaa111
+opn_refuses 'open <n> quotes a head ref with shell metacharacters in the open hint' \
+  'feat/q;z is a worktree for a different pull request: it merges refs/pull/1299/head; to open it anyway, run: clwt open feat/q\;z' 1211
+git -C "$PRIMARY" worktree add -q -b 4242 "$MANAGED/4242" HEAD
+git -C "$PRIMARY" config branch.4242.merge refs/pull/1299/head
+write_pr_meta 1212 4242 false aaa111
+opn_refuses 'open <n> omits the open hint for an all-digit head ref' \
+  '4242 is a worktree for a different pull request: it merges refs/pull/1299/head; its branch name is all digits, so it cannot be opened by name' 1212
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-q-z"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/4242"
+git -C "$PRIMARY" branch -D 'feat/q;z' 4242 >/dev/null
+
+write_pr_meta 1209 feat/stray false aaa111
+opn_refuses 'open <n> refuses a worktree outside the managed root' \
+  "worktree is not under the managed root, so clwt does not manage it: $UNMANAGED" 1209
+
+# Regression: "007" must not reach gh, where it could resolve as PR 7.
+write_pr_meta 007 feat/listed false aaa111
+opn_refuses 'open 007 refuses a leading zero' \
+  'pull request number must not start with 0: 007' 007
+rm -f "$CLWT_GH_PRS/007"
+
+# Regression: only an all-digit argument is a pull request number.
+opn_run 0abc
+check_equals 'open 0abc is still treated as a branch name' \
+  'clwt: no worktree checked out for branch: 0abc' "$opn_out"
+opn_run 12abc
+check_equals 'open 12abc is still treated as a branch name' \
+  'clwt: no worktree checked out for branch: 12abc' "$opn_out"
+
+# Regression: the PR path must stay read-only; the wrapper logs every git
+# subcommand, since LOGGIT only sees `git branch`.
+sessions_before=$(ls -A "$PRIMARY/.git/clwt/sessions" 2>/dev/null || true)
+: >"$OPN_GIT_LOG"
+launch_reset
+PATH="$OPN_ALL_GIT:$PATH" clwt open 1201 >/dev/null 2>&1 || true
+check_equals 'open <n> through the logging git wrapper still launches' \
+  "$MANAGED/feat-listed" "$(launched pwd)"
+check 'open <n> ran git through the logging wrapper' test -s "$OPN_GIT_LOG"
+# Match the subcommand after any -C/-c globals, not a substring: "merge" also
+# appears in the read `config --get branch.<b>.merge`.
+opn_writes=$(awk '{
+  i = 1
+  while (i <= NF && ($i == "-C" || $i == "-c")) i += 2
+  cmd = $i; next_word = $(i + 1)
+  if (cmd ~ /^(fetch|pull|push|checkout|switch|reset|merge|rebase|commit|branch|update-ref)$/) print $0
+  else if (cmd == "worktree" && next_word != "list") print $0
+  else if (cmd == "config" && next_word !~ /^--get/) print $0
+}' "$OPN_GIT_LOG")
+check_equals 'open <n> runs no git command that writes' '' "$opn_writes"
+sessions_after=$(ls -A "$PRIMARY/.git/clwt/sessions" 2>/dev/null || true)
+check_equals 'open <n> writes no session folder' "$sessions_before" "$sessions_after"
+rm -f "$CLWT_GH_PRS"/12[0-9][0-9]
 
 # Refusal tests assert the hint tail, not git's wording: the stripped PATH can
 # fail early on a missing binary, and only the tail proves clwt itself refused.

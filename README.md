@@ -182,8 +182,8 @@ A small Bash CLI at `claude/scripts/clwt` that manages this repository's git
 worktrees and launches Claude Code inside them. **You run it from your shell, not
 from inside Claude.**
 
-**Prerequisites:** stock macOS `bash` 3.2+ and `git`. `gh` (authenticated) is needed only by `clwt pr`
-and `clwt prune` — both fail with a clear message rather than guessing if it is missing
+**Prerequisites:** stock macOS `bash` 3.2+ and `git`. `gh` (authenticated) is needed only by `clwt pr`,
+`clwt open <n>`, and `clwt prune` — each fails with a clear message rather than guessing if it is missing
 or logged out. The repository must have an `origin` remote, since the managed paths are
 derived from it. The network steps of `clwt new` and `clwt branch`, and `clwt pr`'s base-branch fetch, over an SSH remote
 run ssh in batch mode with a connect timeout, so an unreachable remote fails with git's
@@ -222,7 +222,7 @@ defect.
 | `clwt` / `clwt list` | list this repo's managed worktrees, flagging unmanaged ones |
 | `clwt new <type>/<slug>` | branch from the **current** origin default, create the worktree, launch |
 | `clwt branch <branch>` | check out an existing local or origin branch, launch |
-| `clwt open <branch>` | launch in an existing managed worktree |
+| `clwt open <branch\|n>` | launch in an existing managed worktree, by branch or pull request number |
 | `clwt pr <number> [--force] [--no-review]` | check a pull request out into a worktree, launch (warns on forks) |
 | `clwt root` | launch in the primary checkout |
 | `clwt remove <branch> [--delete-branch]` | remove a clean managed worktree |
@@ -231,6 +231,8 @@ defect.
 | `clwt help` | usage |
 
 `remove <branch> --delete-branch` deletes the branch with `git branch -d` when git sees it as merged (no `gh` needed). Otherwise, if GitHub reports a MERGED pull request for the branch whose head commit equals the local branch tip (a squash merge), it deletes with `git branch -D` and names the PR; this needs an authenticated `gh`. Any other case refuses and removes nothing; drop `--delete-branch` to remove only the worktree. If the branch gains a commit while the check runs, the worktree is still removed but the branch is kept. A pull request merged into a non-default base branch also counts as merged. `clwt` looks pull requests up with `--repo owner/repo`, so it asks github.com, or the host in `GH_HOST`, not the origin host; same-named pull requests from forks are never accepted.
+
+`open <n>` looks up the pull request's head branch with `gh` and launches the worktree that already has it checked out, without fetching or changing it. An all-digit argument is always a pull request number. It refuses a fork pull request (use `clwt pr <n>`) and a worktree recorded for a different pull request (open it by name with `clwt open <branch>`); with no worktree yet, it names the `clwt branch <branch>` command.
 
 Worktrees live at `~/github/.worktrees/<owner>/<repo>/<branch-with-slashes-as-dashes>/`.
 `clwt` refuses to create, move, or remove anything outside that root — worktrees made
@@ -259,7 +261,7 @@ and the update is a fast-forward; rewritten history is refused because no last-v
 exists yet.
 
 Every launching subcommand also passes `--name` to `claude`, naming the session after the PR
-number (`PR-<n>`), the branch, or the primary checkout's current branch for `root` — branch
+number (`PR-<n>` for `pr <n>` and `open <n>`), the branch, or the primary checkout's current branch for `root` — branch
 names with slashes as dashes, and no name on a detached HEAD. A developer's own `--name`/`-n` after `--` overrides it,
 since `claude` takes the last value it sees.
 
