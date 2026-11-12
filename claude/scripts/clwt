@@ -113,11 +113,11 @@ branch's current tip, naming the real base branch and telling you to rebase
 to get the prompt back. `--no-review` skips this guard entirely: no prompt is
 sent either way, so there is nothing for it to withhold.
 
-Every launching subcommand passes --name to claude, naming the session: `pr <n>` becomes
-`PR-<n>`, as does `open <n>`; `new`/`branch`/`open <branch>` use the branch with slashes as dashes; `root` uses the
-primary checkout's current branch, also with slashes as dashes, or no name on a
-detached HEAD. A developer's own `--name`/`-n` after `--` overrides it, since claude
-takes the last value it sees.
+Every launching subcommand passes --name to claude, naming the session: `pr <n>`
+and `open <n>` become `PR-<n>`; `new`/`branch`/`open <branch>` use the branch
+with slashes as dashes; `root` uses the primary checkout's current branch, also
+with slashes as dashes, or no name on a detached HEAD. A developer's own
+`--name`/`-n` after `--` overrides it, since claude takes the last value it sees.
 
 Arguments after `--` are passed through to `claude`.
 EOF
@@ -2271,13 +2271,11 @@ cmd_open() {
   esac
 }
 
-# Opens the existing worktree for a same-repository pull request. Unlike
-# cmd_pr it never fetches or changes the checkout, so a fork head or a branch
-# that belongs to another pull request must be refused: the name alone would
-# otherwise launch a session under the wrong PR-<n> label.
+# No fetch or checkout here, so the branch name is the only link to PR #n:
+# refuse fork heads and worktrees recorded for another PR.
 open_pr_worktree() {
   local number=$1 meta head_ref cross pr_url target
-  local marker_url marker_head merge other=''
+  local marker_url marker_head merge remote quoted_ref other=''
   LAUNCH_NAME="PR-$number"
 
   require_gh open
@@ -2297,8 +2295,9 @@ open_pr_worktree() {
   pr_url_identity "$pr_url" "$number" ||
     die "pull request #$number returned an invalid canonical URL"
 
+  quoted_ref=$(printf '%q' "$head_ref")
   target=$(branch_worktree "$head_ref") ||
-    die "no worktree for pull request #$number (branch $head_ref); run: clwt branch $head_ref"
+    die "no worktree for pull request #$number (branch $head_ref); run: clwt branch $quoted_ref"
 
   marker_url=$(git config --get "branch.$head_ref.worktree-pr-url" 2>/dev/null) || marker_url=''
   marker_head=$(git config --get "branch.$head_ref.worktree-pr-head" 2>/dev/null) || marker_head=''
@@ -2307,17 +2306,22 @@ open_pr_worktree() {
     other="it is recorded for $marker_url"
   elif [[ -n $marker_head && -z $marker_url ]]; then
     other='it has an incomplete pull request marker'
-  else
-    case $merge in
-      refs/pull/*/head)
-        if [[ $merge != "refs/pull/$number/head" ]]; then
-          other="it merges $merge"
-        fi
-        ;;
+  elif [[ $merge == refs/pull/*/head && $merge != "refs/pull/$number/head" ]]; then
+    other="it merges $merge"
+  elif [[ -z $marker_url && $merge == "refs/heads/$head_ref" ]]; then
+    # Unmarked legacy checkout of a fork head (gh pr checkout before markers).
+    remote=$(git config --get "branch.$head_ref.remote" 2>/dev/null) || remote=''
+    if [[ -n $remote ]] && ! remote_matches_identity "$remote" "$PR_BASE_OWNER" "$PR_BASE_REPO"; then
+      other="it tracks $head_ref on a different repository"
+    fi
+  fi
+  if [[ -n $other ]]; then
+    # An all-digit ref cannot be opened by name: open reads it as a PR number.
+    case $head_ref in
+      *[!0-9]*) die "$head_ref is a worktree for a different pull request: $other; to open it anyway, run: clwt open $quoted_ref" ;;
+      *) die "$head_ref is a worktree for a different pull request: $other; its branch name is all digits, so it cannot be opened by name" ;;
     esac
   fi
-  [[ -z $other ]] ||
-    die "$head_ref is a worktree for a different pull request: $other; to open it anyway, run: clwt open $head_ref"
 
   require_managed_worktree "$target"
   launch "$target"

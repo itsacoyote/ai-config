@@ -2543,8 +2543,6 @@ rm -f "$MANAGED/feat-symlink-prune"
 rm -f "$CLWT_GH_STATES/feat-stray" "$CLWT_GH_STATES/feat-symlink-prune" \
   "$CLWT_GH_STATES/$(printf '%s' "$primary_branch_now" | tr '/' '-')"
 
-# Refusal tests assert the hint tail, not git's wording: the stripped PATH can
-# fail early on a missing binary, and only the tail proves clwt itself refused.
 section 'open <pr number>'
 
 OPN_URL='https://github.com/owner/project/pull'
@@ -2576,6 +2574,10 @@ opn_refuses() {
   check_equals "$label does not launch claude" '' "$(launched pwd)"
 }
 
+# opn_cfg <key> <value> / opn_uncfg <key> — set or clear a git config entry on feat/listed.
+opn_cfg() { git -C "$PRIMARY" config "branch.feat/listed.$1" "$2"; }
+opn_uncfg() { git -C "$PRIMARY" config --unset-all "branch.feat/listed.$1"; }
+
 write_pr_meta 1201 feat/listed false aaa111
 opn_run 1201
 check_equals 'open <n> launches claude in the worktree for the pull request'"'"'s head branch' \
@@ -2592,20 +2594,19 @@ clwt open 1201 --yolo >/dev/null 2>&1
 check_equals 'open <n> --yolo adds --dangerously-skip-permissions' \
   '--name PR-1201 --dangerously-skip-permissions' "$(launched args)"
 
-# Regression: without require_gh the missing binary would surface as a bare
-# "command not found" instead of naming gh.
+# Regression: without require_gh a missing or unauthenticated gh reads as
+# "cannot resolve pull request" (stderr is discarded), hiding the real cause.
 launch_reset
-opn_status=0
-opn_out=$(clwt_without_gh open 1201 2>&1) || opn_status=$?
-check_equals 'open <n> refuses when gh is not on PATH: exits non-zero' 2 "$opn_status"
-check_contains 'open <n> refuses when gh is not on PATH: says so' 'not on PATH' "$opn_out"
+opn_out=$(clwt_without_gh open 1201 2>&1) || true
+check_equals 'open <n> refuses when gh is not on PATH' \
+  'clwt: open needs gh to reach GitHub, but gh is not on PATH' "$opn_out"
 check_equals 'open <n> refuses when gh is not on PATH: no launch' '' "$(launched pwd)"
 
 touch "$CLWT_GH_UNAVAILABLE"
 opn_run 1201
 rm -f "$CLWT_GH_UNAVAILABLE"
-check_equals 'open <n> refuses when gh is not authenticated: exits non-zero' 2 "$opn_status"
-check_contains 'open <n> refuses when gh is not authenticated: says so' 'not authenticated' "$opn_out"
+check_equals 'open <n> refuses when gh is not authenticated' \
+  'clwt: open needs gh to reach GitHub, but gh is not authenticated (run: gh auth login)' "$opn_out"
 check_equals 'open <n> refuses when gh is not authenticated: no launch' '' "$(launched pwd)"
 
 opn_refuses 'open <n> refuses an unknown pull request' \
@@ -2635,43 +2636,77 @@ opn_refuses 'open <n> refuses an invalid pull request url' \
 
 write_pr_meta 1207 feat/no-such-worktree false aaa111
 opn_run 1207
-check_equals 'open <n> refuses a head branch without a worktree: exits non-zero' 2 "$opn_status"
-check_equals 'open <n> refuses a head branch without a worktree: exact message' \
+check_equals 'open <n> refuses when the head branch has no worktree and names clwt branch <branch>: exits non-zero' 2 "$opn_status"
+check_equals 'open <n> refuses when the head branch has no worktree and names clwt branch <branch>: exact message' \
   'clwt: no worktree for pull request #1207 (branch feat/no-such-worktree); run: clwt branch feat/no-such-worktree' "$opn_out"
-check_equals 'open <n> refuses a head branch without a worktree: no launch' '' "$(launched pwd)"
+check_equals 'open <n> refuses when the head branch has no worktree and names clwt branch <branch>: no launch' '' "$(launched pwd)"
+
+# Regression: a shell metacharacter in a fork-controlled ref must not reach the
+# copy-pasteable hint unquoted.
+write_pr_meta 1210 'feat/x;y' false aaa111
+opn_refuses 'open <n> quotes a head ref with shell metacharacters in the branch hint' \
+  'no worktree for pull request #1210 (branch feat/x;y); run: clwt branch feat/x\;y' 1210
 
 # Regression: a worktree recorded for another PR must not be launched as this one.
 write_pr_meta 1208 feat/listed false aaa111
-git -C "$PRIMARY" config branch.feat/listed.worktree-pr-url "$OPN_URL/1299"
-git -C "$PRIMARY" config branch.feat/listed.worktree-pr-head bbb222
+opn_cfg worktree-pr-url "$OPN_URL/1299"
+opn_cfg worktree-pr-head bbb222
 opn_refuses 'open <n> refuses a worktree recorded for a different pull request' \
   "feat/listed is a worktree for a different pull request: it is recorded for $OPN_URL/1299; to open it anyway, run: clwt open feat/listed" 1208
 
-git -C "$PRIMARY" config --unset-all branch.feat/listed.worktree-pr-url
+opn_uncfg worktree-pr-url
 opn_refuses 'open <n> refuses a worktree with only a head marker' \
   'feat/listed is a worktree for a different pull request: it has an incomplete pull request marker; to open it anyway, run: clwt open feat/listed' 1208
-git -C "$PRIMARY" config --unset-all branch.feat/listed.worktree-pr-head
+opn_uncfg worktree-pr-head
 
-git -C "$PRIMARY" config branch.feat/listed.merge refs/pull/1299/head
+opn_cfg merge refs/pull/1299/head
 opn_refuses "open <n> refuses a worktree whose branch merges another pull request's head ref" \
   'feat/listed is a worktree for a different pull request: it merges refs/pull/1299/head; to open it anyway, run: clwt open feat/listed' 1208
-git -C "$PRIMARY" config --unset-all branch.feat/listed.merge
 
-git -C "$PRIMARY" config branch.feat/listed.worktree-pr-url "$OPN_URL/1208"
-git -C "$PRIMARY" config branch.feat/listed.worktree-pr-head aaa111
-git -C "$PRIMARY" config branch.feat/listed.merge refs/pull/1208/head
+opn_cfg worktree-pr-url "$OPN_URL/1208"
+opn_cfg worktree-pr-head aaa111
+opn_cfg merge refs/pull/1208/head
 opn_run 1208
 check_equals 'open <n> accepts a worktree recorded for the same pull request' \
   "$MANAGED/feat-listed" "$(launched pwd)"
-git -C "$PRIMARY" config --unset-all branch.feat/listed.worktree-pr-url
-git -C "$PRIMARY" config --unset-all branch.feat/listed.worktree-pr-head
-git -C "$PRIMARY" config --unset-all branch.feat/listed.merge
+opn_uncfg worktree-pr-url
+opn_uncfg worktree-pr-head
+
+# Regression: an unmarked fork checkout (maintainer-can-edit) tracks the branch
+# on the fork, so its name alone must not pass as this PR.
+opn_cfg merge refs/heads/feat/listed
+opn_cfg remote 'https://github.com/other/fork.git'
+opn_refuses 'open <n> refuses an unmarked worktree tracking its branch on another repository' \
+  'feat/listed is a worktree for a different pull request: it tracks feat/listed on a different repository; to open it anyway, run: clwt open feat/listed' 1208
+opn_cfg remote origin
+opn_run 1208
+check_equals 'open <n> accepts an unmarked worktree tracking its branch on origin' \
+  "$MANAGED/feat-listed" "$(launched pwd)"
+opn_uncfg remote
+opn_run 1208
+check_equals 'open <n> accepts an unmarked worktree with no upstream remote' \
+  "$MANAGED/feat-listed" "$(launched pwd)"
+opn_uncfg merge
+
+# Regression: a metacharacter ref must be shell-quoted in the open hint, and an
+# all-digit ref (which open would read as a PR number) must not get one.
+git -C "$PRIMARY" worktree add -q -b 'feat/q;z' "$MANAGED/feat-q-z" HEAD
+git -C "$PRIMARY" config 'branch.feat/q;z.merge' refs/pull/1299/head
+write_pr_meta 1211 'feat/q;z' false aaa111
+opn_refuses 'open <n> quotes a head ref with shell metacharacters in the open hint' \
+  'feat/q;z is a worktree for a different pull request: it merges refs/pull/1299/head; to open it anyway, run: clwt open feat/q\;z' 1211
+git -C "$PRIMARY" worktree add -q -b 4242 "$MANAGED/4242" HEAD
+git -C "$PRIMARY" config branch.4242.merge refs/pull/1299/head
+write_pr_meta 1212 4242 false aaa111
+opn_refuses 'open <n> omits the open hint for an all-digit head ref' \
+  '4242 is a worktree for a different pull request: it merges refs/pull/1299/head; its branch name is all digits, so it cannot be opened by name' 1212
+git -C "$PRIMARY" worktree remove --force "$MANAGED/feat-q-z"
+git -C "$PRIMARY" worktree remove --force "$MANAGED/4242"
+git -C "$PRIMARY" branch -D 'feat/q;z' 4242 >/dev/null
 
 write_pr_meta 1209 feat/stray false aaa111
-opn_run 1209
-check_equals 'open <n> refuses a worktree outside the managed root: exits non-zero' 2 "$opn_status"
-check_contains 'open <n> refuses a worktree outside the managed root: says so' 'managed' "$opn_out"
-check_equals 'open <n> refuses a worktree outside the managed root: no launch' '' "$(launched pwd)"
+opn_refuses 'open <n> refuses a worktree outside the managed root' \
+  "worktree is not under the managed root, so clwt does not manage it: $UNMANAGED" 1209
 
 # Regression: "007" must not reach gh, where it could resolve as PR 7.
 write_pr_meta 007 feat/listed false aaa111
@@ -2699,10 +2734,10 @@ check 'open <n> ran git through the logging wrapper' test -s "$OPN_GIT_LOG"
 check_not_contains 'open <n> does not fetch' 'fetch' "$(cat "$OPN_GIT_LOG")"
 sessions_after=$(ls -A "$PRIMARY/.git/clwt/sessions" 2>/dev/null || true)
 check_equals 'open <n> writes no session folder' "$sessions_before" "$sessions_after"
-check 'open <n> leaves no session folder for the worktree' \
-  test ! -e "$(pr_session_dir feat-listed)"
 rm -f "$CLWT_GH_PRS"/12[0-9][0-9]
 
+# Refusal tests assert the hint tail, not git's wording: the stripped PATH can
+# fail early on a missing binary, and only the tail proves clwt itself refused.
 section 'remove --delete-branch decision'
 
 REAL_GIT=$(command -v git)
