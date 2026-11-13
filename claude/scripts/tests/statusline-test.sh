@@ -63,7 +63,7 @@ check_line2() {
   fi
 }
 
-# Primary checkout, with an https origin that carries credentials.
+# Primary checkout with a clean https origin.
 PRIMARY="$TMP/primary-proj"; mkdir -p "$PRIMARY"
 ( cd "$PRIMARY" && git init -q . && echo a > a.txt && git add a.txt && git commit -qm init &&
   git remote add origin 'https://example.invalid/owner/project.git' ) || { echo "fixture setup failed" >&2; exit 1; }
@@ -72,7 +72,8 @@ PRIMARY="$TMP/primary-proj"; mkdir -p "$PRIMARY"
 ( cd "$PRIMARY" &&
   git worktree add -q "$TMP/feature-a" -b feature-a &&
   git worktree add -q "$TMP/feat-login" -b feat/login &&
-  git worktree add -q "$TMP/scratch" -b feat/other ) || { echo "worktree fixture setup failed" >&2; exit 1; }
+  git worktree add -q "$TMP/scratch" -b feat/other &&
+  git worktree add -q "$TMP/login-wt" -b feat/login-page ) || { echo "worktree fixture setup failed" >&2; exit 1; }
 
 DETACHED="$TMP/detached-proj"; mkdir -p "$DETACHED"
 ( cd "$DETACHED" && git init -q . && echo a > a.txt && git add a.txt && git commit -qm init &&
@@ -94,8 +95,8 @@ check_line2 'worktree name is hidden when it equals the branch' \
 check_line2 'worktree name is hidden when it equals the branch with slashes replaced by dashes' \
   "$TMP/feat-login" '📁 primary-proj | 🌿 feat/login'
 
-check_line2 'worktree name is shown when it differs from the branch' \
-  "$TMP/scratch" '📁 primary-proj | 🌿 feat/other | scratch'
+check_line2 'worktree name is shown when it differs from a branch containing a slash' \
+  "$TMP/login-wt" '📁 primary-proj | 🌿 feat/login-page | login-wt'
 
 check_line2 'detached HEAD omits the branch item' \
   "$DETACHED" '📁 detached-proj'
@@ -147,6 +148,45 @@ else
   not_ok "credentials in an https origin remote are not printed: $(printf '%s' "$OUT" | od -c | head -8)"
 fi
 
+run_statusline "$(jq -n --arg d "$NONGIT" '{workspace:{current_dir:$d,repo:{host:"user:repotok@example.invalid",owner:"acme",name:"widgets"}}}')"
+if printf '%s' "$OUT" | grep -qF 'https://example.invalid/acme/widgets/pulls' &&
+   ! printf '%s' "$OUT" | grep -qF 'repotok'; then
+  ok 'credentials in workspace.repo.host are not printed'
+else
+  not_ok "credentials in workspace.repo.host are not printed: $(printf '%s' "$OUT" | od -c | head -8)"
+fi
+
+QRY="$TMP/query-proj"; mkdir -p "$QRY"
+( cd "$QRY" && git init -q . && git remote add origin 'https://example.invalid/owner/project.git?token=qtok123#frag456' ) ||
+  { echo "query fixture setup failed" >&2; exit 1; }
+run_statusline "$(json_dir "$QRY")"
+if printf '%s' "$OUT" | grep -qF 'https://example.invalid/owner/project/pulls' &&
+   ! printf '%s' "$OUT" | grep -qF 'qtok123' && ! printf '%s' "$OUT" | grep -qF 'frag456'; then
+  ok 'a query-string token and fragment in the origin remote are not printed'
+else
+  not_ok "a query-string token and fragment in the origin remote are not printed: $(printf '%s' "$OUT" | od -c | head -8)"
+fi
+
+SLASH="$TMP/slash-proj"; mkdir -p "$SLASH"
+( cd "$SLASH" && git init -q . && git remote add origin 'https://someuser:1/slashsecret@example.invalid/owner/project.git' ) ||
+  { echo "slash fixture setup failed" >&2; exit 1; }
+run_statusline "$(json_dir "$SLASH")"
+if ! printf '%s' "$OUT" | grep -qF 'slashsecret'; then
+  ok 'a password containing a slash in the origin remote is not printed'
+else
+  not_ok "a password containing a slash in the origin remote is not printed: $(printf '%s' "$OUT" | od -c | head -8)"
+fi
+
+NOLINK="$TMP/nolink-proj"; mkdir -p "$NOLINK"
+( cd "$NOLINK" && git init -q . && git remote add origin 'https://bad_host.invalid:x/owner/project.git' ) ||
+  { echo "nolink fixture setup failed" >&2; exit 1; }
+run_statusline "$(json_dir "$NOLINK")"
+if ! printf '%s' "$OUT" | grep -qF "${ESC}]8;;"; then
+  ok 'no link is emitted when the remote authority is not a plain host'
+else
+  not_ok 'no link is emitted when the remote authority is not a plain host'
+fi
+
 section 'output hardening'
 
 BADDIR="$TMP/bad${ESC}[31mname${BEL}"; mkdir -p "$BADDIR"
@@ -166,6 +206,23 @@ else
   not_ok "literal backslash escapes in the folder name are printed literally: $(line2)"
 fi
 
+BADU="$TMP/c1-$(printf '\xc2\x9b')dir"; mkdir -p "$BADU"
+run_statusline "$(json_dir "$BADU")"
+if [ "$(line2)" = '📁 c1-dir' ]; then
+  ok 'UTF-8 C1 controls in the folder name are stripped'
+else
+  not_ok "UTF-8 C1 controls in the folder name are stripped: $(line2 | od -c | head -3)"
+fi
+
+# U+202E and U+2067, plus U+00E9 and U+2014 to show ordinary non-ASCII survives.
+BIDI="$TMP/bidi-$(printf '\xe2\x80\xae')x$(printf '\xe2\x81\xa7')-$(printf '\xc3\xa9\xe2\x80\x94')"; mkdir -p "$BIDI"
+run_statusline "$(json_dir "$BIDI")"
+if [ "$(line2)" = "📁 bidi-x-$(printf '\xc3\xa9\xe2\x80\x94')" ]; then
+  ok 'bidi override characters in the folder name are stripped'
+else
+  not_ok "bidi override characters in the folder name are stripped: $(line2 | od -c | head -3)"
+fi
+
 section 'line 1'
 
 # Captured from the script as it was before line 2 changed, run from a non-git
@@ -179,10 +236,19 @@ else
   not_ok "line 1 is unchanged for a fixed input: $got_hex"
 fi
 
+err=$(printf '%s' '{"context_window":{"used_percentage":"abc"},"rate_limits":{"five_hour":{"used_percentage":"1e"}}}' | bash "$SCRIPT" 2>&1 >/dev/null)
+run_statusline '{"context_window":{"used_percentage":"abc"},"rate_limits":{"five_hour":{"used_percentage":"1e"}}}'
+if [ -z "$err" ] && [ "$(printf '%s\n' "$OUT" | sed -n 1p | plain)" = 'Unknown Model | --% ctx' ]; then
+  ok 'a non-numeric percentage renders --% ctx with empty stderr'
+else
+  not_ok "a non-numeric percentage renders --% ctx with empty stderr: [$err] $OUT"
+fi
+
 section 'git config hardening'
 
-# A repo-local core.fsmonitor command must never run. The marker is the
-# payload's only effect.
+# Behavioral trap for a future git call that bypasses git_safe and refreshes
+# the index. Today's calls never read fsmonitor, so this passes even with the
+# flag removed; the source pin below is what guards the flags.
 HOSTILE="$TMP/hostile"; mkdir -p "$HOSTILE"
 ( cd "$HOSTILE" && git init -q . && echo data > f.txt && git add f.txt && git commit -qm init &&
   git config core.fsmonitor "sh -c 'touch $TMP/PWNED_FSMON; exit 1'" &&
@@ -195,8 +261,7 @@ else
   not_ok "a repo-local core.fsmonitor command is not executed (status=$STATUS): $(line2)"
 fi
 
-# Source-level pin: the marker test above only fires if some git subcommand
-# the script runs happens to consult fsmonitor, so the flags are pinned directly.
+# Source-level pin: the flags are the guard; the marker test cannot detect their removal.
 if grep -q 'GIT_CONFIG_NOSYSTEM=1' "$SCRIPT" &&
    grep -q 'core.fsmonitor=false' "$SCRIPT" &&
    grep -q 'core.hooksPath=/dev/null' "$SCRIPT" &&
