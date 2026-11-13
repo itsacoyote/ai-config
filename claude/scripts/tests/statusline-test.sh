@@ -271,6 +271,421 @@ else
   not_ok 'git runs with system config, fsmonitor, hooks and optional locks disabled'
 fi
 
+section 'refresh: cache the branch pull request'
+
+command -v jq >/dev/null 2>&1 || { echo "jq is required to run this suite" >&2; exit 1; }
+
+TAB=$'\t'
+CACHE_DIR="$HOME/.cache/claude-statusline"
+BIN="$TMP/bin"; mkdir -p "$BIN"
+GHFIX="$TMP/gh-fixtures"; mkdir -p "$GHFIX"
+export STATUSLINE_GH_FIXTURES="$GHFIX"
+PR_FIELDS='number,url,state,author,reviewDecision,reviews'
+export PR_FIELDS
+
+# Stub gh: canned answers from fixture files, one log line per call. A missing
+# fixture file exits 1, the same signal real gh gives for "no such PR" and for
+# "gh is broken", so the refresher cannot rely on telling them apart.
+cat >"$BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+dir="${STATUSLINE_GH_FIXTURES:?}"
+printf '%s\tenv:%s,%s,%s,%s,%s=%s,%s=%s,%s=%s,%s=%s\tpwd:%s\n' "$*" \
+  "${GH_PROMPT_DISABLED-}" "${GH_NO_UPDATE_NOTIFIER-}" "${GH_PAGER-}" "${NO_COLOR-}" \
+  "${GIT_CONFIG_KEY_0-}" "${GIT_CONFIG_VALUE_0-}" "${GIT_CONFIG_KEY_1-}" "${GIT_CONFIG_VALUE_1-}" \
+  "GIT_CONFIG_COUNT" "${GIT_CONFIG_COUNT-}" "SLEEP" "${STATUSLINE_STUB_SLEEP-}" "$PWD" >>"$dir/log"
+[ -e "$dir/fail" ] && exit 1
+if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$4" = user ] && [ "$5" = --jq ] && [ "$6" = .login ] && [ $# -eq 6 ]; then
+  [ -e "$dir/viewer-fail" ] && exit 1
+  cat "$dir/viewer" 2>/dev/null || exit 1
+  exit 0
+fi
+if [ "$1" = pr ] && [ "$2" = view ] && [ "$4" = --json ] && [ "$5" = "$PR_FIELDS" ] && [ $# -eq 5 ]; then
+  cat "$dir/view.json" 2>/dev/null || exit 1
+  exit 0
+fi
+if [ "$1" = pr ] && [ "$2" = list ] && [ "$3" = --head ] && [ "$5" = --state ] && [ "$6" = all ] &&
+   [ "$7" = --json ] && [ "$8" = "$PR_FIELDS" ] && [ "$9" = --limit ] && [ "${10}" = 10 ] && [ $# -eq 10 ]; then
+  cat "$dir/list.json" 2>/dev/null || exit 1
+  exit 0
+fi
+printf 'gh stub: unhandled: %s\n' "$*" >&2
+printf 'UNHANDLED %s\n' "$*" >>"$dir/unhandled"
+exit 99
+STUB
+chmod +x "$BIN/gh"
+
+# A PATH that has the tools the refresher needs but no gh.
+NOGH="$TMP/nogh-bin"; mkdir -p "$NOGH"
+for tool in git jq date mktemp mv rm mkdir chmod cat dirname basename sed tr grep head cut; do
+  tool_path=$(command -v "$tool") && ln -sf "$tool_path" "$NOGH/$tool"
+done
+
+RF="$TMP/refresh-repo"; mkdir -p "$RF"
+( cd "$RF" && git init -q . && echo a > a.txt && git add a.txt && git commit -qm init &&
+  git remote add origin 'https://example.invalid/owner/project.git' &&
+  git update-ref refs/remotes/origin/main HEAD &&
+  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main ) || { echo "refresh fixture setup failed" >&2; exit 1; }
+
+# No origin/HEAD: the default branch falls back to main/master.
+RFNOHEAD="$TMP/refresh-nohead"; mkdir -p "$RFNOHEAD"
+( cd "$RFNOHEAD" && git init -q . && echo a > a.txt && git add a.txt && git commit -qm init ) ||
+  { echo "refresh nohead fixture setup failed" >&2; exit 1; }
+
+PRURL='https://example.invalid/owner/project/pull'
+
+reset_gh() {
+  rm -rf "$GHFIX" "$CACHE_DIR"; mkdir -p "$GHFIX"
+  printf 'me\n' >"$GHFIX/viewer"
+}
+
+# reviews <login> <STATE> [<login> <STATE>]... — a reviews array, oldest first.
+reviews() {
+  jq -n -c '[$ARGS.positional as $p | range(0; $p | length; 2) | {author: {login: $p[.]}, state: $p[. + 1]}]' --args "$@"
+}
+
+# pr_obj <number> <STATE> <author> <reviewDecision> <reviews-json>
+pr_obj() {
+  jq -n -c --arg n "$1" --arg s "$2" --arg a "$3" --arg d "$4" --argjson r "$5" \
+    '{number: ($n | tonumber), url: "https://example.invalid/owner/project/pull/\($n)", state: $s, author: {login: $a}, reviewDecision: $d, reviews: $r}'
+}
+
+seed_cache() { mkdir -p "$CACHE_DIR" && printf '%s\n' "$1" >"$CF"; }
+set_list() { printf '%s\n' "$1" >"$GHFIX/list.json"; }
+set_view() { printf '%s\n' "$1" >"$GHFIX/view.json"; }
+gh_calls() { [ -f "$GHFIX/log" ] && grep -c . "$GHFIX/log" || printf '0'; }
+
+CF="$CACHE_DIR/branch-key"
+RSTATUS=0
+refresh() { # <top> <branch> <cache file> [PATH]
+  PATH="${4:-$BIN:$PATH}" "$BASH" "$SCRIPT" --refresh "$1" "$2" "$3" >"$TMP/refresh.out" 2>&1
+  RSTATUS=$?
+}
+
+# cache_tail — the cache line without its epoch.
+cache_tail() { cut -f2- "$CF" 2>/dev/null; }
+cache_epoch() { cut -f1 "$CF" 2>/dev/null; }
+epoch_is_current() {
+  local e now; e=$(cache_epoch); now=$(date +%s)
+  case "$e" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$e" -le "$now" ] && [ "$e" -ge $((now - 30)) ]
+}
+
+# expect_cache <name> <expected line without epoch> — also pins a clean exit,
+# a current epoch, empty output and no gh call the stub did not understand.
+expect_cache() {
+  local name="$1" want="$2" got
+  got=$(cache_tail)
+  if [ "$RSTATUS" = 0 ] && [ "$got" = "$want" ] && epoch_is_current &&
+     [ ! -s "$TMP/refresh.out" ] && [ ! -e "$GHFIX/unhandled" ]; then
+    ok "$name"
+  else
+    not_ok "$name (status=$RSTATUS): expected [$want] got [$got] out=[$(cat "$TMP/refresh.out" 2>/dev/null)]"
+  fi
+}
+
+reset_gh
+refresh "$RF" feat/x "$CF"
+if [ "$(ls -ld "$CACHE_DIR" | cut -c1-10)" = 'drwx------' ]; then
+  ok 'the cache directory is created owner-only'
+else
+  not_ok "the cache directory is created owner-only: $(ls -ld "$CACHE_DIR")"
+fi
+
+reset_gh
+set_list '[]'
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh caches NONE when the branch has no pr' 'NONE'
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh caches an open pr with no reviews as none' "7${TAB}OPEN${TAB}none${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED me COMMENTED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh caches approved when the viewer's last opinionated review is an approval followed by a comment" \
+  "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED me CHANGES_REQUESTED me COMMENTED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh caches changes when the viewer's last opinionated review requests changes" \
+  "7${TAB}OPEN${TAB}changes${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews bob APPROVED me COMMENTED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh caches commented when the viewer only left comment reviews" \
+  "7${TAB}OPEN${TAB}commented${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED me DISMISSED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh caches none when the viewer's approval was dismissed and they left no comment" \
+  "7${TAB}OPEN${TAB}none${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED me DISMISSED me COMMENTED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh caches commented when the viewer's approval was dismissed and they also commented" \
+  "7${TAB}OPEN${TAB}commented${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN me APPROVED "$(reviews bob COMMENTED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh on the viewer's own pr uses reviewDecision" \
+  "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN me CHANGES_REQUESTED "$(reviews bob APPROVED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh on the viewer's own pr uses reviewDecision for changes" \
+  "7${TAB}OPEN${TAB}changes${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN me '' "$(reviews bob COMMENTED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh on the viewer's own pr caches commented when only others commented" \
+  "7${TAB}OPEN${TAB}commented${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN me '' "$(reviews me COMMENTED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "refresh on the viewer's own pr ignores the viewer's own comment reviews" \
+  "7${TAB}OPEN${TAB}none${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 4 MERGED alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh caches merged' "4${TAB}MERGED${TAB}merged${TAB}$PRURL/4"
+if [ "$(gh_calls)" = 1 ]; then ok 'a merged pr needs no viewer lookup'; else not_ok "a merged pr needs no viewer lookup: $(cat "$GHFIX/log")"; fi
+
+# The open PR is the lower number and listed first, so only an explicit
+# OPEN preference, not "highest number" or "last listed", picks it.
+reset_gh
+set_list "[$(pr_obj 3 OPEN alice '' "$(reviews)"),$(pr_obj 9 MERGED alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh prefers an open pr over a merged one' "3${TAB}OPEN${TAB}none${TAB}$PRURL/3"
+
+reset_gh
+set_list "[$(pr_obj 3 MERGED alice '' "$(reviews)"),$(pr_obj 9 MERGED alice '' "$(reviews)"),$(pr_obj 5 MERGED alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh picks the highest-numbered merged pr' "9${TAB}MERGED${TAB}merged${TAB}$PRURL/9"
+
+reset_gh
+set_list "[$(pr_obj 8 CLOSED alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh ignores a closed unmerged pr' 'NONE'
+
+reset_gh
+set_list "[$(pr_obj 8 CLOSED alice '' "$(reviews)"),$(pr_obj 2 MERGED alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache 'a closed pr does not hide an older merged one' "2${TAB}MERGED${TAB}merged${TAB}$PRURL/2"
+
+section 'refresh: lookup order'
+
+reset_gh
+git -C "$RF" config branch.feat/m.worktree-pr-url "$PRURL/21"
+set_view "$(pr_obj 21 OPEN alice '' "$(reviews me APPROVED)")"
+refresh "$RF" feat/m "$CF"
+expect_cache 'refresh uses the clwt pr url marker before searching by branch' \
+  "21${TAB}OPEN${TAB}approved${TAB}$PRURL/21"
+if grep -q "^pr view $PRURL/21 --json" "$GHFIX/log" && ! grep -q '^pr list' "$GHFIX/log"; then
+  ok 'the marker path calls gh pr view with the url and never pr list'
+else
+  not_ok "the marker path calls gh pr view with the url and never pr list: $(cat "$GHFIX/log")"
+fi
+git -C "$RF" config --unset branch.feat/m.worktree-pr-url
+
+reset_gh
+git -C "$RF" config branch.feat/n.merge refs/pull/33/head
+set_view "$(pr_obj 33 OPEN alice '' "$(reviews me CHANGES_REQUESTED)")"
+refresh "$RF" feat/n "$CF"
+expect_cache 'refresh uses refs/pull/<n>/head from branch merge config' \
+  "33${TAB}OPEN${TAB}changes${TAB}$PRURL/33"
+if grep -q '^pr view 33 --json' "$GHFIX/log" && ! grep -q '^pr list' "$GHFIX/log"; then
+  ok 'the merge-ref path calls gh pr view with the number and never pr list'
+else
+  not_ok "the merge-ref path calls gh pr view with the number and never pr list: $(cat "$GHFIX/log")"
+fi
+git -C "$RF" config --unset branch.feat/n.merge
+
+reset_gh
+git -C "$RF" config branch.feat/bad.worktree-pr-url 'https://example.invalid/owner/project/issues/5'
+set_list '[]'
+refresh "$RF" feat/bad "$CF"
+expect_cache 'a marker that is not a pr url falls back to the branch search' 'NONE'
+if grep -q '^pr list' "$GHFIX/log"; then ok 'an invalid marker is never passed to gh'; else not_ok "an invalid marker is never passed to gh: $(cat "$GHFIX/log")"; fi
+git -C "$RF" config --unset branch.feat/bad.worktree-pr-url
+
+reset_gh
+git -C "$RF" config branch.feat/c.worktree-pr-url "$PRURL/40"
+set_view "$(pr_obj 40 CLOSED alice '' "$(reviews)")"
+refresh "$RF" feat/c "$CF"
+expect_cache 'a closed unmerged pr found through the marker caches NONE' 'NONE'
+git -C "$RF" config --unset branch.feat/c.worktree-pr-url
+
+reset_gh
+git -C "$RF" config branch.feat/d.merge refs/pull/41/head
+set_view "$(pr_obj 41 CLOSED alice '' "$(reviews)")"
+refresh "$RF" feat/d "$CF"
+expect_cache 'a closed unmerged pr found through refs/pull/<n>/head caches NONE' 'NONE'
+git -C "$RF" config --unset branch.feat/d.merge
+
+reset_gh
+refresh "$RF" main "$CF"
+expect_cache 'refresh on the default branch caches NONE without calling gh' 'NONE'
+if [ "$(gh_calls)" = 0 ]; then ok 'the default branch makes no gh call'; else not_ok "the default branch makes no gh call: $(cat "$GHFIX/log")"; fi
+
+reset_gh
+refresh "$RFNOHEAD" master "$CF"
+expect_cache 'without origin/HEAD, master is treated as the default branch' 'NONE'
+if [ "$(gh_calls)" = 0 ]; then ok 'master without origin/HEAD makes no gh call'; else not_ok "master without origin/HEAD makes no gh call: $(cat "$GHFIX/log")"; fi
+
+reset_gh
+set_list '[]'
+refresh "$RF" develop "$CF"
+if [ "$(gh_calls)" = 1 ]; then ok 'a non-default branch name is looked up even when origin/HEAD names another branch'; else not_ok "a non-default branch name is looked up: $(gh_calls) calls"; fi
+
+section 'refresh: viewer login'
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+refresh "$RF" feat/x "$CF"
+if [ "$(grep -c '^api ' "$GHFIX/log")" = 1 ] && grep -q '^api --hostname example.invalid user --jq .login' "$GHFIX/log"; then
+  ok 'the viewer login is fetched for the pr host once and cached'
+else
+  not_ok "the viewer login is fetched for the pr host once and cached: $(cat "$GHFIX/log")"
+fi
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+printf '%s\tme\n' "$(( $(date +%s) - 90000 ))" >"$CACHE_DIR/viewer.example.invalid"
+refresh "$RF" feat/x "$CF"
+if [ "$(grep -c '^api ' "$GHFIX/log")" = 2 ]; then
+  ok 'a viewer login older than 24 hours is fetched again'
+else
+  not_ok "a viewer login older than 24 hours is fetched again: $(cat "$GHFIX/log")"
+fi
+
+reset_gh
+seed_cache "1000${TAB}NONE"
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
+touch "$GHFIX/viewer-fail"
+refresh "$RF" feat/x "$CF"
+if [ "$RSTATUS" = 0 ] && [ "$(cache_tail)" = 'NONE' ] && epoch_is_current; then
+  ok 'refresh treats a viewer login failure as a refresh failure'
+else
+  not_ok "refresh treats a viewer login failure as a refresh failure: $(cat "$CF")"
+fi
+reset_gh
+seed_cache "1000${TAB}7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
+touch "$GHFIX/viewer-fail"
+refresh "$RF" feat/x "$CF"
+expect_cache 'a viewer login failure keeps the previous fields' "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+
+section 'refresh: failures and validation'
+
+reset_gh
+seed_cache "1000${TAB}7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+touch "$GHFIX/fail"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh keeps the previous fields and bumps the epoch when gh fails' \
+  "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+
+reset_gh
+touch "$GHFIX/fail"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh writes NONE when gh fails and there is no previous file' 'NONE'
+
+reset_gh
+seed_cache "1000${TAB}7${TAB}OPEN${TAB}approved${TAB}https://evil.invalid/x"
+touch "$GHFIX/fail"
+refresh "$RF" feat/x "$CF"
+expect_cache 'a previous line that fails validation is not carried forward' 'NONE'
+
+reset_gh
+set_list 'not json'
+refresh "$RF" feat/x "$CF"
+expect_cache 'a gh answer that is not json counts as a failure' 'NONE'
+
+reset_gh
+set_list "$(jq -n -c --arg u "$PRURL/7" '[{number: "12x", url: $u, state: "OPEN", author: {login: "alice"}, reviewDecision: "", reviews: []}]')"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh rejects a non-numeric pr number' 'NONE'
+
+reset_gh
+set_list "$(jq -n -c --arg u "$PRURL/7"$'\033[31m' '[{number: 7, url: $u, state: "OPEN", author: {login: "alice"}, reviewDecision: "", reviews: []}]')"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh rejects a url with control characters' 'NONE'
+if ! grep -q "$ESC" "$CF"; then ok 'no control character reaches the cache file'; else not_ok 'no control character reaches the cache file'; fi
+
+reset_gh
+set_list "$(jq -n -c '[{number: 7, url: "http://example.invalid/owner/project/pull/7", state: "OPEN", author: {login: "alice"}, reviewDecision: "", reviews: []}]')"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh rejects a pr url that is not https' 'NONE'
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF" "$NOGH"
+expect_cache 'refresh with gh absent from PATH writes NONE' 'NONE'
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+if grep -q 'env:1,1,cat,1,core.fsmonitor=false,core.hooksPath=/dev/null,GIT_CONFIG_COUNT=2' "$GHFIX/log" &&
+   grep -q "pwd:$RF\$" "$GHFIX/log"; then
+  ok 'gh runs from the repo toplevel with prompts, pager, colour and git hooks disabled'
+else
+  not_ok "gh runs from the repo toplevel with prompts, pager, colour and git hooks disabled: $(head -3 "$GHFIX/log")"
+fi
+if grep -q 'GIT_CONFIG_KEY_1\|fsmonitor' "$TMP/refresh.out"; then not_ok 'gh output stays out of the refresher output'; else ok 'gh output stays out of the refresher output'; fi
+
+section 'refresh: cache paths'
+
+key_a=$(printf 'common\nfeat/a-b' | cksum | cut -d' ' -f1)
+key_b=$(printf 'common\nfeat-a/b' | cksum | cut -d' ' -f1)
+# Names are built by the render in the next task; this pins that the key input
+# keeps / and - apart, so the two branches below cannot share a file.
+reset_gh
+set_list "[$(pr_obj 5 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/a-b "$CACHE_DIR/k-$key_a"
+set_list "[$(pr_obj 6 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat-a/b "$CACHE_DIR/k-$key_b"
+if [ "$key_a" != "$key_b" ] && [ "$(cut -f2 "$CACHE_DIR/k-$key_a")" = 5 ] && [ "$(cut -f2 "$CACHE_DIR/k-$key_b")" = 6 ]; then
+  ok 'branches feat/a-b and feat-a/b use different cache files'
+else
+  not_ok "branches feat/a-b and feat-a/b use different cache files: $key_a $key_b"
+fi
+
+reset_gh
+set_list "[$(pr_obj 5 OPEN alice '' "$(reviews)")]"
+for bad in "$TMP/outside-cache" "$CACHE_DIR/../escaped" "$CACHE_DIR/sub/file" "$CACHE_DIR" "$CACHE_DIR/.hidden" "relative-file"; do
+  rm -f "$TMP/outside-cache" "$HOME/.cache/escaped"
+  refresh "$RF" feat/x "$bad"
+  if [ "$RSTATUS" != 0 ] && [ ! -e "$TMP/outside-cache" ] && [ ! -e "$HOME/.cache/escaped" ] && [ ! -e "$CACHE_DIR/sub" ] && [ ! -e "$CACHE_DIR/.hidden" ] && [ "$(gh_calls)" = 0 ]; then
+    ok "refresh refuses a cache file outside the cache directory: $bad"
+  else
+    not_ok "refresh refuses a cache file outside the cache directory: $bad (status=$RSTATUS)"
+  fi
+done
+
+reset_gh
+refresh "$RF" "" "$CF"; empty_status=$RSTATUS
+refresh "$RF" "--help" "$CF"; dash_status=$RSTATUS
+if [ "$empty_status" != 0 ] && [ "$dash_status" != 0 ] && [ "$(gh_calls)" = 0 ]; then
+  ok 'refresh refuses an empty branch and one starting with a dash'
+else
+  not_ok "refresh refuses an empty branch and one starting with a dash ($empty_status, $dash_status)"
+fi
+
+reset_gh
+if ! ls "$CACHE_DIR"/.tmp.* >/dev/null 2>&1; then ok 'no temp files are left in the cache directory'; else not_ok 'temp files left behind'; fi
+
 section 'portability'
 
 if sed 's/#.*//' "$SCRIPT" | grep -Eq '(^|[[:space:]])(mapfile|readarray|(declare|local)[[:space:]]+-A)([[:space:]]|$)'; then

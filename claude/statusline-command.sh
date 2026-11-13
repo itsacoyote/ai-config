@@ -7,8 +7,6 @@ set -u
 # disables the config paths that can run commands.
 export GIT_CONFIG_NOSYSTEM=1
 
-input=$(cat)
-
 # Display values are printed with %s, so terminal escape sequences in a folder
 # name or model string would otherwise reach the terminal as-is.
 # Also removes UTF-8 C1 controls (U+0080-U+009F) and bidi overrides
@@ -50,6 +48,174 @@ field() {
 git_safe() {
   git -C "$dir" -c core.fsmonitor=false -c core.hooksPath=/dev/null --no-optional-locks "$@"
 }
+
+CACHE_DIR="${HOME:-}/.cache/claude-statusline"
+PR_FIELDS='number,url,state,author,reviewDecision,reviews'
+PR_NUMBER_RE='^[0-9]+$'
+PR_URL_RE='^https://[A-Za-z0-9.-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+$'
+PR_STATE_RE='^(OPEN|MERGED)$'
+PR_CODE_RE='^(approved|changes|commented|merged|none)$'
+EPOCH_RE='^[0-9]{1,12}$'
+LOGIN_RE='^[A-Za-z0-9][][A-Za-z0-9_.-]*$'
+VIEWER_TTL=86400
+
+# gh runs inside a repository whose config is untrusted, and shells out to git.
+run_gh() {
+  (
+    cd "$top" || exit 1
+    GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 GH_PAGER=cat NO_COLOR=1 \
+    GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false \
+    GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
+      gh "$@" 2>/dev/null
+  )
+}
+
+atomic_write() {
+  local dest="$1" tmp
+  tmp=$(mktemp "$CACHE_DIR/.tmp.XXXXXX") || return 1
+  if printf '%s\n' "$2" >"$tmp" && mv -f "$tmp" "$dest"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+viewer_login() {
+  local host="$1" file v_epoch="" v_login="" login
+  file="$CACHE_DIR/viewer.$host"
+  if [ -f "$file" ]; then
+    IFS=$'\t' read -r v_epoch v_login <"$file"
+    if [[ $v_epoch =~ $EPOCH_RE ]] && [[ $v_login =~ $LOGIN_RE ]] &&
+       [ $((now - v_epoch)) -ge 0 ] && [ $((now - v_epoch)) -lt "$VIEWER_TTL" ]; then
+      printf '%s' "$v_login"
+      return 0
+    fi
+  fi
+  login=$(run_gh api --hostname "$host" user --jq .login) || return 1
+  [[ $login =~ $LOGIN_RE ]] || return 1
+  atomic_write "$file" "$now"$'\t'"$login" || return 1
+  printf '%s' "$login"
+}
+
+# reviews, not latestReviews: latestReviews lets a later COMMENTED review
+# replace an APPROVED one. reviewDecision is "" (not null) when there is none.
+REVIEW_CODE_JQ='
+  ((.author.login // "") | ascii_downcase) as $author
+  | ($v | ascii_downcase) as $viewer
+  | [.reviews[]? | {who: ((.author.login // "") | ascii_downcase), state: .state}] as $rv
+  | if $author == $viewer then
+      if .reviewDecision == "APPROVED" then "approved"
+      elif .reviewDecision == "CHANGES_REQUESTED" then "changes"
+      elif ([$rv[] | select(.state == "COMMENTED" and .who != $author)] | length) > 0 then "commented"
+      else "none" end
+    else
+      [$rv[] | select(.who == $viewer)] as $mine
+      | ([$mine[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")] | last | .state) as $last
+      | if $last == "APPROVED" then "approved"
+        elif $last == "CHANGES_REQUESTED" then "changes"
+        elif ([$mine[] | select(.state == "COMMENTED")] | length) > 0 then "commented"
+        else "none" end
+    end'
+
+# Sets pr_number/pr_url/pr_state/pr_code, all empty meaning no PR. Returns 1
+# when gh could not answer, so the caller keeps the previous cache fields.
+lookup_pr() {
+  local default marker merge json n u host viewer code state
+  pr_number=""; pr_url=""; pr_state=""; pr_code=""
+
+  default=$(git_safe symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+  default="${default#origin/}"
+  if [ -z "$default" ]; then
+    case "$branch" in main|master) return 0 ;; esac
+  elif [ "$branch" = "$default" ]; then
+    return 0
+  fi
+
+  command -v gh >/dev/null 2>&1 || return 0
+
+  marker=$(git_safe config --get "branch.$branch.worktree-pr-url" 2>/dev/null)
+  merge=$(git_safe config --get "branch.$branch.merge" 2>/dev/null)
+  if [[ $marker =~ $PR_URL_RE ]]; then
+    json=$(run_gh pr view "$marker" --json "$PR_FIELDS") || return 1
+  elif [[ $merge =~ ^refs/pull/([0-9]+)/head$ ]]; then
+    json=$(run_gh pr view "${BASH_REMATCH[1]}" --json "$PR_FIELDS") || return 1
+  else
+    json=$(run_gh pr list --head "$branch" --state all --json "$PR_FIELDS" --limit 10) || return 1
+    json=$(printf '%s' "$json" | jq -c '
+      [.[] | select(.state == "OPEN")][0]
+      // ([.[] | select(.state == "MERGED")] | sort_by(.number) | last)' 2>/dev/null) || return 1
+  fi
+
+  [ "$json" = null ] && return 0
+  printf '%s' "$json" | jq -e 'type == "object"' >/dev/null 2>&1 || return 1
+
+  state=$(printf '%s' "$json" | jq -r '.state // ""')
+  [[ $state =~ $PR_STATE_RE ]] || return 0
+  n=$(printf '%s' "$json" | jq -r '.number | tostring')
+  u=$(printf '%s' "$json" | jq -r '.url // ""')
+  [[ $n =~ $PR_NUMBER_RE ]] && [[ $u =~ $PR_URL_RE ]] || return 0
+
+  if [ "$state" = MERGED ]; then
+    code=merged
+  else
+    host="${u#https://}"
+    host="${host%%/*}"
+    viewer=$(viewer_login "$host") || return 1
+    code=$(printf '%s' "$json" | jq -r --arg v "$viewer" "$REVIEW_CODE_JQ" 2>/dev/null) || return 1
+    [[ $code =~ $PR_CODE_RE ]] || return 1
+  fi
+
+  pr_number="$n"; pr_url="$u"; pr_state="$state"; pr_code="$code"
+}
+
+write_pr_line() {
+  if [ -n "$pr_number" ]; then
+    atomic_write "$cache_file" "$now"$'\t'"$pr_number"$'\t'"$pr_state"$'\t'"$pr_code"$'\t'"$pr_url"
+  else
+    atomic_write "$cache_file" "$now"$'\tNONE'
+  fi
+}
+
+keep_previous_line() {
+  local p_epoch="" p_number="" p_state="" p_code="" p_url=""
+  [ -f "$cache_file" ] && IFS=$'\t' read -r p_epoch p_number p_state p_code p_url <"$cache_file"
+  pr_number=""
+  if [[ $p_number =~ $PR_NUMBER_RE ]] && [[ $p_state =~ $PR_STATE_RE ]] &&
+     [[ $p_code =~ $PR_CODE_RE ]] && [[ $p_url =~ $PR_URL_RE ]]; then
+    pr_number="$p_number"; pr_state="$p_state"; pr_code="$p_code"; pr_url="$p_url"
+  fi
+  write_pr_line
+}
+
+# --refresh <repo toplevel> <branch> <cache file>
+refresh_main() {
+  local top="$1" branch="$2" cache_file="$3" name now
+  local pr_number pr_url pr_state pr_code
+  umask 077
+
+  [ -n "${HOME:-}" ] && [ -d "$top" ] || return 1
+  [ -n "$branch" ] && [ "${branch#-}" = "$branch" ] || return 1
+  case "$cache_file" in "$CACHE_DIR"/*) ;; *) return 1 ;; esac
+  name="${cache_file#"$CACHE_DIR"/}"
+  case "$name" in ''|.*|*/*) return 1 ;; esac
+  [ -L "$CACHE_DIR" ] && return 1
+  mkdir -p "$CACHE_DIR" && chmod 700 "$CACHE_DIR" || return 1
+
+  dir="$top"
+  now=$(date +%s)
+  if lookup_pr; then
+    write_pr_line
+  else
+    keep_previous_line
+  fi
+}
+
+if [ "${1:-}" = "--refresh" ]; then
+  refresh_main "${2:-}" "${3:-}" "${4:-}"
+  exit $?
+fi
+
+input=$(cat)
 
 model=$(strip_ctl "$(field '.model.display_name // "Unknown Model"')")
 effort=$(strip_ctl "$(field '.effort.level // ""')")
