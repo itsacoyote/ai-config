@@ -330,7 +330,7 @@ section 'refresh: cache the branch pull request'
 
 # A PATH with the tools the refresher runs but no gh.
 NOGH="$TMP/nogh-bin"; mkdir -p "$NOGH"
-for tool in bash git jq date mktemp mv rm mkdir chmod cat sed tr grep basename dirname cksum find nohup sleep; do
+for tool in bash git jq date mktemp mv rm mkdir chmod cat sed tr grep basename dirname shasum find nohup sleep; do
   tool_path=$(command -v "$tool") && ln -sf "$tool_path" "$NOGH/$tool"
 done
 
@@ -365,21 +365,35 @@ pr_obj() {
     '{number: ($n | tonumber), url: "\($b)/pull/\($n)", state: $s, author: {login: $a}, reviewDecision: $d, reviews: $r}'
 }
 
-# wait_idle — returns once no refresher holds a lock, so a straggler from an
+# lock_busy — true while a lock has no recorded owner yet or its owner runs. A
+# lock kept after a failed write has a dead owner and does not count.
+lock_busy() {
+  local lock pid
+  for lock in "$CACHE_DIR"/*.lock; do
+    [ -d "$lock" ] || continue
+    pid=$(cat "$lock/pid" 2>/dev/null)
+    [ -z "$pid" ] && return 0
+    kill -0 "$pid" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+# wait_idle — returns once no refresher is running, so a straggler from an
 # earlier test cannot write into the next test's cache. Bounded to about 10s.
 wait_idle() {
   local i=0
-  while [ "$i" -lt 100 ] && [ -n "$(find "$CACHE_DIR" -maxdepth 1 -name '*.lock' 2>/dev/null)" ]; do
-    sleep 0.1; i=$((i + 1))
-  done
+  while [ "$i" -lt 100 ] && lock_busy; do sleep 0.1; i=$((i + 1)); done
 }
+
+# no_refresher <cache file> — true when no --refresh process names that file.
+no_refresher() { ! pgrep -f -- "--refresh .* $1" >/dev/null 2>&1; }
 
 set_list() { printf '%s\n' "$1" >"$GHFIX/list.json"; }
 set_view() { printf '%s\n' "$1" >"$GHFIX/view.json"; }
 gh_calls() { [ -f "$GHFIX/log" ] && grep -c . "$GHFIX/log" || printf '0'; }
 api_calls() { [ -f "$GHFIX/log" ] || { printf '0'; return; }; grep -c '^api ' "$GHFIX/log" || true; }
 
-CF="$CACHE_DIR/k-1234567"
+CF="$CACHE_DIR/k-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 GOOD="7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
 seed_cache() { mkdir -p "$CACHE_DIR" && printf '%s\n' "$1" >"$CF"; }
 seed_good() { seed_cache "1000${TAB}$GOOD"; }
@@ -879,7 +893,7 @@ RR="$TMP/render-repo"; mkdir -p "$RR"
 RRX="$TMP/rr-x"
 
 cache_for() { # <branch> — the path the render must pick for a branch of $RR
-  local key; key=$(printf '%s\n%s' "$RR/.git" "$1" | cksum); printf '%s/k-%s' "$CACHE_DIR" "${key%% *}"
+  local key; key=$(printf '%s\n%s' "$RR/.git" "$1" | shasum -a 256); printf '%s/k-%s' "$CACHE_DIR" "${key%% *}"
 }
 seed_for() { # <branch> <epoch offset from now> <line without epoch>
   mkdir -p "$CACHE_DIR"
@@ -890,7 +904,7 @@ line1_raw() { printf '%s\n' "$OUT" | sed -n 1p; }
 pr_list_calls() { [ -f "$GHFIX/log" ] || { printf '0'; return; }; grep -c '^pr list' "$GHFIX/log" || true; }
 # wait_file <path> — bounded poll, about 10s.
 wait_file() { local i=0; while [ ! -e "$1" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; }
-OPEN7_LIST() { set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED)")]"; }
+set_open7_list() { set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED)")]"; }
 
 reset_gh
 seed_for feat/x -5 "$GOOD"
@@ -908,7 +922,7 @@ else
   not_ok "a fresh cache never calls gh: $(cat "$GHFIX/log" 2>/dev/null)"
 fi
 
-for pair in 'approved:✅' 'changes:🔴' 'commented:💬'; do
+for pair in 'changes:🔴' 'commented:💬'; do
   code="${pair%%:*}"; emoji="${pair#*:}"
   reset_gh
   seed_for feat/x -5 "7${TAB}OPEN${TAB}$code${TAB}$PRURL/7"
@@ -947,9 +961,8 @@ else
   not_ok "a NONE cache renders no pr item: $(line1)"
 fi
 
-# Stale data still renders while the refresh runs.
 reset_gh
-OPEN7_LIST
+set_open7_list
 seed_for feat/x -120 "$GOOD"
 run_statusline "$(json_dir "$RRX")"
 wait_idle
@@ -961,7 +974,7 @@ else
 fi
 
 reset_gh
-OPEN7_LIST
+set_open7_list
 seed_for feat/x 3600 "$GOOD"
 run_statusline "$(json_dir "$RRX")"
 wait_idle
@@ -973,8 +986,8 @@ fi
 
 # The delay keeps the first refresher holding the lock while every render runs.
 reset_gh
-OPEN7_LIST
-echo 1 >"$GHFIX/delay"
+set_open7_list
+echo 0.5 >"$GHFIX/delay"
 pids=''
 for _ in 1 2 3 4 5; do
   ( printf '%s' "$(json_dir "$RRX")" | PATH="$BIN:$PATH" bash "$SCRIPT" >/dev/null 2>&1 ) &
@@ -990,7 +1003,7 @@ else
 fi
 
 reset_gh
-OPEN7_LIST
+set_open7_list
 mkdir -p "$(cache_for feat/x).lock"
 touch -t 202001010000 "$(cache_for feat/x).lock"
 run_statusline "$(json_dir "$RRX")"
@@ -1003,11 +1016,11 @@ else
 fi
 
 reset_gh
-OPEN7_LIST
+set_open7_list
 mkdir -p "$(cache_for feat/x).lock"
 run_statusline "$(json_dir "$RRX")"
-sleep 1
-if [ "$(gh_calls)" = 0 ] && [ -d "$(cache_for feat/x).lock" ]; then
+sleep 0.5
+if [ "$(gh_calls)" = 0 ] && [ -d "$(cache_for feat/x).lock" ] && no_refresher "$(cache_for feat/x)"; then
   ok 'a fresh lock directory is treated as held'
 else
   not_ok "a fresh lock directory is treated as held (calls=$(gh_calls))"
@@ -1017,7 +1030,7 @@ rm -rf "$(cache_for feat/x).lock"
 # The stub mv refreshes the lock after the staleness check and before the
 # rename, as a competing render's replacement would.
 reset_gh
-OPEN7_LIST
+set_open7_list
 RACEBIN="$TMP/racebin"; mkdir -p "$RACEBIN"
 REAL_MV=$(command -v mv)
 printf '#!/bin/bash\ncase "$1" in *.lock) touch "$1" ;; esac\nexec %s "$@"\n' "$REAL_MV" >"$RACEBIN/mv"
@@ -1025,19 +1038,20 @@ chmod +x "$RACEBIN/mv"
 mkdir -p "$(cache_for feat/x).lock"
 touch -t 202001010000 "$(cache_for feat/x).lock"
 RENDER_PATH="$RACEBIN:$BIN:$PATH" run_statusline "$(json_dir "$RRX")"
-sleep 1
-if [ "$(gh_calls)" = 0 ] && [ ! -e "$(cache_for feat/x).lock" ]; then
-  ok 'a lock refreshed between the check and the rename is not taken over'
+sleep 0.5
+if [ "$(gh_calls)" = 0 ] && [ -d "$(cache_for feat/x).lock" ] && no_refresher "$(cache_for feat/x)" &&
+   [ -z "$(ls "$CACHE_DIR" | grep 'stale')" ]; then
+  ok 'a lock refreshed between the check and the rename is put back, not taken over'
 else
-  not_ok "a lock refreshed between the check and the rename is not taken over (calls=$(gh_calls))"
+  not_ok "a lock refreshed between the check and the rename is put back, not taken over (calls=$(gh_calls)): $(ls "$CACHE_DIR")"
 fi
 rm -rf "$(cache_for feat/x).lock"
 
 # Without >/dev/null the refresher keeps the capture pipe open and the render
 # blocks until gh returns.
 reset_gh
-OPEN7_LIST
-echo 4 >"$GHFIX/delay"
+set_open7_list
+echo 3 >"$GHFIX/delay"
 t0=$(date +%s)
 run_statusline "$(json_dir "$RRX")"
 t1=$(date +%s)
@@ -1050,7 +1064,7 @@ wait_file "$(cache_for feat/x)"
 wait_idle
 
 reset_gh
-OPEN7_LIST
+set_open7_list
 echo 2 >"$GHFIX/delay"
 json_dir "$RRX" >"$TMP/sig.json"
 rm -f "$TMP/sig.pid"
@@ -1091,6 +1105,8 @@ poison 'number that is not numeric' "7;x${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
 poison 'number that differs from the url' "8${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
 poison 'unknown code word' "7${TAB}OPEN${TAB}evil${TAB}$PRURL/7"
 poison 'unknown state' "7${TAB}CLOSED${TAB}approved${TAB}$PRURL/7"
+poison 'open pr with the merged code' "7${TAB}OPEN${TAB}merged${TAB}$PRURL/7"
+poison 'merged pr with a review code' "7${TAB}MERGED${TAB}approved${TAB}$PRURL/7"
 poison 'extra field' "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7${TAB}extra"
 
 # Bash evaluates a subscript in arithmetic, so an unvalidated epoch would run the command.
@@ -1143,7 +1159,7 @@ else
 fi
 
 reset_gh
-OPEN7_LIST
+set_open7_list
 run_statusline "$(json_dir "$RRX")"
 first="$(line1)"
 wait_file "$(cache_for feat/x)"
@@ -1171,7 +1187,7 @@ else
 fi
 
 reset_gh
-OPEN7_LIST
+set_open7_list
 mkdir -p "$TMP/link"
 ln -sf "$SCRIPT" "$TMP/link/statusline-command.sh"
 OUT="$(cd "$TMP/link" && json_dir "$RRX" | PATH="$BIN:$PATH" bash statusline-command.sh 2>&1)"
@@ -1194,21 +1210,73 @@ else
   not_ok "with gh absent from PATH both lines render and stderr is empty: err=[$err] [$(line2)]"
 fi
 
-# A stub nohup exits at once, so the job finishes while the render still runs.
-# Bash 3.2 reports a finished job on stderr only when job control is on in the
-# shell and a later foreground command runs; the render has no such command
-# today, so this pins the output rather than killing the unwrapped-set -m mutation.
+# A previous line whose number and url disagree must not be carried forward.
 reset_gh
-NOHUPBIN="$TMP/nohupbin"; mkdir -p "$NOHUPBIN"
-printf '#!/bin/bash\nexit 0\n' >"$NOHUPBIN/nohup"; chmod +x "$NOHUPBIN/nohup"
-RENDER_PATH="$NOHUPBIN:$BIN:$PATH" run_statusline "$(json_dir "$RRX")"
-sleep 0.5
-if [ "$STATUS" = 0 ] && [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = 2 ] && ! printf '%s' "$OUT" | grep -q 'Done'; then
-  ok 'a render whose refresher exits at once writes nothing to stderr'
+seed_cache "1000${TAB}8${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+touch "$GHFIX/fail"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh does not carry forward a previous line whose number and url disagree' 'NONE'
+
+reset_gh
+seed_cache "1000${TAB}7${TAB}MERGED${TAB}approved${TAB}$PRURL/7"
+touch "$GHFIX/fail"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh does not carry forward a previous line whose state and code disagree' 'NONE'
+
+# A write that cannot succeed keeps the lock, so the stale-lock rule, not every
+# render, limits the retries.
+reset_gh
+set_open7_list
+mkdir -p "$(cache_for feat/x)"
+for _ in 1 2 3; do
+  run_statusline "$(json_dir "$RRX")"
+  wait_idle
+done
+if [ "$(pr_list_calls)" = 1 ] && [ -d "$(cache_for feat/x).lock" ]; then
+  ok 'a refresher that cannot write the cache keeps its lock so renders do not retry'
 else
-  not_ok "a render whose refresher exits at once writes nothing to stderr: $OUT"
+  not_ok "a refresher that cannot write the cache keeps its lock (list calls=$(pr_list_calls))"
 fi
-rm -rf "$(cache_for feat/x).lock"
+
+# The key is a SHA-256 hex digest: shorter, longer and uppercase names are refused.
+HEX64='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+for name in k-5 "k-${HEX64}0" "k-$(printf '%s' "$HEX64" | tr a-f A-F)"; do
+  reset_gh
+  refresh "$RF" feat/x "$CACHE_DIR/$name"
+  if [ "$RSTATUS" != 0 ] && [ ! -e "$CACHE_DIR/$name" ] && [ "$(gh_calls)" = 0 ]; then
+    ok "refresh refuses the cache file name $name"
+  else
+    not_ok "refresh refuses the cache file name $name (status=$RSTATUS)"
+  fi
+done
+
+# A rejected run (branch starting with -) must still release the lock it was given.
+reset_gh
+mkdir -p "$CACHE_DIR" "$CF.lock"
+refresh "$RF" -bad "$CF"
+if [ "$RSTATUS" != 0 ] && [ ! -e "$CF.lock" ] && [ "$(gh_calls)" = 0 ]; then
+  ok 'a refresher that rejects its arguments releases its lock'
+else
+  not_ok "a refresher that rejects its arguments releases its lock (status=$RSTATUS)"
+fi
+
+# A refresher that no longer owns the lock must leave a replacement alone. The
+# pid file is overwritten while gh runs, as a replacing render's refresher would.
+reset_gh
+set_list '[]'
+echo 1 >"$GHFIX/delay"
+mkdir -p "$CACHE_DIR" "$CF.lock"
+PATH="$BIN:$PATH" "$BASH" "$SCRIPT" --refresh "$RF" feat/x "$CF" >/dev/null 2>&1 &
+slow_pid=$!
+sleep 0.4
+printf '%s\n' 99999999 >"$CF.lock/pid"
+wait "$slow_pid"
+if [ -d "$CF.lock" ]; then
+  ok "a refresher leaves a lock that holds another process's pid"
+else
+  not_ok "a refresher leaves a lock that holds another process's pid"
+fi
+rm -rf "$CF.lock"
 
 reset_gh
 set_list '[]'
@@ -1221,6 +1289,16 @@ else
 fi
 
 section 'portability'
+
+# set -m turns on job control for the whole shell, and bash 3.2 then prints a
+# "Done" notice for finished jobs. It belongs only in the spawn's own subshell.
+setm_lines=$(sed 's/#.*//' "$SCRIPT" | grep -n 'set -m')
+if [ "$(printf '%s\n' "$setm_lines" | wc -l | tr -d ' ')" = 1 ] &&
+   printf '%s\n' "$setm_lines" | cut -d: -f2- | grep -Fxq '  ( set -m; nohup bash "$self" --refresh "$toplevel" "$branch" "$cache_file" </dev/null >/dev/null 2>&1 & )'; then
+  ok 'set -m appears only inside the spawn subshell'
+else
+  not_ok "set -m appears only inside the spawn subshell: $setm_lines"
+fi
 
 if sed 's/#.*//' "$SCRIPT" | grep -Eq '(^|[[:space:]])(mapfile|readarray|(declare|local)[[:space:]]+-A)([[:space:]]|$)'; then
   not_ok 'uses no bash 4 builtins'

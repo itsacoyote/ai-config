@@ -214,15 +214,43 @@ write_pr_line() {
   fi
 }
 
-keep_previous_line() {
-  local p_epoch="" p_number="" p_state="" p_code="" p_url=""
-  [ -f "$cache_file" ] && [ ! -L "$cache_file" ] && IFS=$'\t' read -r p_epoch p_number p_state p_code p_url <"$cache_file"
-  pr_number=""
-  if [[ $p_number =~ $PR_NUMBER_RE ]] && [[ $p_state =~ $PR_STATE_RE ]] &&
-     [[ $p_code =~ $PR_CODE_RE ]] && [[ $p_url =~ $PR_URL_RE ]]; then
-    pr_number="$p_number"; pr_state="$p_state"; pr_code="$p_code"; pr_url="$p_url"
+# The cache line is untrusted: it is read as tab-separated text, never sourced
+# or evaluated, and every field is validated. Sets p_epoch, and p_number,
+# p_state, p_code and p_url only when they form a consistent PR record; all are
+# empty otherwise. Returns 0 when the epoch is valid.
+parse_pr_line() {
+  local LC_ALL=C
+  p_epoch=""; p_number=""; p_state=""; p_code=""; p_url=""
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  IFS=$'\t' read -r p_epoch p_number p_state p_code p_url <"$1"
+  if ! [[ $p_epoch =~ $EPOCH_RE ]]; then
+    p_epoch=""; p_number=""; p_state=""; p_code=""; p_url=""
+    return 1
   fi
+  if [[ $p_number =~ $PR_NUMBER_RE ]] && [[ $p_state =~ $PR_STATE_RE ]] &&
+     [[ $p_code =~ $PR_CODE_RE ]] && [[ $p_url =~ $PR_URL_RE ]] &&
+     [ "${p_url##*/pull/}" = "$p_number" ] &&
+     { { [ "$p_state" = MERGED ] && [ "$p_code" = merged ]; } ||
+       { [ "$p_state" = OPEN ] && [ "$p_code" != merged ]; }; }; then
+    return 0
+  fi
+  p_number=""; p_state=""; p_code=""; p_url=""
+  return 0
+}
+
+keep_previous_line() {
+  local p_epoch p_number p_state p_code p_url
+  parse_pr_line "$cache_file"
+  pr_number="$p_number"; pr_state="$p_state"; pr_code="$p_code"; pr_url="$p_url"
   write_pr_line
+}
+
+# Removes the lock only while it still holds this process's PID: a render may
+# have replaced it as stale while this refresher was still running.
+release_lock() {
+  local owner=""
+  [ -f "$refresh_lock/pid" ] && read -r owner <"$refresh_lock/pid"
+  [ "$owner" = "$$" ] && rm -rf "$refresh_lock"
 }
 
 # --refresh <repo toplevel> <branch> <cache file>
@@ -234,52 +262,54 @@ refresh_main() {
   export LC_ALL=C
 
   [ -n "${HOME:-}" ] || return 1
+  [ "${cache_file%/*}" = "$CACHE_DIR" ] || return 1
+  [[ ${cache_file##*/} =~ ^k-[0-9a-f]{64}$ ]] || return 1
+
+  # A global, not a local: the EXIT trap runs after this function has returned.
+  refresh_lock="$cache_file.lock"
+  [ -d "$refresh_lock" ] && printf '%s\n' "$$" >"$refresh_lock/pid"
+  trap 'release_lock' EXIT
+
   case "$top" in /*) ;; *) return 1 ;; esac
   [ -d "$top" ] || return 1
   [ -n "$branch" ] && [ "${branch#-}" = "$branch" ] || return 1
-  [ "${cache_file%/*}" = "$CACHE_DIR" ] || return 1
-  [[ ${cache_file##*/} =~ ^k-[0-9]+$ ]] || return 1
-  refresh_lock="$cache_file.lock"
-  trap 'rm -rf "$refresh_lock"' EXIT
   ensure_cache_dir || return 1
 
   dir="$top"
   now=$(date +%s)
+  # A failed write keeps the lock so the two-minute stale rule limits retries.
   if lookup_pr; then
     write_pr_line
   else
     keep_previous_line
-  fi
+  fi || { trap - EXIT; return 1; }
 }
 
-# The cache line is untrusted: every field is validated before it is used,
-# and it is never sourced or evaluated. Sets shown_* when the line is valid and
-# returns 0 only when the cache is fresh (not older than 60s, not in the future).
+# Sets shown_* from a valid cache line and returns 0 only when the cache is
+# fresh (not older than 60s, not in the future).
 read_pr_cache() {
-  local LC_ALL=C c_epoch="" c_number="" c_state="" c_code="" c_url="" age
-  shown_number=""; shown_url=""; shown_code=""
-  [ -f "$cache_file" ] && [ ! -L "$cache_file" ] || return 1
-  IFS=$'\t' read -r c_epoch c_number c_state c_code c_url <"$cache_file"
-  [[ $c_epoch =~ $EPOCH_RE ]] || return 1
-  if [[ $c_number =~ $PR_NUMBER_RE ]] && [[ $c_state =~ $PR_STATE_RE ]] &&
-     [[ $c_code =~ $PR_CODE_RE ]] && [[ $c_url =~ $PR_URL_RE ]] &&
-     [ "${c_url##*/pull/}" = "$c_number" ]; then
-    shown_number="$c_number"; shown_url="$c_url"; shown_code="$c_code"
-  fi
-  age=$(($(date +%s) - c_epoch))
+  local p_epoch p_number p_state p_code p_url age
+  parse_pr_line "$cache_file" || return 1
+  shown_number="$p_number"; shown_url="$p_url"; shown_code="$p_code"
+  age=$(($(date +%s) - p_epoch))
   [ "$age" -ge 0 ] && [ "$age" -le 60 ]
 }
 
 # A lock directory older than two minutes belongs to a dead refresher. Renaming
 # it first lets only one render win the replacement.
 take_lock() {
-  local lock="$1" stale="$1.stale.$$" was_stale=""
+  local lock="$1" stale="$1.stale.$$"
   mkdir "$lock" 2>/dev/null && return 0
   [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] || return 1
   mv "$lock" "$stale" 2>/dev/null || return 1
-  [ -n "$(find "$stale" -maxdepth 0 -mmin +2 2>/dev/null)" ] && was_stale=1
+  if [ -z "$(find "$stale" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then
+    # Another render refreshed the lock after the check: put it back. mv would
+    # nest the directory inside a lock that has been recreated since.
+    if [ -e "$lock" ]; then rm -rf "$stale"; else mv "$stale" "$lock" 2>/dev/null || rm -rf "$stale"; fi
+    return 1
+  fi
   rm -rf "$stale"
-  [ -n "$was_stale" ] && mkdir "$lock" 2>/dev/null
+  mkdir "$lock" 2>/dev/null
 }
 
 # set -m runs the refresher in its own process group, and the subshell keeps
@@ -342,10 +372,13 @@ if [ -n "$dir" ]; then
 fi
 
 shown_number=""; shown_url=""; shown_code=""
-if [ -n "$toplevel" ] && [ -n "$common_dir" ] && [ -n "$branch" ] && [ -n "${HOME:-}" ] && ! is_default_branch; then
-  key=$(printf '%s\n%s' "$common_dir" "$branch" | cksum)
-  cache_file="$CACHE_DIR/k-${key%% *}"
-  read_pr_cache || start_refresh
+if [ -n "$toplevel" ] && [ -n "$common_dir" ] && [ -n "$branch" ] && [ "${branch#-}" = "$branch" ] && [ -n "${HOME:-}" ] && ! is_default_branch; then
+  key=$(printf '%s\n%s' "$common_dir" "$branch" | shasum -a 256)
+  key="${key%% *}"
+  if [[ $key =~ ^[0-9a-f]{64}$ ]]; then
+    cache_file="$CACHE_DIR/k-$key"
+    read_pr_cache || start_refresh
+  fi
 fi
 
 project_name=$(strip_ctl "$project_name")
