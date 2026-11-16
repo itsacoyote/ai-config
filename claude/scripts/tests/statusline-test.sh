@@ -347,6 +347,34 @@ else
   not_ok "a repository path containing a newline is treated as outside git: $(line2)"
 fi
 
+# The worktree folder name is the one displayed string no other test covers.
+CTLWT="$TMP/wt${ESC}[31mx${BEL}"
+( cd "$PRIMARY" && git worktree add -q "$CTLWT" -b feat/y ) ||
+  { echo "control-character worktree fixture setup failed" >&2; exit 1; }
+run_statusline "$(json_dir "$CTLWT")"
+case "$OUT" in *"$BEL"*) bel=yes ;; *) bel=no ;; esac
+if [ "$(line2)" = '📁 primary-proj | 🌿 feat/y | wt[31mx' ] && [ "$bel" = no ]; then
+  ok 'control characters in a linked worktree folder name are stripped'
+else
+  not_ok "control characters in a linked worktree folder name are stripped (bel=$bel): $(line2)"
+fi
+
+# A bare repository's common dir is not named .git, so the project name falls
+# back to the worktree's own folder.
+BARE="$TMP/bare.git"
+git init -q --bare "$BARE" &&
+( cd "$BARE" && c=$(git commit-tree "$(git mktree </dev/null)" -m init) &&
+  git update-ref refs/heads/main "$c" &&
+  git worktree add -q "$TMP/bare-wt" -b feat/z main ) ||
+  { echo "bare repository fixture setup failed" >&2; exit 1; }
+# Prefix match: the worktree item also shows "| bare-wt" here, which repeats the
+# project name; that repetition is not what this test pins.
+run_statusline "$(json_dir "$TMP/bare-wt")"
+case "$(line2)" in
+  '📁 bare-wt | 🌿 feat/z'*) ok "a bare repository's linked worktree is named after its own folder" ;;
+  *) not_ok "a bare repository's linked worktree is named after its own folder: $(line2)" ;;
+esac
+
 section 'line 1'
 
 # Captured from the script as it was before line 2 changed, run from a non-git
@@ -390,6 +418,14 @@ if [ "$(printf '%s\n' "$OUT" | sed -n 1p | plain)" = 'Opus | 42% ctx' ] &&
   ok 'a field with an unexpected type blanks only that field'
 else
   not_ok "a field with an unexpected type blanks only that field: $OUT"
+fi
+
+run_statusline "$(jq -n --arg d "$NONGIT" '{model:{display_name:"Op\u001b[31mus\u0007"},effort:{level:"hi\u001b[5mgh"},workspace:{current_dir:$d}}')"
+case "$(printf '%s\n' "$OUT" | sed -n 1p)" in *"$BEL"*) bel=yes ;; *) bel=no ;; esac
+if [ "$(printf '%s\n' "$OUT" | sed -n 1p | plain)" = 'Op[31mus hi[5mgh | --% ctx' ] && [ "$bel" = no ]; then
+  ok 'control characters in the model and effort are stripped'
+else
+  not_ok "control characters in the model and effort are stripped (bel=$bel): $(printf '%s\n' "$OUT" | sed -n 1p | od -c | head -4)"
 fi
 
 section 'git config hardening'
@@ -818,6 +854,38 @@ touch "$GHFIX/viewer-fail"
 refresh "$RF" feat/x "$CF"
 expect_cache 'refresh treats a viewer login failure as a refresh failure' "$GOOD"
 
+# The viewer's login and the reviewers' logins differ only in case.
+reset_gh
+printf 'Me\n' >"$GHFIX/viewer"
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "a viewer login matches a reviewer's login ignoring case" "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews ME APPROVED)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "a reviewer's login matches the viewer's login ignoring case" "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN ME APPROVED "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+expect_cache "a pr author matches the viewer's login ignoring case" "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+
+# A viewer login that fails LOGIN_RE must not reach the viewer file or jq.
+for bad in "ev il${ESC}" "ev${TAB}il"; do
+  reset_gh
+  seed_good
+  printf '%s\n' "$bad" >"$GHFIX/viewer"
+  set_list "[$(pr_obj 8 OPEN alice '' "$(reviews)")]"
+  refresh "$RF" feat/x "$CF"
+  expect_cache 'an invalid viewer login from gh is a refresh failure that keeps the previous fields' "$GOOD"
+  if [ ! -e "$CACHE_DIR/viewer.example.invalid" ]; then
+    ok 'an invalid viewer login from gh is not written to the viewer file'
+  else
+    not_ok "an invalid viewer login from gh is not written to the viewer file: $(od -c "$CACHE_DIR/viewer.example.invalid" | head -2)"
+  fi
+done
+
 section 'refresh: failures and validation'
 
 reset_gh
@@ -1044,6 +1112,15 @@ if [ "$(line1)" = 'Unknown Model | --% ctx | PR #4 🟣' ]; then
   ok 'a merged pr renders the purple circle and no review emoji'
 else
   not_ok "a merged pr renders the purple circle and no review emoji: $(line1)"
+fi
+
+reset_gh
+seed_for feat/x -5 "4${TAB}MERGED${TAB}merged${TAB}$PRURL/4"
+run_statusline "$(json_dir "$RRX")"
+if printf '%s' "$(line1_raw)" | grep -qF "${ESC}]8;;$PRURL/4${ESC}\\PR #4${ESC}]8;;${ESC}\\"; then
+  ok 'a merged pr item is linked to the pr url'
+else
+  not_ok "a merged pr item is linked to the pr url: $(line1_raw | od -c | head -6)"
 fi
 
 reset_gh
