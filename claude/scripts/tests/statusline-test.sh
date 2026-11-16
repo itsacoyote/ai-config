@@ -273,8 +273,6 @@ fi
 
 section 'refresh: cache the branch pull request'
 
-command -v jq >/dev/null 2>&1 || { echo "jq is required to run this suite" >&2; exit 1; }
-
 TAB=$'\t'
 CACHE_DIR="$HOME/.cache/claude-statusline"
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -283,29 +281,41 @@ export STATUSLINE_GH_FIXTURES="$GHFIX"
 PR_FIELDS='number,url,state,author,reviewDecision,reviews'
 export PR_FIELDS
 
+# Hosts the refresher may send to gh. The nested attacker.invalid key must not
+# count: only top-level keys are hosts.
+export GH_CONFIG_DIR="$TMP/gh-config"; mkdir -p "$GH_CONFIG_DIR"
+cat >"$GH_CONFIG_DIR/hosts.yml" <<'YML'
+example.invalid:
+    user: me
+    nested:
+    attacker.invalid:
+YML
+
 # Stub gh: canned answers from fixture files, one log line per call. A missing
 # fixture file exits 1, the same signal real gh gives for "no such PR" and for
-# "gh is broken", so the refresher cannot rely on telling them apart.
+# "gh is broken", so the refresher cannot rely on telling them apart. Failures
+# write to stderr, as real gh does, so a refresher that stops discarding it fails.
 cat >"$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 dir="${STATUSLINE_GH_FIXTURES:?}"
-printf '%s\tenv:%s,%s,%s,%s,%s=%s,%s=%s,%s=%s,%s=%s\tpwd:%s\n' "$*" \
+printf '%s\tenv:%s,%s,%s,%s,%s=%s,%s=%s,GIT_CONFIG_COUNT=%s\tent:[%s%s]\tlc:%s\tpwd:%s\n' "$*" \
   "${GH_PROMPT_DISABLED-}" "${GH_NO_UPDATE_NOTIFIER-}" "${GH_PAGER-}" "${NO_COLOR-}" \
   "${GIT_CONFIG_KEY_0-}" "${GIT_CONFIG_VALUE_0-}" "${GIT_CONFIG_KEY_1-}" "${GIT_CONFIG_VALUE_1-}" \
-  "GIT_CONFIG_COUNT" "${GIT_CONFIG_COUNT-}" "SLEEP" "${STATUSLINE_STUB_SLEEP-}" "$PWD" >>"$dir/log"
-[ -e "$dir/fail" ] && exit 1
+  "${GIT_CONFIG_COUNT-}" "${GH_ENTERPRISE_TOKEN-}" "${GITHUB_ENTERPRISE_TOKEN-}" "${LC_ALL-}" "$PWD" >>"$dir/log"
+fail() { echo "gh: simulated failure" >&2; exit 1; }
+[ -e "$dir/fail" ] && fail
 if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$4" = user ] && [ "$5" = --jq ] && [ "$6" = .login ] && [ $# -eq 6 ]; then
-  [ -e "$dir/viewer-fail" ] && exit 1
-  cat "$dir/viewer" 2>/dev/null || exit 1
+  [ -e "$dir/viewer-fail" ] && fail
+  cat "$dir/viewer" 2>/dev/null || fail
   exit 0
 fi
 if [ "$1" = pr ] && [ "$2" = view ] && [ "$4" = --json ] && [ "$5" = "$PR_FIELDS" ] && [ $# -eq 5 ]; then
-  cat "$dir/view.json" 2>/dev/null || exit 1
+  cat "$dir/view.json" 2>/dev/null || fail
   exit 0
 fi
 if [ "$1" = pr ] && [ "$2" = list ] && [ "$3" = --head ] && [ "$5" = --state ] && [ "$6" = all ] &&
    [ "$7" = --json ] && [ "$8" = "$PR_FIELDS" ] && [ "$9" = --limit ] && [ "${10}" = 10 ] && [ $# -eq 10 ]; then
-  cat "$dir/list.json" 2>/dev/null || exit 1
+  cat "$dir/list.json" 2>/dev/null || fail
   exit 0
 fi
 printf 'gh stub: unhandled: %s\n' "$*" >&2
@@ -314,9 +324,9 @@ exit 99
 STUB
 chmod +x "$BIN/gh"
 
-# A PATH that has the tools the refresher needs but no gh.
+# A PATH with the tools the refresher runs but no gh.
 NOGH="$TMP/nogh-bin"; mkdir -p "$NOGH"
-for tool in git jq date mktemp mv rm mkdir chmod cat dirname basename sed tr grep head cut; do
+for tool in git jq date mktemp mv rm mkdir chmod; do
   tool_path=$(command -v "$tool") && ln -sf "$tool_path" "$NOGH/$tool"
 done
 
@@ -331,7 +341,8 @@ RFNOHEAD="$TMP/refresh-nohead"; mkdir -p "$RFNOHEAD"
 ( cd "$RFNOHEAD" && git init -q . && echo a > a.txt && git add a.txt && git commit -qm init ) ||
   { echo "refresh nohead fixture setup failed" >&2; exit 1; }
 
-PRURL='https://example.invalid/owner/project/pull'
+PRBASE='https://example.invalid/owner/project'
+PRURL="$PRBASE/pull"
 
 reset_gh() {
   rm -rf "$GHFIX" "$CACHE_DIR"; mkdir -p "$GHFIX"
@@ -343,25 +354,44 @@ reviews() {
   jq -n -c '[$ARGS.positional as $p | range(0; $p | length; 2) | {author: {login: $p[.]}, state: $p[. + 1]}]' --args "$@"
 }
 
-# pr_obj <number> <STATE> <author> <reviewDecision> <reviews-json>
+# pr_obj <number> <STATE> <author> <reviewDecision> <reviews-json> [<url base>]
 pr_obj() {
-  jq -n -c --arg n "$1" --arg s "$2" --arg a "$3" --arg d "$4" --argjson r "$5" \
-    '{number: ($n | tonumber), url: "https://example.invalid/owner/project/pull/\($n)", state: $s, author: {login: $a}, reviewDecision: $d, reviews: $r}'
+  jq -n -c --arg n "$1" --arg s "$2" --arg a "$3" --arg d "$4" --argjson r "$5" --arg b "${6:-$PRBASE}" \
+    '{number: ($n | tonumber), url: "\($b)/pull/\($n)", state: $s, author: {login: $a}, reviewDecision: $d, reviews: $r}'
 }
 
-seed_cache() { mkdir -p "$CACHE_DIR" && printf '%s\n' "$1" >"$CF"; }
 set_list() { printf '%s\n' "$1" >"$GHFIX/list.json"; }
 set_view() { printf '%s\n' "$1" >"$GHFIX/view.json"; }
 gh_calls() { [ -f "$GHFIX/log" ] && grep -c . "$GHFIX/log" || printf '0'; }
+api_calls() { [ -f "$GHFIX/log" ] || { printf '0'; return; }; grep -c '^api ' "$GHFIX/log" || true; }
 
-CF="$CACHE_DIR/branch-key"
+CF="$CACHE_DIR/k-1234567"
+GOOD="7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+seed_cache() { mkdir -p "$CACHE_DIR" && printf '%s\n' "$1" >"$CF"; }
+seed_good() { seed_cache "1000${TAB}$GOOD"; }
+
 RSTATUS=0
+# The tokens are fake; they exist so a leak into gh's environment is visible.
 refresh() { # <top> <branch> <cache file> [PATH]
-  PATH="${4:-$BIN:$PATH}" "$BASH" "$SCRIPT" --refresh "$1" "$2" "$3" >"$TMP/refresh.out" 2>&1
+  GH_ENTERPRISE_TOKEN=fake-enterprise GITHUB_ENTERPRISE_TOKEN=fake-github-enterprise LC_ALL=en_US.UTF-8 \
+    PATH="${4:-$BIN:$PATH}" "$BASH" "$SCRIPT" --refresh "$1" "$2" "$3" >"$TMP/refresh.out" 2>&1
   RSTATUS=$?
 }
 
-# cache_tail — the cache line without its epoch.
+# refresh_bounded — as refresh, but kills the run after about 5 seconds so a
+# refresher that blocks on a FIFO fails the test instead of hanging the suite.
+refresh_bounded() {
+  local pid i=0
+  PATH="$BIN:$PATH" "$BASH" "$SCRIPT" --refresh "$1" "$2" "$3" >"$TMP/refresh.out" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; RSTATUS=timeout
+  else
+    wait "$pid"; RSTATUS=$?
+  fi
+}
+
 cache_tail() { cut -f2- "$CF" 2>/dev/null; }
 cache_epoch() { cut -f1 "$CF" 2>/dev/null; }
 epoch_is_current() {
@@ -371,7 +401,8 @@ epoch_is_current() {
 }
 
 # expect_cache <name> <expected line without epoch> — also pins a clean exit,
-# a current epoch, empty output and no gh call the stub did not understand.
+# a current epoch, empty output (gh's stderr must not leak) and no gh call the
+# stub did not understand.
 expect_cache() {
   local name="$1" want="$2" got
   got=$(cache_tail)
@@ -392,6 +423,7 @@ else
 fi
 
 reset_gh
+seed_good
 set_list '[]'
 refresh "$RF" feat/x "$CF"
 expect_cache 'refresh caches NONE when the branch has no pr' 'NONE'
@@ -474,6 +506,7 @@ refresh "$RF" feat/x "$CF"
 expect_cache 'refresh picks the highest-numbered merged pr' "9${TAB}MERGED${TAB}merged${TAB}$PRURL/9"
 
 reset_gh
+seed_good
 set_list "[$(pr_obj 8 CLOSED alice '' "$(reviews)")]"
 refresh "$RF" feat/x "$CF"
 expect_cache 'refresh ignores a closed unmerged pr' 'NONE'
@@ -516,7 +549,11 @@ git -C "$RF" config branch.feat/bad.worktree-pr-url 'https://example.invalid/own
 set_list '[]'
 refresh "$RF" feat/bad "$CF"
 expect_cache 'a marker that is not a pr url falls back to the branch search' 'NONE'
-if grep -q '^pr list' "$GHFIX/log"; then ok 'an invalid marker is never passed to gh'; else not_ok "an invalid marker is never passed to gh: $(cat "$GHFIX/log")"; fi
+if grep -q '^pr list' "$GHFIX/log" && ! grep -q '^pr view' "$GHFIX/log"; then
+  ok 'an invalid marker runs pr list and never pr view'
+else
+  not_ok "an invalid marker runs pr list and never pr view: $(cat "$GHFIX/log")"
+fi
 git -C "$RF" config --unset branch.feat/bad.worktree-pr-url
 
 reset_gh
@@ -548,13 +585,71 @@ set_list '[]'
 refresh "$RF" develop "$CF"
 if [ "$(gh_calls)" = 1 ]; then ok 'a non-default branch name is looked up even when origin/HEAD names another branch'; else not_ok "a non-default branch name is looked up: $(gh_calls) calls"; fi
 
+section 'refresh: trusted hosts'
+
+reset_gh
+seed_good
+git -C "$RF" config branch.feat/h.worktree-pr-url 'https://attacker.invalid/owner/project/pull/50'
+set_list '[]'
+refresh "$RF" feat/h "$CF"
+expect_cache 'a marker on a host that is not in hosts.yml is ignored' 'NONE'
+if ! grep -q 'attacker.invalid' "$GHFIX/log" && grep -q '^pr list' "$GHFIX/log"; then
+  ok 'a marker on a non-allowlisted host never reaches gh'
+else
+  not_ok "a marker on a non-allowlisted host never reaches gh: $(cat "$GHFIX/log")"
+fi
+git -C "$RF" config --unset branch.feat/h.worktree-pr-url
+
+reset_gh
+git -C "$RF" config branch.feat/g.worktree-pr-url 'https://github.com/owner/project/pull/60'
+set_view "$(pr_obj 60 OPEN alice '' "$(reviews me APPROVED)" 'https://github.com/owner/project')"
+refresh "$RF" feat/g "$CF"
+expect_cache 'a marker on github.com is trusted without a hosts.yml entry' \
+  "60${TAB}OPEN${TAB}approved${TAB}https://github.com/owner/project/pull/60"
+if grep -q '^api --hostname github.com user' "$GHFIX/log"; then ok 'the viewer login is requested from the marker host'; else not_ok "the viewer login is requested from the marker host: $(cat "$GHFIX/log")"; fi
+git -C "$RF" config --unset branch.feat/g.worktree-pr-url
+
+reset_gh
+seed_good
+git -C "$RF" config branch.feat/r.worktree-pr-url 'https://github.com/owner/project/pull/61'
+set_view "$(pr_obj 61 OPEN alice '' "$(reviews me APPROVED)")"
+refresh "$RF" feat/r "$CF"
+expect_cache 'a response url on a different host than the marker is rejected' 'NONE'
+if [ "$(api_calls)" = 0 ]; then ok 'a rejected response makes no viewer lookup'; else not_ok "a rejected response makes no viewer lookup: $(cat "$GHFIX/log")"; fi
+git -C "$RF" config --unset branch.feat/r.worktree-pr-url
+
+reset_gh
+seed_good
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)" 'https://attacker.invalid/owner/project')]"
+refresh "$RF" feat/x "$CF"
+expect_cache 'a pr list answer on a host that is not in hosts.yml is rejected' 'NONE'
+if ! grep -q 'attacker.invalid' "$GHFIX/log"; then ok 'no gh call names a host that is not in hosts.yml (pr list)'; else not_ok "a gh call named the untrusted host: $(cat "$GHFIX/log")"; fi
+
+reset_gh
+seed_good
+git -C "$RF" config branch.feat/q.merge refs/pull/62/head
+set_view "$(pr_obj 62 OPEN alice '' "$(reviews)" 'https://attacker.invalid/owner/project')"
+refresh "$RF" feat/q "$CF"
+expect_cache 'a refs/pull answer on a host that is not in hosts.yml is rejected' 'NONE'
+if ! grep -q 'attacker.invalid' "$GHFIX/log"; then ok 'no gh call names a host that is not in hosts.yml (refs/pull)'; else not_ok "a gh call named the untrusted host: $(cat "$GHFIX/log")"; fi
+git -C "$RF" config --unset branch.feat/q.merge
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED)")]"
+refresh "$RF" feat/x "$CF"
+if [ "$(gh_calls)" = 2 ] && [ "$(grep -c 'ent:\[\]' "$GHFIX/log")" = 2 ]; then
+  ok 'gh runs without the enterprise token variables'
+else
+  not_ok "gh runs without the enterprise token variables: $(cat "$GHFIX/log")"
+fi
+
 section 'refresh: viewer login'
 
 reset_gh
 set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
 refresh "$RF" feat/x "$CF"
 refresh "$RF" feat/x "$CF"
-if [ "$(grep -c '^api ' "$GHFIX/log")" = 1 ] && grep -q '^api --hostname example.invalid user --jq .login' "$GHFIX/log"; then
+if [ "$(api_calls)" = 1 ] && grep -q '^api --hostname example.invalid user --jq .login' "$GHFIX/log"; then
   ok 'the viewer login is fetched for the pr host once and cached'
 else
   not_ok "the viewer login is fetched for the pr host once and cached: $(cat "$GHFIX/log")"
@@ -565,37 +660,49 @@ set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
 refresh "$RF" feat/x "$CF"
 printf '%s\tme\n' "$(( $(date +%s) - 90000 ))" >"$CACHE_DIR/viewer.example.invalid"
 refresh "$RF" feat/x "$CF"
-if [ "$(grep -c '^api ' "$GHFIX/log")" = 2 ]; then
+if [ "$(api_calls)" = 2 ]; then
   ok 'a viewer login older than 24 hours is fetched again'
 else
   not_ok "a viewer login older than 24 hours is fetched again: $(cat "$GHFIX/log")"
 fi
 
+# A leading zero is octal in shell arithmetic; 08... would abort the refresh.
 reset_gh
-seed_cache "1000${TAB}NONE"
-set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
-touch "$GHFIX/viewer-fail"
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED)")]"
+mkdir -p "$CACHE_DIR"
+printf '0800000000\tme\n' >"$CACHE_DIR/viewer.example.invalid"
 refresh "$RF" feat/x "$CF"
-if [ "$RSTATUS" = 0 ] && [ "$(cache_tail)" = 'NONE' ] && epoch_is_current; then
-  ok 'refresh treats a viewer login failure as a refresh failure'
+expect_cache 'a viewer file epoch with a leading zero is ignored and refetched' "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+if [ "$(api_calls)" = 1 ]; then ok 'the leading-zero viewer file triggers a fresh lookup'; else not_ok "the leading-zero viewer file triggers a fresh lookup: $(cat "$GHFIX/log")"; fi
+
+reset_gh
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
+mkdir -p "$CACHE_DIR"
+printf '%s\tevil\n' "$(date +%s)" >"$TMP/viewer-target"
+ln -s "$TMP/viewer-target" "$CACHE_DIR/viewer.example.invalid"
+seed_good
+refresh "$RF" feat/x "$CF"
+if [ "$(api_calls)" = 1 ] && [ "$(cat "$TMP/viewer-target")" != "$(printf '%s\tme' "$(date +%s)")" ] && grep -q evil "$TMP/viewer-target"; then
+  ok 'a viewer file that is a symlink is not read and not written through'
 else
-  not_ok "refresh treats a viewer login failure as a refresh failure: $(cat "$CF")"
+  not_ok "a viewer file that is a symlink is not read and not written through: $(cat "$GHFIX/log" 2>/dev/null)"
 fi
+expect_cache 'a viewer file that cannot be replaced is a refresh failure that keeps the previous fields' "$GOOD"
+
 reset_gh
-seed_cache "1000${TAB}7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+seed_good
 set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
 touch "$GHFIX/viewer-fail"
 refresh "$RF" feat/x "$CF"
-expect_cache 'a viewer login failure keeps the previous fields' "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+expect_cache 'refresh treats a viewer login failure as a refresh failure' "$GOOD"
 
 section 'refresh: failures and validation'
 
 reset_gh
-seed_cache "1000${TAB}7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+seed_good
 touch "$GHFIX/fail"
 refresh "$RF" feat/x "$CF"
-expect_cache 'refresh keeps the previous fields and bumps the epoch when gh fails' \
-  "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+expect_cache 'refresh keeps the previous fields and bumps the epoch when gh fails' "$GOOD"
 
 reset_gh
 touch "$GHFIX/fail"
@@ -609,27 +716,37 @@ refresh "$RF" feat/x "$CF"
 expect_cache 'a previous line that fails validation is not carried forward' 'NONE'
 
 reset_gh
+seed_good
 set_list 'not json'
 refresh "$RF" feat/x "$CF"
-expect_cache 'a gh answer that is not json counts as a failure' 'NONE'
+expect_cache 'a gh answer that is not json keeps the previous fields' "$GOOD"
 
 reset_gh
+seed_good
 set_list "$(jq -n -c --arg u "$PRURL/7" '[{number: "12x", url: $u, state: "OPEN", author: {login: "alice"}, reviewDecision: "", reviews: []}]')"
 refresh "$RF" feat/x "$CF"
 expect_cache 'refresh rejects a non-numeric pr number' 'NONE'
 
 reset_gh
+seed_good
 set_list "$(jq -n -c --arg u "$PRURL/7"$'\033[31m' '[{number: 7, url: $u, state: "OPEN", author: {login: "alice"}, reviewDecision: "", reviews: []}]')"
 refresh "$RF" feat/x "$CF"
 expect_cache 'refresh rejects a url with control characters' 'NONE'
-if ! grep -q "$ESC" "$CF"; then ok 'no control character reaches the cache file'; else not_ok 'no control character reaches the cache file'; fi
 
 reset_gh
+seed_good
 set_list "$(jq -n -c '[{number: 7, url: "http://example.invalid/owner/project/pull/7", state: "OPEN", author: {login: "alice"}, reviewDecision: "", reviews: []}]')"
 refresh "$RF" feat/x "$CF"
 expect_cache 'refresh rejects a pr url that is not https' 'NONE'
 
 reset_gh
+seed_good
+set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)" | jq -c --arg u "$PRURL/8" '.url = $u')]"
+refresh "$RF" feat/x "$CF"
+expect_cache 'refresh rejects a pr whose url number differs from its number' 'NONE'
+
+reset_gh
+seed_good
 set_list "[$(pr_obj 7 OPEN alice '' "$(reviews)")]"
 refresh "$RF" feat/x "$CF" "$NOGH"
 expect_cache 'refresh with gh absent from PATH writes NONE' 'NONE'
@@ -643,34 +760,25 @@ if grep -q 'env:1,1,cat,1,core.fsmonitor=false,core.hooksPath=/dev/null,GIT_CONF
 else
   not_ok "gh runs from the repo toplevel with prompts, pager, colour and git hooks disabled: $(head -3 "$GHFIX/log")"
 fi
-if grep -q 'GIT_CONFIG_KEY_1\|fsmonitor' "$TMP/refresh.out"; then not_ok 'gh output stays out of the refresher output'; else ok 'gh output stays out of the refresher output'; fi
+if [ "$(grep -c 'lc:C' "$GHFIX/log")" = "$(gh_calls)" ]; then ok 'gh runs with LC_ALL=C'; else not_ok "gh runs with LC_ALL=C: $(cat "$GHFIX/log")"; fi
 
-section 'refresh: cache paths'
-
-key_a=$(printf 'common\nfeat/a-b' | cksum | cut -d' ' -f1)
-key_b=$(printf 'common\nfeat-a/b' | cksum | cut -d' ' -f1)
-# Names are built by the render in the next task; this pins that the key input
-# keeps / and - apart, so the two branches below cannot share a file.
-reset_gh
-set_list "[$(pr_obj 5 OPEN alice '' "$(reviews)")]"
-refresh "$RF" feat/a-b "$CACHE_DIR/k-$key_a"
-set_list "[$(pr_obj 6 OPEN alice '' "$(reviews)")]"
-refresh "$RF" feat-a/b "$CACHE_DIR/k-$key_b"
-if [ "$key_a" != "$key_b" ] && [ "$(cut -f2 "$CACHE_DIR/k-$key_a")" = 5 ] && [ "$(cut -f2 "$CACHE_DIR/k-$key_b")" = 6 ]; then
-  ok 'branches feat/a-b and feat-a/b use different cache files'
-else
-  not_ok "branches feat/a-b and feat-a/b use different cache files: $key_a $key_b"
-fi
+section 'refresh: cache paths and files'
 
 reset_gh
 set_list "[$(pr_obj 5 OPEN alice '' "$(reviews)")]"
-for bad in "$TMP/outside-cache" "$CACHE_DIR/../escaped" "$CACHE_DIR/sub/file" "$CACHE_DIR" "$CACHE_DIR/.hidden" "relative-file"; do
-  rm -f "$TMP/outside-cache" "$HOME/.cache/escaped"
+mkdir -p "$TMP/elsewhere"
+# Each path breaks one guard: the first four sit in the wrong directory with a
+# valid name, the rest sit in the cache directory with an invalid name.
+for bad in "$TMP/k-5" "$CACHE_DIR/../k-5" "$CACHE_DIR/sub/k-5" "relative-k-5" \
+           "$CACHE_DIR/viewer.example.invalid" "$CACHE_DIR/.hidden" "$CACHE_DIR/branch-key" "$CACHE_DIR/k-5x" "$CACHE_DIR/k-"; do
+  rm -f "$TMP/k-5" "$HOME/.cache/k-5"
   refresh "$RF" feat/x "$bad"
-  if [ "$RSTATUS" != 0 ] && [ ! -e "$TMP/outside-cache" ] && [ ! -e "$HOME/.cache/escaped" ] && [ ! -e "$CACHE_DIR/sub" ] && [ ! -e "$CACHE_DIR/.hidden" ] && [ "$(gh_calls)" = 0 ]; then
-    ok "refresh refuses a cache file outside the cache directory: $bad"
+  if [ "$RSTATUS" != 0 ] && [ ! -e "$TMP/k-5" ] && [ ! -e "$HOME/.cache/k-5" ] && [ ! -e "$CACHE_DIR/sub" ] &&
+     [ ! -e "$CACHE_DIR/viewer.example.invalid" ] && [ ! -e "$CACHE_DIR/.hidden" ] && [ ! -e "$CACHE_DIR/branch-key" ] &&
+     [ ! -e "$CACHE_DIR/k-5x" ] && [ "$(gh_calls)" = 0 ]; then
+    ok "refresh refuses the cache file path: $bad"
   else
-    not_ok "refresh refuses a cache file outside the cache directory: $bad (status=$RSTATUS)"
+    not_ok "refresh refuses the cache file path: $bad (status=$RSTATUS)"
   fi
 done
 
@@ -684,7 +792,64 @@ else
 fi
 
 reset_gh
-if ! ls "$CACHE_DIR"/.tmp.* >/dev/null 2>&1; then ok 'no temp files are left in the cache directory'; else not_ok 'temp files left behind'; fi
+# From a directory that really holds refresh-repo, so only the absolute-path check can refuse it.
+cd "$TMP" || exit 1
+refresh 'refresh-repo' feat/x "$CF"; rel_status=$RSTATUS
+cd "$REPO_ROOT" || exit 1
+refresh "$TMP/no-such-toplevel" feat/x "$CF"; missing_status=$RSTATUS
+if [ "$rel_status" != 0 ] && [ "$missing_status" != 0 ] && [ "$(gh_calls)" = 0 ] && [ ! -e "$CF" ]; then
+  ok 'refresh refuses a relative or missing toplevel'
+else
+  not_ok "refresh refuses a relative or missing toplevel ($rel_status, $missing_status)"
+fi
+
+reset_gh
+mkdir -p "$TMP/real-cache"
+mkdir -p "$HOME/.cache"
+ln -s "$TMP/real-cache" "$CACHE_DIR"
+set_list "[$(pr_obj 5 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+if [ "$RSTATUS" != 0 ] && [ -z "$(ls -A "$TMP/real-cache")" ] && [ "$(gh_calls)" = 0 ]; then
+  ok 'refresh refuses a cache directory that is a symlink'
+else
+  not_ok "refresh refuses a cache directory that is a symlink (status=$RSTATUS): $(ls -A "$TMP/real-cache")"
+fi
+
+# A failed write must also remove its temp file, so this asserts both.
+reset_gh
+mkdir -p "$CACHE_DIR"
+mkdir "$CF"
+set_list "[$(pr_obj 5 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+if [ "$RSTATUS" != 0 ] && [ -z "$(ls -A "$CF")" ] && ! ls "$CACHE_DIR"/.tmp.* >/dev/null 2>&1; then
+  ok 'a cache file that is a directory is refused and leaves no temp file'
+else
+  not_ok "a cache file that is a directory is refused and leaves no temp file (status=$RSTATUS): $(ls -A "$CF" "$CACHE_DIR")"
+fi
+
+reset_gh
+mkdir -p "$CACHE_DIR" "$TMP/link-target"
+ln -s "$TMP/link-target" "$CF"
+set_list "[$(pr_obj 5 OPEN alice '' "$(reviews)")]"
+refresh "$RF" feat/x "$CF"
+if [ "$RSTATUS" != 0 ] && [ -z "$(ls -A "$TMP/link-target")" ] && [ -L "$CF" ]; then
+  ok 'a cache file that is a symlink to a directory is refused'
+else
+  not_ok "a cache file that is a symlink to a directory is refused (status=$RSTATUS): $(ls -A "$TMP/link-target")"
+fi
+rm -rf "$TMP/link-target"
+
+reset_gh
+mkdir -p "$CACHE_DIR"
+mkfifo "$CF"
+touch "$GHFIX/fail"
+refresh_bounded "$RF" feat/x "$CF"
+if [ "$RSTATUS" != timeout ] && [ "$RSTATUS" != 0 ] && [ -p "$CF" ]; then
+  ok 'a cache file that is a FIFO is refused without blocking'
+else
+  not_ok "a cache file that is a FIFO is refused without blocking (status=$RSTATUS)"
+fi
+rm -f "$CF"
 
 section 'portability'
 

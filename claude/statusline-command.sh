@@ -55,14 +55,18 @@ PR_NUMBER_RE='^[0-9]+$'
 PR_URL_RE='^https://[A-Za-z0-9.-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+$'
 PR_STATE_RE='^(OPEN|MERGED)$'
 PR_CODE_RE='^(approved|changes|commented|merged|none)$'
-EPOCH_RE='^[0-9]{1,12}$'
+EPOCH_RE='^[1-9][0-9]{0,11}$'
+# The brackets admit bot logins such as dependabot[bot].
 LOGIN_RE='^[A-Za-z0-9][][A-Za-z0-9_.-]*$'
 VIEWER_TTL=86400
 
 # gh runs inside a repository whose config is untrusted, and shells out to git.
+# The enterprise token variables are dropped so a hostile host in a request
+# cannot receive them; gh still uses its stored per-host credentials.
 run_gh() {
   (
     cd "$top" || exit 1
+    unset GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
     GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 GH_PAGER=cat NO_COLOR=1 \
     GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false \
     GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null \
@@ -70,20 +74,35 @@ run_gh() {
   )
 }
 
+# Refuses a destination that is not a regular file: mv would move the
+# temp file into a directory, or through a symlink.
 atomic_write() {
   local dest="$1" tmp
   tmp=$(mktemp "$CACHE_DIR/.tmp.XXXXXX") || return 1
-  if printf '%s\n' "$2" >"$tmp" && mv -f "$tmp" "$dest"; then
-    return 0
+  if { [ ! -e "$dest" ] && [ ! -L "$dest" ]; } || { [ -f "$dest" ] && [ ! -L "$dest" ]; }; then
+    printf '%s\n' "$2" >"$tmp" && mv -f "$tmp" "$dest" && return 0
   fi
   rm -f "$tmp"
+  return 1
+}
+
+# A host is trusted when gh already knows it: github.com or a top-level key
+# of gh's hosts.yml.
+host_allowed() {
+  local host="$1" hosts_file line
+  [ "$host" = github.com ] && return 0
+  hosts_file="${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME:-}/.config}/gh}/hosts.yml"
+  [ -f "$hosts_file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ $line =~ ^[A-Za-z0-9.-]+:$ ]] && [ "${line%:}" = "$host" ] && return 0
+  done <"$hosts_file"
   return 1
 }
 
 viewer_login() {
   local host="$1" file v_epoch="" v_login="" login
   file="$CACHE_DIR/viewer.$host"
-  if [ -f "$file" ]; then
+  if [ -f "$file" ] && [ ! -L "$file" ]; then
     IFS=$'\t' read -r v_epoch v_login <"$file"
     if [[ $v_epoch =~ $EPOCH_RE ]] && [[ $v_login =~ $LOGIN_RE ]] &&
        [ $((now - v_epoch)) -ge 0 ] && [ $((now - v_epoch)) -lt "$VIEWER_TTL" ]; then
@@ -120,7 +139,7 @@ REVIEW_CODE_JQ='
 # Sets pr_number/pr_url/pr_state/pr_code, all empty meaning no PR. Returns 1
 # when gh could not answer, so the caller keeps the previous cache fields.
 lookup_pr() {
-  local default marker merge json n u host viewer code state
+  local default marker merge json number url host viewer code state want_host=""
   pr_number=""; pr_url=""; pr_state=""; pr_code=""
 
   default=$(git_safe symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
@@ -135,11 +154,14 @@ lookup_pr() {
 
   marker=$(git_safe config --get "branch.$branch.worktree-pr-url" 2>/dev/null)
   merge=$(git_safe config --get "branch.$branch.merge" 2>/dev/null)
-  if [[ $marker =~ $PR_URL_RE ]]; then
+  if [[ $marker =~ $PR_URL_RE ]] && want_host="${marker#https://}" && want_host="${want_host%%/*}" &&
+     host_allowed "$want_host"; then
     json=$(run_gh pr view "$marker" --json "$PR_FIELDS") || return 1
   elif [[ $merge =~ ^refs/pull/([0-9]+)/head$ ]]; then
+    want_host=""
     json=$(run_gh pr view "${BASH_REMATCH[1]}" --json "$PR_FIELDS") || return 1
   else
+    want_host=""
     json=$(run_gh pr list --head "$branch" --state all --json "$PR_FIELDS" --limit 10) || return 1
     json=$(printf '%s' "$json" | jq -c '
       [.[] | select(.state == "OPEN")][0]
@@ -151,21 +173,25 @@ lookup_pr() {
 
   state=$(printf '%s' "$json" | jq -r '.state // ""')
   [[ $state =~ $PR_STATE_RE ]] || return 0
-  n=$(printf '%s' "$json" | jq -r '.number | tostring')
-  u=$(printf '%s' "$json" | jq -r '.url // ""')
-  [[ $n =~ $PR_NUMBER_RE ]] && [[ $u =~ $PR_URL_RE ]] || return 0
+  number=$(printf '%s' "$json" | jq -r '.number | tostring')
+  url=$(printf '%s' "$json" | jq -r '.url // ""')
+  [[ $number =~ $PR_NUMBER_RE ]] && [[ $url =~ $PR_URL_RE ]] || return 0
+  [ "${url##*/pull/}" = "$number" ] || return 0
+
+  host="${url#https://}"
+  host="${host%%/*}"
+  host_allowed "$host" || return 0
+  [ -z "$want_host" ] || [ "$host" = "$want_host" ] || return 0
 
   if [ "$state" = MERGED ]; then
     code=merged
   else
-    host="${u#https://}"
-    host="${host%%/*}"
     viewer=$(viewer_login "$host") || return 1
     code=$(printf '%s' "$json" | jq -r --arg v "$viewer" "$REVIEW_CODE_JQ" 2>/dev/null) || return 1
     [[ $code =~ $PR_CODE_RE ]] || return 1
   fi
 
-  pr_number="$n"; pr_url="$u"; pr_state="$state"; pr_code="$code"
+  pr_number="$number"; pr_url="$url"; pr_state="$state"; pr_code="$code"
 }
 
 write_pr_line() {
@@ -178,7 +204,7 @@ write_pr_line() {
 
 keep_previous_line() {
   local p_epoch="" p_number="" p_state="" p_code="" p_url=""
-  [ -f "$cache_file" ] && IFS=$'\t' read -r p_epoch p_number p_state p_code p_url <"$cache_file"
+  [ -f "$cache_file" ] && [ ! -L "$cache_file" ] && IFS=$'\t' read -r p_epoch p_number p_state p_code p_url <"$cache_file"
   pr_number=""
   if [[ $p_number =~ $PR_NUMBER_RE ]] && [[ $p_state =~ $PR_STATE_RE ]] &&
      [[ $p_code =~ $PR_CODE_RE ]] && [[ $p_url =~ $PR_URL_RE ]]; then
@@ -188,18 +214,21 @@ keep_previous_line() {
 }
 
 # --refresh <repo toplevel> <branch> <cache file>
+# The helpers above read these through dynamic scope: top, branch, cache_file,
+# now, and dir (for git_safe); they set pr_number, pr_url, pr_state, pr_code.
 refresh_main() {
-  local top="$1" branch="$2" cache_file="$3" name now
+  local top="$1" branch="$2" cache_file="$3" now
   local pr_number pr_url pr_state pr_code
-  umask 077
+  export LC_ALL=C
 
-  [ -n "${HOME:-}" ] && [ -d "$top" ] || return 1
+  [ -n "${HOME:-}" ] || return 1
+  case "$top" in /*) ;; *) return 1 ;; esac
+  [ -d "$top" ] || return 1
   [ -n "$branch" ] && [ "${branch#-}" = "$branch" ] || return 1
-  case "$cache_file" in "$CACHE_DIR"/*) ;; *) return 1 ;; esac
-  name="${cache_file#"$CACHE_DIR"/}"
-  case "$name" in ''|.*|*/*) return 1 ;; esac
+  [ "${cache_file%/*}" = "$CACHE_DIR" ] || return 1
+  [[ ${cache_file##*/} =~ ^k-[0-9]+$ ]] || return 1
   [ -L "$CACHE_DIR" ] && return 1
-  mkdir -p "$CACHE_DIR" && chmod 700 "$CACHE_DIR" || return 1
+  mkdir -p "$CACHE_DIR" && chmod 700 "$CACHE_DIR" && [ -O "$CACHE_DIR" ] || return 1
 
   dir="$top"
   now=$(date +%s)
