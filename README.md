@@ -464,6 +464,17 @@ line) and `wt-status.sh <dir>` (branch, head, status, and rebase state of anothe
 worktree of the current repository; it refuses any other directory and runs git with
 config-driven command execution disabled). Both have suites under `claude/scripts/tests/`.
 
+The status line (`claude/statusline-command.sh`) prints two lines. Line 1 shows the model,
+effort, context use, the 5-hour rate limit and, when the branch has a pull request, a
+`PR #<n>` link with ✅ approved, 🔴 changes requested, 💬 commented, or 🟣 merged. On someone
+else's pull request the emoji is your own review; on yours it is the overall review result.
+Line 2 shows `📁 <primary checkout> | 🌿 <branch>`, plus the worktree folder name when it
+differs from the branch. The pull request item comes from `gh` (it must be logged in; without
+it the item is left out) through a cache in `~/.cache/claude-statusline/`. The status line
+never waits for `gh`: it shows the cached result and, at most once a minute per branch,
+refreshes it in the background. It skips the default branch. Its suite is
+`claude/scripts/tests/statusline-test.sh`.
+
 ### Before the first run
 
 Take an archive of the managed directories and the four single files (`~/.claude/CLAUDE.md`,
@@ -592,7 +603,7 @@ claude/
 ├── hooks/                 # PreToolUse and SessionStart hooks
 ├── scripts/               # clwt, worktree-status.sh, wt-status.sh, and their tests
 ├── settings.json          # settings TEMPLATE: hook lines to register by hand (not live config)
-└── statusline-command.sh  # statusline script, linked into ~/.claude
+└── statusline-command.sh  # status line (project, branch, PR state), linked into ~/.claude
 agents/
 ├── AGENTS.md              # portable personal user file, linked as ~/.codex/AGENTS.md
 └── skills/                # shared portable skills, linked into ~/.agents/skills
