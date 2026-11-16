@@ -12,6 +12,12 @@ export GIT_CONFIG_NOSYSTEM=1
 # Also removes UTF-8 C1 controls (U+0080-U+009F) and bidi overrides
 # (U+202A-U+202E, U+2066-U+2069), which tr cannot match as multibyte sequences.
 strip_ctl() {
+  local LC_ALL=C
+  # Printable ASCII needs no stripping; skipping the tr/sed forks keeps the render fast.
+  case "$1" in
+    *[!\ -~]*) ;;
+    *) printf '%s' "$1"; return ;;
+  esac
   local c2=$'\xc2' e2=$'\xe2' x80=$'\x80' x81=$'\x81'
   local x9f=$'\x9f' xa6=$'\xa6' xa9=$'\xa9' xaa=$'\xaa' xae=$'\xae'
   printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177' | LC_ALL=C sed \
@@ -37,12 +43,9 @@ safe_repo_url() {
   printf '%s://%s' "$scheme" "$rest"
 }
 
+NUMERIC_RE='^[0-9]+(\.[0-9]+)?$'
 numeric_or_empty() {
-  printf '%s' "$1" | grep -Eq '^[0-9]+(\.[0-9]+)?$' && printf '%s' "$1"
-}
-
-field() {
-  printf '%s' "$input" | jq -r "$1" 2>/dev/null
+  [[ $1 =~ $NUMERIC_RE ]] && printf '%s' "$1"
 }
 
 git_safe() {
@@ -329,14 +332,27 @@ fi
 
 input=$(cat)
 
-model=$(strip_ctl "$(field '.model.display_name // "Unknown Model"')")
-effort=$(strip_ctl "$(field '.effort.level // ""')")
-dir=$(field '.workspace.current_dir // .workspace.project_dir // ""')
-repo_host=$(strip_ctl "$(field '.workspace.repo.host // empty')")
-repo_owner=$(strip_ctl "$(field '.workspace.repo.owner // empty')")
-repo_name=$(strip_ctl "$(field '.workspace.repo.name // empty')")
-used_pct=$(numeric_or_empty "$(field '.context_window.used_percentage // empty')")
-five_hour_pct=$(numeric_or_empty "$(field '.rate_limits.five_hour.used_percentage // empty')")
+# One jq call for every field. The separator is \037, not a tab: a whitespace
+# IFS character would collapse empty fields and shift the ones after them.
+IFS=$'\037' read -r -d '' model effort dir repo_host repo_owner repo_name used_raw five_raw < <(
+  printf '%s' "$input" | jq -j '[
+      (.model.display_name // "Unknown Model"),
+      (.effort.level // ""),
+      (.workspace.current_dir // .workspace.project_dir // ""),
+      (.workspace.repo.host // ""),
+      (.workspace.repo.owner // ""),
+      (.workspace.repo.name // ""),
+      (.context_window.used_percentage // ""),
+      (.rate_limits.five_hour.used_percentage // "")
+    ] | map(tostring | gsub("\u001f"; "")) | join("\u001f")' 2>/dev/null
+)
+model=$(strip_ctl "$model")
+effort=$(strip_ctl "$effort")
+repo_host=$(strip_ctl "$repo_host")
+repo_owner=$(strip_ctl "$repo_owner")
+repo_name=$(strip_ctl "$repo_name")
+used_pct=$(numeric_or_empty "$used_raw")
+five_hour_pct=$(numeric_or_empty "$five_raw")
 
 project_name=""
 branch=""
@@ -347,10 +363,11 @@ common_dir=""
 
 if [ -n "$dir" ]; then
   project_name=$(basename "$dir")
-  toplevel=$(git_safe rev-parse --show-toplevel 2>/dev/null)
+  git_dir=""
+  { IFS= read -r toplevel; IFS= read -r git_dir; IFS= read -r common_dir; } <<EOF
+$(git_safe rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir 2>/dev/null)
+EOF
   if [ -n "$toplevel" ]; then
-    git_dir=$(git_safe rev-parse --path-format=absolute --git-dir 2>/dev/null)
-    common_dir=$(git_safe rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 
     # A linked worktree's toplevel is the worktree folder, so the primary
     # checkout's name has to come from the shared git directory.
@@ -399,7 +416,7 @@ hyperlink() {
 }
 
 # The JSON repo fields are often absent, so the git remote is the fallback.
-pr_url=""
+pulls_url=""
 if [ -n "$repo_host" ] && [ -n "$repo_owner" ] && [ -n "$repo_name" ]; then
   candidate="https://${repo_host}/${repo_owner}/${repo_name}"
 elif [ -n "$remote" ]; then
@@ -411,7 +428,7 @@ else
 fi
 safe_base=$(safe_repo_url "$candidate")
 if [ -n "$safe_base" ]; then
-  pr_url=$(strip_ctl "${safe_base%.git}/pulls")
+  pulls_url=$(strip_ctl "${safe_base%.git}/pulls")
 fi
 
 effort_color="$DIM"
@@ -475,8 +492,8 @@ printf '\n'
 
 if [ -n "$project_name" ]; then
   printf '📁 %b' "${BOLD}${CYAN}"
-  if [ -n "$pr_url" ]; then
-    hyperlink "$pr_url" "$project_name"
+  if [ -n "$pulls_url" ]; then
+    hyperlink "$pulls_url" "$project_name"
   else
     printf '%s' "$project_name"
   fi

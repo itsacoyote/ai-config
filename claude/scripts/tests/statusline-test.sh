@@ -298,6 +298,22 @@ else
   not_ok "a non-numeric percentage renders --% ctx with empty stderr: [$err] $OUT"
 fi
 
+# Catches a field split that collapses empty fields: with a tab IFS, 42 would land
+# in the effort slot.
+run_statusline "$(jq -n --arg d "$NONGIT" '{model:{display_name:"Opus"},workspace:{current_dir:$d},context_window:{used_percentage:42},rate_limits:{five_hour:{used_percentage:75}}}')"
+if [ "$(printf '%s\n' "$OUT" | sed -n 1p | plain)" = 'Opus | 42% ctx | 75% 5h' ]; then
+  ok 'empty fields before the percentages do not shift them'
+else
+  not_ok "empty fields before the percentages do not shift them: $OUT"
+fi
+
+run_statusline "$(jq -n --arg d "$NONGIT" '{model:{display_name:"Op\u001fus"},effort:{level:"\u001f"},workspace:{current_dir:$d},context_window:{used_percentage:42}}')"
+if [ "$(printf '%s\n' "$OUT" | sed -n 1p | plain)" = 'Opus | 42% ctx' ]; then
+  ok 'a separator character inside a value does not shift the fields'
+else
+  not_ok "a separator character inside a value does not shift the fields: $OUT"
+fi
+
 section 'git config hardening'
 
 # Behavioral trap for a future git call that bypasses git_safe and refreshes
