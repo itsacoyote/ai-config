@@ -105,6 +105,7 @@ bash pi/scripts/tests/pwt-test.sh
 bash claude/scripts/tests/beads-gate-test.sh
 bash claude/scripts/tests/bash-guard-test.sh
 bash claude/scripts/tests/wt-status-test.sh
+bash claude/scripts/tests/statusline-test.sh
 ```
 
 Build the world the script needs under `mktemp -d` with a fake `$HOME` — a bare remote,
