@@ -1149,6 +1149,23 @@ else
   not_ok "the default branch starts no refresh: $(ls "$CACHE_DIR")"
 fi
 
+# git update-ref accepts refs/heads/-x. The refresher rejects such a branch on its
+# own and leaves no trace, so only a logging nohup shows whether the render spawned it.
+DASH="$TMP/dash-repo"; DASHBIN="$TMP/dash-bin"; mkdir -p "$DASH" "$DASHBIN"
+( cd "$DASH" && git init -q . && git commit -q --allow-empty -m init &&
+  git update-ref refs/heads/-evil HEAD && git symbolic-ref HEAD refs/heads/-evil ) ||
+  { echo "dash fixture setup failed" >&2; exit 1; }
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/nohup.log"\n' "$DASHBIN" >"$DASHBIN/nohup"
+chmod +x "$DASHBIN/nohup"
+reset_gh
+RENDER_PATH="$DASHBIN:$BIN:$PATH" run_statusline "$(json_dir "$DASH")"
+wait_idle
+if [ ! -e "$DASHBIN/nohup.log" ] && [ "$(gh_calls)" = 0 ]; then
+  ok 'a branch starting with a dash starts no refresh'
+else
+  not_ok "a branch starting with a dash starts no refresh: $(cat "$DASHBIN/nohup.log" 2>/dev/null)"
+fi
+
 reset_gh
 run_statusline "$(json_dir "$RFNOHEAD")"
 wait_idle
