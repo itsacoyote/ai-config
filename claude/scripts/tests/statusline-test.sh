@@ -231,6 +231,27 @@ else
   not_ok "a password containing a slash in the origin remote is not printed: $(printf '%s' "$OUT" | od -c | head -8)"
 fi
 
+FRAG="$TMP/frag-proj"; mkdir -p "$FRAG"
+( cd "$FRAG" && git init -q . && git remote add origin 'https://someuser:4321#frag@example.invalid/owner/project.git' ) ||
+  { echo "frag fixture setup failed" >&2; exit 1; }
+run_statusline "$(json_dir "$FRAG")"
+if printf '%s' "$OUT" | grep -qF 'https://example.invalid/owner/project/pulls' &&
+   ! printf '%s' "$OUT" | grep -qF 'someuser' && ! printf '%s' "$OUT" | grep -qF '4321'; then
+  ok 'userinfo is removed before a # in the password can cut the url short'
+else
+  not_ok "userinfo is removed before a # in the password can cut the url short: $(printf '%s' "$OUT" | od -c | head -8)"
+fi
+
+ATPATH="$TMP/atpath-proj"; mkdir -p "$ATPATH"
+( cd "$ATPATH" && git init -q . && git remote add origin 'https://example.invalid/x@evil.invalid/project.git' ) ||
+  { echo "atpath fixture setup failed" >&2; exit 1; }
+run_statusline "$(json_dir "$ATPATH")"
+if ! printf '%s' "$OUT" | grep -qF "${ESC}]8;;" && ! printf '%s' "$OUT" | grep -qF 'evil.invalid'; then
+  ok 'an @ in the remote path emits no link'
+else
+  not_ok "an @ in the remote path emits no link: $(printf '%s' "$OUT" | od -c | head -8)"
+fi
+
 NOLINK="$TMP/nolink-proj"; mkdir -p "$NOLINK"
 ( cd "$NOLINK" && git init -q . && git remote add origin 'https://bad_host.invalid:x/owner/project.git' ) ||
   { echo "nolink fixture setup failed" >&2; exit 1; }
@@ -275,6 +296,38 @@ if [ "$(line2)" = "📁 bidi-x-$(printf '\xc3\xa9\xe2\x80\x94')" ]; then
   ok 'bidi override characters in the folder name are stripped'
 else
   not_ok "bidi override characters in the folder name are stripped: $(line2 | od -c | head -3)"
+fi
+
+# APFS refuses invalid UTF-8 in file names, so the nested sequences ride in a
+# packed ref. Each one only becomes a control once the inner one is removed:
+# c2 [c2 9b] 9b, c2 [e2 80 ae] 9b, e2 [e2 80 ae] 80 ae.
+NEST="$TMP/nest-proj"; mkdir -p "$NEST"
+NESTED_BRANCH="n$(printf '\xc2\xc2\x9b\x9b')a$(printf '\xc2\xe2\x80\xae\x9b')b$(printf '\xe2\xe2\x80\xae\x80\xae')c"
+( cd "$NEST" && git init -q . && git commit -q --allow-empty -m init &&
+  printf '%s refs/heads/%s\n' "$(git rev-parse HEAD)" "$NESTED_BRANCH" >.git/packed-refs &&
+  printf 'ref: refs/heads/%s\n' "$NESTED_BRANCH" >.git/HEAD ) ||
+  { echo "nested fixture setup failed" >&2; exit 1; }
+run_statusline "$(json_dir "$NEST")"
+case "$(line2)" in
+  *"🌿 nabc") nested=ok ;;
+  *) nested=bad ;;
+esac
+if [ "$nested" = ok ]; then
+  ok 'control sequences formed by removing nested ones are stripped too'
+else
+  not_ok "control sequences formed by removing nested ones are stripped too: $(line2 | od -An -tx1 | head -3)"
+fi
+
+# A newline in the path would shift git's three output lines: toplevel would
+# become a sibling directory and the branch would be read from it.
+NLREPO="$TMP/nl
+repo"; mkdir -p "$NLREPO"
+( cd "$NLREPO" && git init -q . ) || { echo "newline fixture setup failed" >&2; exit 1; }
+run_statusline "$(json_dir "$NLREPO")"
+if [ "$(line2)" = '📁 nlrepo' ]; then
+  ok 'a repository path containing a newline is treated as outside git'
+else
+  not_ok "a repository path containing a newline is treated as outside git: $(line2)"
 fi
 
 section 'line 1'

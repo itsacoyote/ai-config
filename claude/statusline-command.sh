@@ -20,27 +20,37 @@ strip_ctl() {
   esac
   local c2=$'\xc2' e2=$'\xe2' x80=$'\x80' x81=$'\x81'
   local x9f=$'\x9f' xa6=$'\xa6' xa9=$'\xa9' xaa=$'\xaa' xae=$'\xae'
+  # Loops until nothing matches: removing one sequence can join the bytes around
+  # it into a new one (c2 [c2 9b] 9b -> c2 9b).
   printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177' | LC_ALL=C sed \
+    -e ':a' \
     -e "s/${c2}[${x80}-${x9f}]//g" \
     -e "s/${e2}${x80}[${xaa}-${xae}]//g" \
-    -e "s/${e2}${x81}[${xa6}-${xa9}]//g"
+    -e "s/${e2}${x81}[${xa6}-${xa9}]//g" \
+    -e 'ta'
 }
 
-# Builds a link base from a candidate URL: drops query and fragment, removes
-# userinfo (up to the last @), and emits nothing unless the host is plain.
+AUTHORITY_RE='^[A-Za-z0-9.-]+(:[0-9]+)?$'
+# Builds a link base from a candidate URL: removes userinfo from the authority,
+# drops query and fragment from the path, and emits nothing unless the host is
+# plain and the path has no @.
 safe_repo_url() {
-  local url="$1" scheme rest
-  url="${url%%#*}"
-  url="${url%%\?*}"
+  local url="$1" scheme rest authority path
   case "$url" in
     https://*) scheme=https ;;
     http://*) scheme=http ;;
     *) return ;;
   esac
   rest="${url#*://}"
-  rest="${rest##*@}"
-  printf '%s' "${rest%%/*}" | grep -Eq '^[A-Za-z0-9.-]+(:[0-9]+)?$' || return
-  printf '%s://%s' "$scheme" "$rest"
+  authority="${rest%%/*}"
+  path="${rest#"$authority"}"
+  authority="${authority##*@}"
+  path="${path%%[?#]*}"
+  # An @ after the first / is either a password containing a slash or a path
+  # pretending to be a host; neither yields a link worth the risk.
+  case "$path" in *@*) return ;; esac
+  [[ $authority =~ $AUTHORITY_RE ]] || return
+  printf '%s://%s%s' "$scheme" "$authority" "$path"
 }
 
 NUMERIC_RE='^[0-9]+(\.[0-9]+)?$'
@@ -365,8 +375,15 @@ common_dir=""
 if [ -n "$dir" ]; then
   project_name=$(basename "$dir")
   git_dir=""
+  paths=$(git_safe rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir 2>/dev/null)
+  # Exactly three lines; a path containing a newline would shift the others.
+  case "$paths" in
+    *$'\n'*$'\n'*$'\n'*) paths="" ;;
+    *$'\n'*$'\n'*) ;;
+    *) paths="" ;;
+  esac
   { IFS= read -r toplevel; IFS= read -r git_dir; IFS= read -r common_dir; } <<EOF
-$(git_safe rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir 2>/dev/null)
+$paths
 EOF
   if [ -n "$toplevel" ]; then
 
