@@ -367,13 +367,14 @@ git init -q --bare "$BARE" &&
   git update-ref refs/heads/main "$c" &&
   git worktree add -q "$TMP/bare-wt" -b feat/z main ) ||
   { echo "bare repository fixture setup failed" >&2; exit 1; }
-# Prefix match: the worktree item also shows "| bare-wt" here, which repeats the
-# project name; that repetition is not what this test pins.
+# Exact match: the project name is the worktree folder here, so the worktree
+# item would only repeat it.
 run_statusline "$(json_dir "$TMP/bare-wt")"
-case "$(line2)" in
-  '📁 bare-wt | 🌿 feat/z'*) ok "a bare repository's linked worktree is named after its own folder" ;;
-  *) not_ok "a bare repository's linked worktree is named after its own folder: $(line2)" ;;
-esac
+if [ "$(line2)" = '📁 bare-wt | 🌿 feat/z' ]; then
+  ok "a bare repository's linked worktree is named after its own folder, once"
+else
+  not_ok "a bare repository's linked worktree is named after its own folder, once: $(line2)"
+fi
 
 section 'line 1'
 

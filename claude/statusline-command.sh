@@ -401,7 +401,8 @@ EOF
     branch=$(git_safe symbolic-ref --short HEAD 2>/dev/null)
     if [ -n "$git_dir" ] && [ "$git_dir" != "$common_dir" ]; then
       worktree_name=$(basename "$toplevel")
-      if [ "$worktree_name" = "$branch" ] || [ "$worktree_name" = "${branch//\//-}" ]; then
+      if [ "$worktree_name" = "$branch" ] || [ "$worktree_name" = "${branch//\//-}" ] ||
+        [ "$worktree_name" = "$project_name" ]; then
         worktree_name=""
       fi
     fi
