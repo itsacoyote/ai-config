@@ -469,12 +469,12 @@ effort, context use, the 5-hour rate limit and, when the branch has a pull reque
 `PR #<n>` link with ✅ approved, 🔴 changes requested, 💬 commented, or 🟣 merged. On someone
 else's pull request the emoji is your own review; on yours it is the overall review result.
 Line 2 shows `📁 <primary checkout> | 🌿 <branch>`, plus the worktree folder name when it
-differs from the branch. The pull request item comes from `gh` through a cache in
-`~/.cache/claude-statusline/`. `gh` must be logged in: when it is missing the item is left
-out, and when a lookup fails the last cached state stays. The status line
-never waits for `gh`: it shows the cached result and, at most once a minute per branch,
-refreshes it in the background. It skips the default branch. Its suite is
-`claude/scripts/tests/statusline-test.sh`.
+differs from both the branch (with `/` or `-`) and the project name. The pull request item
+comes from `gh` through a cache in `~/.cache/claude-statusline/`. `gh` must be logged in:
+when it is missing the item is left out, and when a lookup fails the last cached state
+stays. The status line never waits for `gh`: it shows the cached result and, at most once a
+minute per branch, refreshes it in the background. It skips the default branch. Its suite
+is `claude/scripts/tests/statusline-test.sh`.
 
 ### Before the first run
 
