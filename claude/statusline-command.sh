@@ -335,16 +335,17 @@ input=$(cat)
 # One jq call for every field. The separator is \037, not a tab: a whitespace
 # IFS character would collapse empty fields and shift the ones after them.
 IFS=$'\037' read -r -d '' model effort dir repo_host repo_owner repo_name used_raw five_raw < <(
+  # try per field: one value of an unexpected type must blank only that field.
   printf '%s' "$input" | jq -j '[
-      (.model.display_name // "Unknown Model"),
-      (.effort.level // ""),
-      (.workspace.current_dir // .workspace.project_dir // ""),
-      (.workspace.repo.host // ""),
-      (.workspace.repo.owner // ""),
-      (.workspace.repo.name // ""),
-      (.context_window.used_percentage // ""),
-      (.rate_limits.five_hour.used_percentage // "")
-    ] | map(tostring | gsub("\u001f"; "")) | join("\u001f")' 2>/dev/null
+      ((try .model.display_name catch null) // "Unknown Model"),
+      ((try .effort.level catch null) // ""),
+      ((try (.workspace.current_dir // .workspace.project_dir) catch null) // ""),
+      ((try .workspace.repo.host catch null) // ""),
+      ((try .workspace.repo.owner catch null) // ""),
+      ((try .workspace.repo.name catch null) // ""),
+      ((try .context_window.used_percentage catch null) // ""),
+      ((try .rate_limits.five_hour.used_percentage catch null) // "")
+    ] | map(tostring | gsub("[\u0000\u001f]"; "")) | join("\u001f")' 2>/dev/null
 )
 model=$(strip_ctl "$model")
 effort=$(strip_ctl "$effort")

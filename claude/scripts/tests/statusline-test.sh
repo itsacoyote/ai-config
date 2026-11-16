@@ -307,11 +307,19 @@ else
   not_ok "empty fields before the percentages do not shift them: $OUT"
 fi
 
-run_statusline "$(jq -n --arg d "$NONGIT" '{model:{display_name:"Op\u001fus"},effort:{level:"\u001f"},workspace:{current_dir:$d},context_window:{used_percentage:42}}')"
+run_statusline "$(jq -n --arg d "$NONGIT" '{model:{display_name:"Op\u001fu\u0000s"},effort:{level:"\u001f"},workspace:{current_dir:$d},context_window:{used_percentage:42}}')"
 if [ "$(printf '%s\n' "$OUT" | sed -n 1p | plain)" = 'Opus | 42% ctx' ]; then
   ok 'a separator character inside a value does not shift the fields'
 else
   not_ok "a separator character inside a value does not shift the fields: $OUT"
+fi
+
+run_statusline "$(jq -n --arg d "$NONGIT" '{model:{display_name:"Opus"},effort:"high",workspace:{current_dir:$d},context_window:{used_percentage:42}}')"
+if [ "$(printf '%s\n' "$OUT" | sed -n 1p | plain)" = 'Opus | 42% ctx' ] &&
+  [ "$(line2)" = "📁 $(basename "$NONGIT")" ]; then
+  ok 'a field with an unexpected type blanks only that field'
+else
+  not_ok "a field with an unexpected type blanks only that field: $OUT"
 fi
 
 section 'git config hardening'
