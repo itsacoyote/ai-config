@@ -136,19 +136,31 @@ REVIEW_CODE_JQ='
         else "none" end
     end'
 
-# Sets pr_number/pr_url/pr_state/pr_code, all empty meaning no PR. Returns 1
-# when gh could not answer, so the caller keeps the previous cache fields.
-lookup_pr() {
-  local default marker merge json number url host viewer code state want_host=""
-  pr_number=""; pr_url=""; pr_state=""; pr_code=""
-
+# The target of refs/remotes/origin/HEAD, else main or master when it is absent.
+is_default_branch() {
+  local default
   default=$(git_safe symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
   default="${default#origin/}"
   if [ -z "$default" ]; then
     case "$branch" in main|master) return 0 ;; esac
-  elif [ "$branch" = "$default" ]; then
-    return 0
+    return 1
   fi
+  [ "$branch" = "$default" ]
+}
+
+ensure_cache_dir() {
+  [ -n "${HOME:-}" ] || return 1
+  [ -L "$CACHE_DIR" ] && return 1
+  mkdir -p "$CACHE_DIR" && chmod 700 "$CACHE_DIR" && [ -O "$CACHE_DIR" ]
+}
+
+# Sets pr_number/pr_url/pr_state/pr_code, all empty meaning no PR. Returns 1
+# when gh could not answer, so the caller keeps the previous cache fields.
+lookup_pr() {
+  local marker merge json number url host viewer code state want_host=""
+  pr_number=""; pr_url=""; pr_state=""; pr_code=""
+
+  is_default_branch && return 0
 
   command -v gh >/dev/null 2>&1 || return 0
 
@@ -227,8 +239,9 @@ refresh_main() {
   [ -n "$branch" ] && [ "${branch#-}" = "$branch" ] || return 1
   [ "${cache_file%/*}" = "$CACHE_DIR" ] || return 1
   [[ ${cache_file##*/} =~ ^k-[0-9]+$ ]] || return 1
-  [ -L "$CACHE_DIR" ] && return 1
-  mkdir -p "$CACHE_DIR" && chmod 700 "$CACHE_DIR" && [ -O "$CACHE_DIR" ] || return 1
+  refresh_lock="$cache_file.lock"
+  trap 'rm -rf "$refresh_lock"' EXIT
+  ensure_cache_dir || return 1
 
   dir="$top"
   now=$(date +%s)
@@ -237,6 +250,46 @@ refresh_main() {
   else
     keep_previous_line
   fi
+}
+
+# The cache line is untrusted: every field is validated before it is used,
+# and it is never sourced or evaluated. Sets shown_* when the line is valid and
+# returns 0 only when the cache is fresh (not older than 60s, not in the future).
+read_pr_cache() {
+  local LC_ALL=C c_epoch="" c_number="" c_state="" c_code="" c_url="" age
+  shown_number=""; shown_url=""; shown_code=""
+  [ -f "$cache_file" ] && [ ! -L "$cache_file" ] || return 1
+  IFS=$'\t' read -r c_epoch c_number c_state c_code c_url <"$cache_file"
+  [[ $c_epoch =~ $EPOCH_RE ]] || return 1
+  if [[ $c_number =~ $PR_NUMBER_RE ]] && [[ $c_state =~ $PR_STATE_RE ]] &&
+     [[ $c_code =~ $PR_CODE_RE ]] && [[ $c_url =~ $PR_URL_RE ]] &&
+     [ "${c_url##*/pull/}" = "$c_number" ]; then
+    shown_number="$c_number"; shown_url="$c_url"; shown_code="$c_code"
+  fi
+  age=$(($(date +%s) - c_epoch))
+  [ "$age" -ge 0 ] && [ "$age" -le 60 ]
+}
+
+# A lock directory older than two minutes belongs to a dead refresher. Renaming
+# it first lets only one render win the replacement.
+take_lock() {
+  local lock="$1" stale="$1.stale.$$" was_stale=""
+  mkdir "$lock" 2>/dev/null && return 0
+  [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] || return 1
+  mv "$lock" "$stale" 2>/dev/null || return 1
+  [ -n "$(find "$stale" -maxdepth 0 -mmin +2 2>/dev/null)" ] && was_stale=1
+  rm -rf "$stale"
+  [ -n "$was_stale" ] && mkdir "$lock" 2>/dev/null
+}
+
+# set -m runs the refresher in its own process group, and the subshell keeps
+# job control (and bash 3.2's "Done" notice) away from the rest of the script.
+start_refresh() {
+  local self="${BASH_SOURCE[0]}"
+  case "$self" in /*) ;; *) self="$PWD/$self" ;; esac
+  ensure_cache_dir || return 1
+  take_lock "$cache_file.lock" || return 1
+  ( set -m; nohup bash "$self" --refresh "$toplevel" "$branch" "$cache_file" </dev/null >/dev/null 2>&1 & )
 }
 
 if [ "${1:-}" = "--refresh" ]; then
@@ -259,6 +312,8 @@ project_name=""
 branch=""
 worktree_name=""
 remote=""
+toplevel=""
+common_dir=""
 
 if [ -n "$dir" ]; then
   project_name=$(basename "$dir")
@@ -284,6 +339,13 @@ if [ -n "$dir" ]; then
     fi
     remote=$(git_safe remote get-url origin 2>/dev/null)
   fi
+fi
+
+shown_number=""; shown_url=""; shown_code=""
+if [ -n "$toplevel" ] && [ -n "$common_dir" ] && [ -n "$branch" ] && [ -n "${HOME:-}" ] && ! is_default_branch; then
+  key=$(printf '%s\n%s' "$common_dir" "$branch" | cksum)
+  cache_file="$CACHE_DIR/k-${key%% *}"
+  read_pr_cache || start_refresh
 fi
 
 project_name=$(strip_ctl "$project_name")
@@ -363,6 +425,17 @@ colored_pct "$used_pct" "ctx"
 if [ -n "$five_hour_pct" ]; then
   printf ' %b|%b ' "$DIM" "$RESET"
   colored_pct "$five_hour_pct" "5h"
+fi
+
+if [ -n "$shown_number" ]; then
+  printf ' %b|%b ' "$DIM" "$RESET"
+  hyperlink "$shown_url" "PR #$shown_number"
+  case "$shown_code" in
+    approved)  printf ' ✅' ;;
+    changes)   printf ' 🔴' ;;
+    commented) printf ' 💬' ;;
+    merged)    printf ' 🟣' ;;
+  esac
 fi
 
 printf '\n'

@@ -45,7 +45,7 @@ plain() {
 # run_statusline <json> — stdout+stderr in OUT, exit status in STATUS.
 OUT=''; STATUS=0
 run_statusline() {
-  OUT="$(printf '%s' "$1" | bash "$SCRIPT" 2>&1)"
+  OUT="$(printf '%s' "$1" | PATH="${RENDER_PATH:-$BIN:$PATH}" bash "$SCRIPT" 2>&1)"
   STATUS=$?
 }
 json_dir() { jq -n --arg d "$1" '{workspace:{current_dir:$d}}'; }
@@ -80,6 +80,60 @@ DETACHED="$TMP/detached-proj"; mkdir -p "$DETACHED"
   git checkout -q --detach ) || { echo "detached fixture setup failed" >&2; exit 1; }
 
 NONGIT="$TMP/plain-folder"; mkdir -p "$NONGIT"
+
+# gh stub first on PATH for every render: a render may start a background
+# refresher, and a real gh must never be reachable from the suite.
+TAB=$'\t'
+CACHE_DIR="$HOME/.cache/claude-statusline"
+BIN="$TMP/bin"; mkdir -p "$BIN"
+GHFIX="$TMP/gh-fixtures"; mkdir -p "$GHFIX"
+export STATUSLINE_GH_FIXTURES="$GHFIX"
+PR_FIELDS='number,url,state,author,reviewDecision,reviews'
+export PR_FIELDS
+
+# Hosts the refresher may send to gh. The nested attacker.invalid key must not
+# count: only top-level keys are hosts.
+export GH_CONFIG_DIR="$TMP/gh-config"; mkdir -p "$GH_CONFIG_DIR"
+cat >"$GH_CONFIG_DIR/hosts.yml" <<'YML'
+example.invalid:
+    user: me
+    nested:
+    attacker.invalid:
+YML
+
+# Stub gh: canned answers from fixture files, one log line per call. A missing
+# fixture file exits 1, the same signal real gh gives for "no such PR" and for
+# "gh is broken", so the refresher cannot rely on telling them apart. Failures
+# write to stderr, as real gh does, so a refresher that stops discarding it fails.
+cat >"$BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+dir="${STATUSLINE_GH_FIXTURES:?}"
+printf '%s\tenv:%s,%s,%s,%s,%s=%s,%s=%s,GIT_CONFIG_COUNT=%s\tent:[%s%s]\tlc:%s\tpwd:%s\n' "$*" \
+  "${GH_PROMPT_DISABLED-}" "${GH_NO_UPDATE_NOTIFIER-}" "${GH_PAGER-}" "${NO_COLOR-}" \
+  "${GIT_CONFIG_KEY_0-}" "${GIT_CONFIG_VALUE_0-}" "${GIT_CONFIG_KEY_1-}" "${GIT_CONFIG_VALUE_1-}" \
+  "${GIT_CONFIG_COUNT-}" "${GH_ENTERPRISE_TOKEN-}" "${GITHUB_ENTERPRISE_TOKEN-}" "${LC_ALL-}" "$PWD" >>"$dir/log"
+[ -e "$dir/delay" ] && sleep "$(cat "$dir/delay")"
+fail() { echo "gh: simulated failure" >&2; exit 1; }
+[ -e "$dir/fail" ] && fail
+if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$4" = user ] && [ "$5" = --jq ] && [ "$6" = .login ] && [ $# -eq 6 ]; then
+  [ -e "$dir/viewer-fail" ] && fail
+  cat "$dir/viewer" 2>/dev/null || fail
+  exit 0
+fi
+if [ "$1" = pr ] && [ "$2" = view ] && [ "$4" = --json ] && [ "$5" = "$PR_FIELDS" ] && [ $# -eq 5 ]; then
+  cat "$dir/view.json" 2>/dev/null || fail
+  exit 0
+fi
+if [ "$1" = pr ] && [ "$2" = list ] && [ "$3" = --head ] && [ "$5" = --state ] && [ "$6" = all ] &&
+   [ "$7" = --json ] && [ "$8" = "$PR_FIELDS" ] && [ "$9" = --limit ] && [ "${10}" = 10 ] && [ $# -eq 10 ]; then
+  cat "$dir/list.json" 2>/dev/null || fail
+  exit 0
+fi
+printf 'gh stub: unhandled: %s\n' "$*" >&2
+printf 'UNHANDLED %s\n' "$*" >>"$dir/unhandled"
+exit 99
+STUB
+chmod +x "$BIN/gh"
 
 section 'line 2: project, branch, worktree'
 
@@ -273,60 +327,10 @@ fi
 
 section 'refresh: cache the branch pull request'
 
-TAB=$'\t'
-CACHE_DIR="$HOME/.cache/claude-statusline"
-BIN="$TMP/bin"; mkdir -p "$BIN"
-GHFIX="$TMP/gh-fixtures"; mkdir -p "$GHFIX"
-export STATUSLINE_GH_FIXTURES="$GHFIX"
-PR_FIELDS='number,url,state,author,reviewDecision,reviews'
-export PR_FIELDS
-
-# Hosts the refresher may send to gh. The nested attacker.invalid key must not
-# count: only top-level keys are hosts.
-export GH_CONFIG_DIR="$TMP/gh-config"; mkdir -p "$GH_CONFIG_DIR"
-cat >"$GH_CONFIG_DIR/hosts.yml" <<'YML'
-example.invalid:
-    user: me
-    nested:
-    attacker.invalid:
-YML
-
-# Stub gh: canned answers from fixture files, one log line per call. A missing
-# fixture file exits 1, the same signal real gh gives for "no such PR" and for
-# "gh is broken", so the refresher cannot rely on telling them apart. Failures
-# write to stderr, as real gh does, so a refresher that stops discarding it fails.
-cat >"$BIN/gh" <<'STUB'
-#!/usr/bin/env bash
-dir="${STATUSLINE_GH_FIXTURES:?}"
-printf '%s\tenv:%s,%s,%s,%s,%s=%s,%s=%s,GIT_CONFIG_COUNT=%s\tent:[%s%s]\tlc:%s\tpwd:%s\n' "$*" \
-  "${GH_PROMPT_DISABLED-}" "${GH_NO_UPDATE_NOTIFIER-}" "${GH_PAGER-}" "${NO_COLOR-}" \
-  "${GIT_CONFIG_KEY_0-}" "${GIT_CONFIG_VALUE_0-}" "${GIT_CONFIG_KEY_1-}" "${GIT_CONFIG_VALUE_1-}" \
-  "${GIT_CONFIG_COUNT-}" "${GH_ENTERPRISE_TOKEN-}" "${GITHUB_ENTERPRISE_TOKEN-}" "${LC_ALL-}" "$PWD" >>"$dir/log"
-fail() { echo "gh: simulated failure" >&2; exit 1; }
-[ -e "$dir/fail" ] && fail
-if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$4" = user ] && [ "$5" = --jq ] && [ "$6" = .login ] && [ $# -eq 6 ]; then
-  [ -e "$dir/viewer-fail" ] && fail
-  cat "$dir/viewer" 2>/dev/null || fail
-  exit 0
-fi
-if [ "$1" = pr ] && [ "$2" = view ] && [ "$4" = --json ] && [ "$5" = "$PR_FIELDS" ] && [ $# -eq 5 ]; then
-  cat "$dir/view.json" 2>/dev/null || fail
-  exit 0
-fi
-if [ "$1" = pr ] && [ "$2" = list ] && [ "$3" = --head ] && [ "$5" = --state ] && [ "$6" = all ] &&
-   [ "$7" = --json ] && [ "$8" = "$PR_FIELDS" ] && [ "$9" = --limit ] && [ "${10}" = 10 ] && [ $# -eq 10 ]; then
-  cat "$dir/list.json" 2>/dev/null || fail
-  exit 0
-fi
-printf 'gh stub: unhandled: %s\n' "$*" >&2
-printf 'UNHANDLED %s\n' "$*" >>"$dir/unhandled"
-exit 99
-STUB
-chmod +x "$BIN/gh"
 
 # A PATH with the tools the refresher runs but no gh.
 NOGH="$TMP/nogh-bin"; mkdir -p "$NOGH"
-for tool in git jq date mktemp mv rm mkdir chmod; do
+for tool in bash git jq date mktemp mv rm mkdir chmod cat sed tr grep basename dirname cksum find nohup sleep; do
   tool_path=$(command -v "$tool") && ln -sf "$tool_path" "$NOGH/$tool"
 done
 
@@ -345,6 +349,7 @@ PRBASE='https://example.invalid/owner/project'
 PRURL="$PRBASE/pull"
 
 reset_gh() {
+  wait_idle
   rm -rf "$GHFIX" "$CACHE_DIR"; mkdir -p "$GHFIX"
   printf 'me\n' >"$GHFIX/viewer"
 }
@@ -358,6 +363,15 @@ reviews() {
 pr_obj() {
   jq -n -c --arg n "$1" --arg s "$2" --arg a "$3" --arg d "$4" --argjson r "$5" --arg b "${6:-$PRBASE}" \
     '{number: ($n | tonumber), url: "\($b)/pull/\($n)", state: $s, author: {login: $a}, reviewDecision: $d, reviews: $r}'
+}
+
+# wait_idle — returns once no refresher holds a lock, so a straggler from an
+# earlier test cannot write into the next test's cache. Bounded to about 10s.
+wait_idle() {
+  local i=0
+  while [ "$i" -lt 100 ] && [ -n "$(find "$CACHE_DIR" -maxdepth 1 -name '*.lock' 2>/dev/null)" ]; do
+    sleep 0.1; i=$((i + 1))
+  done
 }
 
 set_list() { printf '%s\n' "$1" >"$GHFIX/list.json"; }
@@ -850,6 +864,361 @@ else
   not_ok "a cache file that is a FIFO is refused without blocking (status=$RSTATUS)"
 fi
 rm -f "$CF"
+
+section 'line 1: pull request item'
+
+RR="$TMP/render-repo"; mkdir -p "$RR"
+( cd "$RR" && git init -q . && echo a > a.txt && git add a.txt && git commit -qm init &&
+  git remote add origin 'https://example.invalid/owner/project.git' &&
+  git update-ref refs/remotes/origin/main HEAD &&
+  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main &&
+  git worktree add -q "$TMP/rr-x" -b feat/x &&
+  git worktree add -q "$TMP/rr-ab" -b feat/a-b &&
+  git worktree add -q "$TMP/rr-ba" -b feat-a/b &&
+  git worktree add -q --detach "$TMP/rr-det" ) || { echo "render fixture setup failed" >&2; exit 1; }
+RRX="$TMP/rr-x"
+
+cache_for() { # <branch> — the path the render must pick for a branch of $RR
+  local key; key=$(printf '%s\n%s' "$RR/.git" "$1" | cksum); printf '%s/k-%s' "$CACHE_DIR" "${key%% *}"
+}
+seed_for() { # <branch> <epoch offset from now> <line without epoch>
+  mkdir -p "$CACHE_DIR"
+  printf '%s\t%s\n' "$(($(date +%s) + $2))" "$3" >"$(cache_for "$1")"
+}
+line1()     { printf '%s\n' "$OUT" | sed -n 1p | plain; }
+line1_raw() { printf '%s\n' "$OUT" | sed -n 1p; }
+pr_list_calls() { [ -f "$GHFIX/log" ] || { printf '0'; return; }; grep -c '^pr list' "$GHFIX/log" || true; }
+# wait_file <path> — bounded poll, about 10s.
+wait_file() { local i=0; while [ ! -e "$1" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; }
+OPEN7_LIST() { set_list "[$(pr_obj 7 OPEN alice '' "$(reviews me APPROVED)")]"; }
+
+reset_gh
+seed_for feat/x -5 "$GOOD"
+run_statusline "$(json_dir "$RRX")"
+wait_idle
+if [ "$STATUS" = 0 ] && [ "$(line1)" = 'Unknown Model | --% ctx | PR #7 ✅' ] &&
+   printf '%s' "$(line1_raw)" | grep -qF "${ESC}]8;;$PRURL/7${ESC}\\PR #7${ESC}]8;;${ESC}\\"; then
+  ok 'a fresh cache renders PR #n linked to the pr url'
+else
+  not_ok "a fresh cache renders PR #n linked to the pr url: $(line1_raw | od -c | head -6)"
+fi
+if [ "$(gh_calls)" = 0 ] && [ ! -d "$(cache_for feat/x).lock" ]; then
+  ok 'a fresh cache never calls gh'
+else
+  not_ok "a fresh cache never calls gh: $(cat "$GHFIX/log" 2>/dev/null)"
+fi
+
+for pair in 'approved:✅' 'changes:🔴' 'commented:💬'; do
+  code="${pair%%:*}"; emoji="${pair#*:}"
+  reset_gh
+  seed_for feat/x -5 "7${TAB}OPEN${TAB}$code${TAB}$PRURL/7"
+  run_statusline "$(json_dir "$RRX")"
+  if [ "$(line1)" = "Unknown Model | --% ctx | PR #7 $emoji" ]; then
+    ok "a fresh cache renders the review emoji for $code"
+  else
+    not_ok "a fresh cache renders the review emoji for $code: $(line1)"
+  fi
+done
+
+reset_gh
+seed_for feat/x -5 "7${TAB}OPEN${TAB}none${TAB}$PRURL/7"
+run_statusline "$(json_dir "$RRX")"
+if [ "$(line1)" = 'Unknown Model | --% ctx | PR #7' ]; then
+  ok 'an open pr with no review state renders no emoji'
+else
+  not_ok "an open pr with no review state renders no emoji: $(line1)"
+fi
+
+reset_gh
+seed_for feat/x -5 "4${TAB}MERGED${TAB}merged${TAB}$PRURL/4"
+run_statusline "$(json_dir "$RRX")"
+if [ "$(line1)" = 'Unknown Model | --% ctx | PR #4 🟣' ]; then
+  ok 'a merged pr renders the purple circle and no review emoji'
+else
+  not_ok "a merged pr renders the purple circle and no review emoji: $(line1)"
+fi
+
+reset_gh
+seed_for feat/x -5 'NONE'
+run_statusline "$(json_dir "$RRX")"
+if [ "$(line1)" = 'Unknown Model | --% ctx' ]; then
+  ok 'a NONE cache renders no pr item'
+else
+  not_ok "a NONE cache renders no pr item: $(line1)"
+fi
+
+# Stale data still renders while the refresh runs.
+reset_gh
+OPEN7_LIST
+seed_for feat/x -120 "$GOOD"
+run_statusline "$(json_dir "$RRX")"
+wait_idle
+if [ "$STATUS" = 0 ] && [ "$(line1)" = 'Unknown Model | --% ctx | PR #7 ✅' ] && [ "$(pr_list_calls)" = 1 ] &&
+   [ ! -d "$(cache_for feat/x).lock" ]; then
+  ok 'a stale cache starts one background refresh'
+else
+  not_ok "a stale cache starts one background refresh (list calls=$(pr_list_calls)): $(line1)"
+fi
+
+reset_gh
+OPEN7_LIST
+seed_for feat/x 3600 "$GOOD"
+run_statusline "$(json_dir "$RRX")"
+wait_idle
+if [ "$(pr_list_calls)" = 1 ]; then
+  ok 'a cache dated in the future is treated as stale'
+else
+  not_ok "a cache dated in the future is treated as stale (list calls=$(pr_list_calls))"
+fi
+
+# The delay keeps the first refresher holding the lock while every render runs.
+reset_gh
+OPEN7_LIST
+echo 1 >"$GHFIX/delay"
+pids=''
+for _ in 1 2 3 4 5; do
+  ( printf '%s' "$(json_dir "$RRX")" | PATH="$BIN:$PATH" bash "$SCRIPT" >/dev/null 2>&1 ) &
+  pids="$pids $!"
+done
+wait $pids
+wait_file "$(cache_for feat/x)"
+wait_idle
+if [ "$(pr_list_calls)" = 1 ]; then
+  ok 'five concurrent renders with a stale cache start one refresh'
+else
+  not_ok "five concurrent renders with a stale cache start one refresh (list calls=$(pr_list_calls))"
+fi
+
+reset_gh
+OPEN7_LIST
+mkdir -p "$(cache_for feat/x).lock"
+touch -t 202001010000 "$(cache_for feat/x).lock"
+run_statusline "$(json_dir "$RRX")"
+wait_file "$(cache_for feat/x)"
+wait_idle
+if [ "$(pr_list_calls)" = 1 ] && [ ! -e "$(cache_for feat/x).lock" ]; then
+  ok 'a lock older than 2 minutes is replaced'
+else
+  not_ok "a lock older than 2 minutes is replaced (list calls=$(pr_list_calls))"
+fi
+
+reset_gh
+OPEN7_LIST
+mkdir -p "$(cache_for feat/x).lock"
+run_statusline "$(json_dir "$RRX")"
+sleep 1
+if [ "$(gh_calls)" = 0 ] && [ -d "$(cache_for feat/x).lock" ]; then
+  ok 'a fresh lock directory is treated as held'
+else
+  not_ok "a fresh lock directory is treated as held (calls=$(gh_calls))"
+fi
+rm -rf "$(cache_for feat/x).lock"
+
+# The stub mv refreshes the lock after the staleness check and before the
+# rename, as a competing render's replacement would.
+reset_gh
+OPEN7_LIST
+RACEBIN="$TMP/racebin"; mkdir -p "$RACEBIN"
+REAL_MV=$(command -v mv)
+printf '#!/bin/bash\ncase "$1" in *.lock) touch "$1" ;; esac\nexec %s "$@"\n' "$REAL_MV" >"$RACEBIN/mv"
+chmod +x "$RACEBIN/mv"
+mkdir -p "$(cache_for feat/x).lock"
+touch -t 202001010000 "$(cache_for feat/x).lock"
+RENDER_PATH="$RACEBIN:$BIN:$PATH" run_statusline "$(json_dir "$RRX")"
+sleep 1
+if [ "$(gh_calls)" = 0 ] && [ ! -e "$(cache_for feat/x).lock" ]; then
+  ok 'a lock refreshed between the check and the rename is not taken over'
+else
+  not_ok "a lock refreshed between the check and the rename is not taken over (calls=$(gh_calls))"
+fi
+rm -rf "$(cache_for feat/x).lock"
+
+# Without >/dev/null the refresher keeps the capture pipe open and the render
+# blocks until gh returns.
+reset_gh
+OPEN7_LIST
+echo 4 >"$GHFIX/delay"
+t0=$(date +%s)
+run_statusline "$(json_dir "$RRX")"
+t1=$(date +%s)
+if [ "$STATUS" = 0 ] && [ $((t1 - t0)) -lt 3 ]; then
+  ok 'the render returns before a slow gh finishes'
+else
+  not_ok "the render returns before a slow gh finishes (took $((t1 - t0))s)"
+fi
+wait_file "$(cache_for feat/x)"
+wait_idle
+
+reset_gh
+OPEN7_LIST
+echo 2 >"$GHFIX/delay"
+json_dir "$RRX" >"$TMP/sig.json"
+rm -f "$TMP/sig.pid"
+( set -m
+  PATH="$BIN:$PATH" bash "$SCRIPT" <"$TMP/sig.json" >"$TMP/sig.out" 2>&1 &
+  echo $! >"$TMP/sig.pid"
+  wait )
+sig_pgid=$(cat "$TMP/sig.pid" 2>/dev/null)
+own_pgid=$(ps -o pgid= -p $$ | tr -d ' ')
+if [ -n "$sig_pgid" ] && [ "$sig_pgid" -gt 1 ] && [ "$sig_pgid" != "$own_pgid" ]; then
+  kill -TERM -- "-$sig_pgid" 2>/dev/null
+  wait_file "$(cache_for feat/x)"
+  if [ -e "$(cache_for feat/x)" ]; then
+    ok "the refresh survives SIGTERM to the render's process group"
+  else
+    not_ok "the refresh survives SIGTERM to the render's process group"
+  fi
+else
+  not_ok "the refresh survives SIGTERM to the render's process group: no separate group (pgid=$sig_pgid own=$own_pgid)"
+fi
+wait_idle
+
+# Each case has a fresh epoch, so none of them starts a refresh that would mask the result.
+poison() { # <name> <cache line without epoch>
+  reset_gh
+  seed_for feat/x -5 "$2"
+  run_statusline "$(json_dir "$RRX")"
+  if [ "$STATUS" = 0 ] && [ "$(line1)" = 'Unknown Model | --% ctx' ] &&
+     ! line1_raw | grep -qF '/pull/' && [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = 2 ]; then
+    ok "a poisoned cache line renders no pr item: $1"
+  else
+    not_ok "a poisoned cache line renders no pr item: $1: $(line1_raw | od -c | head -4)"
+  fi
+}
+poison 'escape sequence in the url' "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7${ESC}]8;;evil"
+poison 'url on another scheme' "7${TAB}OPEN${TAB}approved${TAB}http://example.invalid/owner/project/pull/7"
+poison 'number that is not numeric' "7;x${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+poison 'number that differs from the url' "8${TAB}OPEN${TAB}approved${TAB}$PRURL/7"
+poison 'unknown code word' "7${TAB}OPEN${TAB}evil${TAB}$PRURL/7"
+poison 'unknown state' "7${TAB}CLOSED${TAB}approved${TAB}$PRURL/7"
+poison 'extra field' "7${TAB}OPEN${TAB}approved${TAB}$PRURL/7${TAB}extra"
+
+# Bash evaluates a subscript in arithmetic, so an unvalidated epoch would run the command.
+reset_gh
+rm -f "$TMP/PWNED_EPOCH"
+mkdir -p "$CACHE_DIR"
+printf 'x[$(touch %s)]\t%s\n' "$TMP/PWNED_EPOCH" "$GOOD" >"$(cache_for feat/x)"
+run_statusline "$(json_dir "$RRX")"
+wait_idle
+if [ ! -e "$TMP/PWNED_EPOCH" ] && [ "$(line1)" = 'Unknown Model | --% ctx' ]; then
+  ok 'a cache epoch is validated before any arithmetic'
+else
+  not_ok "a cache epoch is validated before any arithmetic: $(line1)"
+fi
+
+reset_gh
+run_statusline "$(json_dir "$TMP/rr-det")"
+wait_idle
+if [ "$(gh_calls)" = 0 ] && [ -z "$(ls "$CACHE_DIR" 2>/dev/null)" ]; then
+  ok 'detached HEAD starts no refresh'
+else
+  not_ok "detached HEAD starts no refresh: $(ls "$CACHE_DIR")"
+fi
+
+reset_gh
+run_statusline "$(json_dir "$NONGIT")"
+wait_idle
+if [ "$(gh_calls)" = 0 ] && [ -z "$(ls "$CACHE_DIR" 2>/dev/null)" ]; then
+  ok 'a directory outside git starts no refresh'
+else
+  not_ok "a directory outside git starts no refresh: $(ls "$CACHE_DIR")"
+fi
+
+reset_gh
+run_statusline "$(json_dir "$RR")"
+wait_idle
+if [ "$(gh_calls)" = 0 ] && [ -z "$(ls "$CACHE_DIR" 2>/dev/null)" ]; then
+  ok 'the default branch starts no refresh'
+else
+  not_ok "the default branch starts no refresh: $(ls "$CACHE_DIR")"
+fi
+
+reset_gh
+run_statusline "$(json_dir "$RFNOHEAD")"
+wait_idle
+if [ "$(gh_calls)" = 0 ] && [ -z "$(ls "$CACHE_DIR" 2>/dev/null)" ]; then
+  ok 'main starts no refresh when origin/HEAD is absent'
+else
+  not_ok "main starts no refresh when origin/HEAD is absent: $(ls "$CACHE_DIR")"
+fi
+
+reset_gh
+OPEN7_LIST
+run_statusline "$(json_dir "$RRX")"
+first="$(line1)"
+wait_file "$(cache_for feat/x)"
+wait_idle
+run_statusline "$(json_dir "$RRX")"
+if [ "$first" = 'Unknown Model | --% ctx' ] && [ "$(line1)" = 'Unknown Model | --% ctx | PR #7 ✅' ]; then
+  ok 'a missing cache is filled by the background refresh and the next render shows the pr'
+else
+  not_ok "a missing cache is filled by the background refresh and the next render shows the pr: [$first] [$(line1)]"
+fi
+
+# Two branches that collide once / becomes - must not share a file.
+reset_gh
+set_list '[]'
+run_statusline "$(json_dir "$TMP/rr-ab")"
+wait_idle
+run_statusline "$(json_dir "$TMP/rr-ba")"
+wait_idle
+if [ -e "$(cache_for feat/a-b)" ] && [ -e "$(cache_for feat-a/b)" ] &&
+   [ "$(cache_for feat/a-b)" != "$(cache_for feat-a/b)" ] &&
+   grep -q -- '--head feat/a-b ' "$GHFIX/log" && grep -q -- '--head feat-a/b ' "$GHFIX/log"; then
+  ok 'branches feat/a-b and feat-a/b render with different cache files and raw branch names'
+else
+  not_ok "branches feat/a-b and feat-a/b render with different cache files: $(ls "$CACHE_DIR")"
+fi
+
+reset_gh
+OPEN7_LIST
+mkdir -p "$TMP/link"
+ln -sf "$SCRIPT" "$TMP/link/statusline-command.sh"
+OUT="$(cd "$TMP/link" && json_dir "$RRX" | PATH="$BIN:$PATH" bash statusline-command.sh 2>&1)"
+wait_file "$(cache_for feat/x)"
+wait_idle
+if [ "$(pr_list_calls)" = 1 ]; then
+  ok 'a render run through a symlink with a relative path starts the refresher'
+else
+  not_ok "a render run through a symlink with a relative path starts the refresher (list calls=$(pr_list_calls))"
+fi
+
+reset_gh
+err=$(json_dir "$RRX" | PATH="$NOGH" bash "$SCRIPT" 2>&1 >"$TMP/nogh.out")
+wait_idle
+OUT="$(cat "$TMP/nogh.out")"
+if [ -z "$err" ] && [ "$(printf '%s\n' "$OUT" | sed -n 1p | plain)" = 'Unknown Model | --% ctx' ] &&
+   [ "$(line2)" = '📁 render-repo | 🌿 feat/x | rr-x' ] && [ "$(cut -f2- "$(cache_for feat/x)")" = NONE ]; then
+  ok 'with gh absent from PATH both lines render and stderr is empty'
+else
+  not_ok "with gh absent from PATH both lines render and stderr is empty: err=[$err] [$(line2)]"
+fi
+
+# A stub nohup exits at once, so the job finishes while the render still runs.
+# Bash 3.2 reports a finished job on stderr only when job control is on in the
+# shell and a later foreground command runs; the render has no such command
+# today, so this pins the output rather than killing the unwrapped-set -m mutation.
+reset_gh
+NOHUPBIN="$TMP/nohupbin"; mkdir -p "$NOHUPBIN"
+printf '#!/bin/bash\nexit 0\n' >"$NOHUPBIN/nohup"; chmod +x "$NOHUPBIN/nohup"
+RENDER_PATH="$NOHUPBIN:$BIN:$PATH" run_statusline "$(json_dir "$RRX")"
+sleep 0.5
+if [ "$STATUS" = 0 ] && [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = 2 ] && ! printf '%s' "$OUT" | grep -q 'Done'; then
+  ok 'a render whose refresher exits at once writes nothing to stderr'
+else
+  not_ok "a render whose refresher exits at once writes nothing to stderr: $OUT"
+fi
+rm -rf "$(cache_for feat/x).lock"
+
+reset_gh
+set_list '[]'
+mkdir -p "$CF.lock"
+refresh "$RF" feat/x "$CF"
+if [ ! -e "$CF.lock" ]; then
+  ok 'the refresher removes its lock on exit'
+else
+  not_ok 'the refresher removes its lock on exit'
+fi
 
 section 'portability'
 
