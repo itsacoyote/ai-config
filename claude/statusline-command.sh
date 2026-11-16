@@ -13,6 +13,9 @@ export GIT_CONFIG_NOSYSTEM=1
 # (U+202A-U+202E, U+2066-U+2069), which tr cannot match as multibyte sequences.
 strip_ctl() {
   local LC_ALL=C
+  # Caps the input: the sed loop below repeats once per nesting level, so a
+  # crafted 64 KB remote URL would otherwise stall the render for seconds.
+  set -- "${1:0:1024}"
   # Printable ASCII needs no stripping; skipping the tr/sed forks keeps the render fast.
   case "$1" in
     *[!\ -~]*) ;;
@@ -438,7 +441,7 @@ pulls_url=""
 if [ -n "$repo_host" ] && [ -n "$repo_owner" ] && [ -n "$repo_name" ]; then
   candidate="https://${repo_host}/${repo_owner}/${repo_name}"
 elif [ -n "$remote" ]; then
-  candidate=$(printf '%s' "$remote" | sed -E \
+  candidate=$(printf '%s' "$remote" | LC_ALL=C sed -E \
     -e 's#^git@([^:]+):#https://\1/#' \
     -e 's#^ssh://git@([^/]+)/#https://\1/#')
 else

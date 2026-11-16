@@ -318,6 +318,23 @@ else
   not_ok "control sequences formed by removing nested ones are stripped too: $(line2 | od -An -tx1 | head -3)"
 fi
 
+# Without the length cap, 64 KB of nested sequences in the remote path takes
+# about 14 seconds to strip.
+LONGNEST="$TMP/longnest-proj"; mkdir -p "$LONGNEST"
+open_seq=$(printf '\xc2%.0s' $(seq 32000))
+close_seq=$(printf '\x9b%.0s' $(seq 32000))
+( cd "$LONGNEST" && git init -q . &&
+  git config remote.origin.url "https://example.invalid/owner/p${open_seq}${close_seq}" ) ||
+  { echo "long nested fixture setup failed" >&2; exit 1; }
+start=$(date +%s)
+run_statusline "$(json_dir "$LONGNEST")"
+elapsed=$(( $(date +%s) - start ))
+if [ "$elapsed" -lt 3 ] && ! printf '%s' "$OUT" | LC_ALL=C grep -q "$(printf '\xc2\x9b')"; then
+  ok 'a long nested sequence in the remote renders quickly and stripped'
+else
+  not_ok "a long nested sequence in the remote renders quickly and stripped: ${elapsed}s"
+fi
+
 # A newline in the path would shift git's three output lines: toplevel would
 # become a sibling directory and the branch would be read from it.
 NLREPO="$TMP/nl
