@@ -16,6 +16,7 @@ The baseline is what the coordinator last saw for each watched PR. Each run comp
       "baseRefName": "main",
       "headRefOid": "0000000000000000000000000000000000000000",
       "reviewDecision": "",
+      "closed_at": "",
       "seen_review_ids": [],
       "seen_comment_ids": [],
       "unblocks": "Start TICKET-2; its session rebases onto main after this merges.",
@@ -27,12 +28,9 @@ The baseline is what the coordinator last saw for each watched PR. Each run comp
 
 | Field | Meaning |
 |---|---|
-| `checked_at` | Time of the last full baseline write |
-| `prs` | Keyed by PR number as a string |
-| `ticket` | Ticket the PR belongs to, or empty |
-| `branch` | The session's stable key. A session is matched by branch, never by `PR-<n>` |
-| `state` | `OPEN`, `MERGED`, or `CLOSED` |
-| `isDraft`, `baseRefName`, `headRefOid`, `reviewDecision` | Copied from `gh pr view` |
+| `branch` | The session's stable key. A `ListAgents` row named after the branch (slashes as dashes) or named `PR-<n>` for this PR is that session |
+| `state`, `isDraft`, `baseRefName`, `headRefOid`, `reviewDecision` | Copied from `gh pr view` |
+| `closed_at` | Merge or close time, set when `state` leaves `OPEN`; drives board cleanup |
 | `seen_review_ids`, `seen_comment_ids` | Every review and comment id already handled, bot ids included |
 | `unblocks` | Free-text rule (see below) |
 | `notes_sent` | Notes already sent (see below) |
@@ -51,7 +49,7 @@ A PR has news when any of these is true since the baseline:
 1. A review or comment id is not in `seen_*_ids`, its author is not a bot, and its author is not the developer (login from `config.json`).
 2. `reviewDecision` changed. An empty string is not approval.
 3. The PR merged.
-4. The PR closed without merging. A stacked child that turns `CLOSED`, or is retargeted, after its parent merged is reported as that, not as a close.
+4. The PR closed without merging, or its `baseRefName` changed. When the PR is a stacked child and its parent merged in the same window, report it as "parent #<n> merged; this PR was retargeted to <base>" (or "…was closed by GitHub"), not as a plain close, and check the new base before any note.
 
 ### Bot detection
 
@@ -61,8 +59,6 @@ A PR has news when any of these is true since the baseline:
 2. Classify them with `gh api repos/{owner}/{repo}/issues/<n>/comments` and `gh api repos/{owner}/{repo}/pulls/<n>/reviews`. An author with `user.type == "Bot"` is a bot.
 3. Add each bot login to `config.json`. A known bot login needs no further lookup.
 
-The `gh api` call prompts for approval. This is expected.
-
 ## Read commands
 
 | Need | Command |
@@ -71,7 +67,7 @@ The `gh api` call prompts for approval. This is expected.
 | CI | `gh pr checks <n>`. Read the output, not the exit code: non-zero means pending or failing |
 | Signatures | `gh api repos/{owner}/{repo}/pulls/<n>/commits`, then `commit.verification.verified` on each commit |
 
-GitHub is authoritative for pushed commits. Use the PR's real base for stacked PRs. The `gh api` call prompts for approval. This is expected.
+GitHub is authoritative for pushed commits. Use the PR's real base for stacked PRs. Every `gh api` call (signatures, bot detection) prompts for approval; this is expected.
 
 ## notes_sent
 
@@ -88,7 +84,7 @@ Rules:
 
 ## unblocks
 
-Free text naming what can start and which session must rebase. Example: `Start TICKET-2; the session on feat/example-slug rebases onto main.`
+Free text naming what can start and which session must rebase (example in the schema above).
 
 - Keep the rule text. Never overwrite it.
 - Record what was acted on as a `notes_sent` entry.

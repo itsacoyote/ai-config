@@ -37,7 +37,7 @@ Every row has the same keys:
 | `review` | Review state, or empty |
 | `updated` | ISO time of the last change |
 
-Use an empty string for a key with no value. Do not add keys.
+Use an empty string for a key with no value. Do not add keys. The keys `session` and `pr` are fields on any row, not the row kinds of the same name.
 
 ## Page requirements
 
@@ -50,7 +50,7 @@ Use an empty string for a key with no value. Do not add keys.
 
 1. Write `board.json` locally.
 2. Upload it as an asset of the board artifact.
-3. Update `datasets/board` with `ArtifactData` to `{source.url, updated: {at, by}}`, passing `if_version`.
+3. Update `datasets/board` with `ArtifactData`: set `source.url` to the new asset's url, and `updated` to `{at: <now, ISO>, by: <coordinator session name>}`, passing `if_version`.
 4. On success, delete the previous asset only if its id is the one `config.json` records as last written by the coordinator.
 5. Record the new asset id and version in `config.json`.
 
@@ -67,9 +67,9 @@ When step 3 reports a version mismatch:
 
 Cap: 3 attempts. Then stop and tell the developer. Never write without `if_version`.
 
-If the Artifact tool is unavailable or the cap is reached, still advance `board.json` and the baseline in [pr-watch.md](pr-watch.md), and say the published board is stale.
+When the cap is reached or the Artifact tool is unavailable, follow the stale-board rule in [pr-watch.md](pr-watch.md#turn-write-order).
 
 ## Cleanup
 
-- A `pr` row for a merged or closed PR is removed the next day.
+- A `pr` row for a merged or closed PR is removed once its `closed_at` in [pr-watch.md](pr-watch.md) is more than 24 hours old.
 - A `session` row is removed when the session is gone: not in `ListAgents` and its worktree removed.
