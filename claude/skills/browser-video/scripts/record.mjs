@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { addOverlay, clearCard, createHelpers, ensureOverlay, setCaption } from './harness.mjs';
@@ -110,6 +110,7 @@ function validateSteps(def) {
   if (!['http:', 'https:', 'file:'].includes(parsed.protocol)) {
     fail('"url" must be an absolute http:, https: or file: URL');
   }
+  if (parsed.username || parsed.password) fail('"url" must not contain a username or password');
   if (!viewport || !isPositiveEven(viewport.width) || !isPositiveEven(viewport.height)) {
     fail('"viewport" needs positive even integer width and height');
   }
@@ -168,19 +169,19 @@ function encode(webm, mp4, seconds) {
 function prepareOutDir(outArg) {
   if (!outArg) return mkdtempSync(join(tmpdir(), 'browser-video-'));
   const dir = resolve(outArg);
-  let stat;
+  mkdirSync(dirname(dir), { recursive: true });
   try {
-    stat = lstatSync(dir);
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-  if (!stat) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    mkdirSync(dir, { mode: 0o700 });
     return dir;
+  } catch (error) {
+    // A non-recursive mkdir that finds anything at the path, even a dangling symlink, fails here instead of following it.
+    if (error.code !== 'EEXIST') throw error;
   }
+  const stat = lstatSync(dir);
   if (stat.isSymbolicLink()) throw new UsageError(`--out must not be a symlink: ${dir}`);
   if (!stat.isDirectory()) throw new UsageError(`--out is not a directory: ${dir}`);
   if (stat.uid !== process.getuid()) throw new UsageError(`--out is not owned by the current user: ${dir}`);
+  if (stat.mode & 0o022) throw new UsageError(`--out must not be group- or world-writable: ${dir}`);
   return dir;
 }
 
@@ -258,6 +259,7 @@ async function record(stepsFile, outArg) {
         report(`error: step "${step.id}" failed: ${error.message}`);
         const shot = join(outDir, `failure-${step.id}.png`);
         try {
+          clearSymlink(shot);
           await page.screenshot({ path: shot });
           report(`screenshot: ${shot}`);
         } catch (shotError) {

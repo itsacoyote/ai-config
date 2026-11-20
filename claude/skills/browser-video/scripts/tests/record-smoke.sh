@@ -42,6 +42,7 @@ check() {
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 RECORD="$HERE/../record.mjs"
+FRAME="$HERE/../frame.sh"
 FIX="$HERE/fixtures"
 PROJECT="$(cd "$BROWSER_VIDEO_PROJECT" && pwd -P)"
 
@@ -63,7 +64,8 @@ run_in() {
   ERR="$(cat "$TMP/stderr")"
 }
 
-frame_at() { ffmpeg -nostdin -hide_banner -loglevel error -y -ss "$2" -i "$1" -frames:v 1 "$3"; }
+# The command the skill docs tell users to run, so every frame in this suite goes through it.
+frame_at() { sh "$FRAME" "$1" "$2" "$3"; }
 
 probe() { ffprobe -v error -select_streams v:0 -show_entries "$2" -of default=noprint_wrappers=1:nokey=1 "$1"; }
 
@@ -188,6 +190,33 @@ if frame_at "$MP4" 0.5 "$TMP/frame.png" && [ -s "$TMP/frame.png" ]; then
 else
   not_ok "a frame can be extracted from the mp4"
 fi
+
+# frame.sh is what SKILL.md pre-approves in place of raw ffmpeg, so each bad argument must stop before ffmpeg runs.
+section "frame.sh"
+# frame_exit <mp4> <seconds> <png> — exit status of frame.sh in STATUS, stderr in ERR.
+frame_exit() { ERR="$(sh "$FRAME" "$@" 2>&1 >/dev/null)"; STATUS=$?; }
+expect_frame_usage_error() { # <name> <mp4> <seconds> <png>
+  frame_exit "$2" "$3" "$4"
+  if [ "$STATUS" -eq 2 ] && [ ! -e "$4" ]; then ok "$1"; else not_ok "$1 (status $STATUS: $ERR)"; fi
+}
+cp "$MP4" "$TMP/clip.txt"
+expect_frame_usage_error "frame.sh rejects an input that does not end in .mp4 (exit 2)" "$TMP/clip.txt" 0.5 "$TMP/bad-ext.png"
+expect_frame_usage_error "frame.sh rejects non-numeric seconds (exit 2)" "$MP4" abc "$TMP/bad-seconds.png"
+expect_frame_usage_error "frame.sh rejects an option-like seconds value (exit 2)" "$MP4" -1 "$TMP/neg-seconds.png"
+expect_frame_usage_error "frame.sh rejects a missing input file (exit 2)" "$TMP/absent.mp4" 0.5 "$TMP/missing-input.png"
+expect_frame_usage_error "frame.sh rejects an output that does not end in .png (exit 2)" "$MP4" 0.5 "$TMP/bad-out.jpg"
+frame_exit "$MP4" 0.5
+if [ "$STATUS" -eq 2 ]; then ok "frame.sh rejects a wrong argument count (exit 2)"; else not_ok "frame.sh rejects a wrong argument count (status $STATUS)"; fi
+frame_exit "$MP4" 0.5 "$TMP/good.png"
+if [ "$STATUS" -eq 0 ] && [ "$(head -c 4 "$TMP/good.png" | tail -c 3)" = "PNG" ]; then
+  ok "frame.sh writes a PNG for a good call"
+else
+  not_ok "frame.sh writes a PNG for a good call (status $STATUS: $ERR)"
+fi
+# A relative path starting with "-" must be read as a file, not an ffmpeg option.
+(cd "$TMP" && cp "$MP4" ./-dash.mp4 && sh "$FRAME" -dash.mp4 0.5 -dash.png >/dev/null 2>&1 && [ -s ./-dash.png ]) \
+  && ok "frame.sh treats a relative path that starts with '-' as a file" \
+  || not_ok "frame.sh treats a relative path that starts with '-' as a file"
 
 section "custom viewport"
 run_in "$PROJECT" "$FIX/steps-viewport.mjs" --out "$TMP/small"
@@ -343,6 +372,7 @@ expect_usage_error "rejects a steps file with an empty steps array" invalid-empt
 expect_usage_error "rejects a step whose act is not a function" invalid-bad-act.mjs
 expect_usage_error "rejects a negative hold" invalid-neg-hold.mjs
 expect_usage_error "rejects a relative url" invalid-rel-url.mjs
+expect_usage_error "rejects a url with credentials" invalid-url-credentials.mjs
 expect_usage_error "rejects a name with a path separator" invalid-bad-name.mjs
 expect_usage_error "rejects an odd viewport width" invalid-odd-viewport.mjs
 expect_usage_error "rejects a step id with a path separator" invalid-bad-step-id.mjs
@@ -359,6 +389,14 @@ else
   not_ok "refuses an --out path that is a symlink (exit 2, got $STATUS: $ERR)"
 fi
 
+mkdir "$TMP/open-out" && chmod 777 "$TMP/open-out"
+run_in "$PROJECT" "$FIX/steps.mjs" --out "$TMP/open-out"
+if [ "$STATUS" -eq 2 ] && [ -z "$(ls "$TMP/open-out")" ]; then
+  ok "refuses a group- or world-writable --out (exit 2)"
+else
+  not_ok "refuses a group- or world-writable --out (exit 2, got $STATUS: $ERR)"
+fi
+
 run_in "$PROJECT" "$FIX/steps.mjs" --out "$TMP/new-out"
 MODE="$(node -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8))' "$TMP/new-out")"
 if [ "$STATUS" -eq 0 ] && [ "$MODE" = "700" ]; then
@@ -369,10 +407,10 @@ fi
 
 run_in "$PROJECT" "$FIX/steps-nav-fail.mjs" --out "$TMP/nav-out"
 # Exit 1 plus a non-empty error is the positive control: the run really failed in navigation.
-if [ "$STATUS" -eq 1 ] && [ -n "$ERR" ] && ! printf '%s\n%s' "$OUT" "$ERR" | grep -qE 'secret|token=abc'; then
-  ok "a failed navigation does not print url credentials or query string"
+if [ "$STATUS" -eq 1 ] && [ -n "$ERR" ] && ! printf '%s\n%s' "$OUT" "$ERR" | grep -q 'token=abc'; then
+  ok "a failed navigation does not print the url query string"
 else
-  not_ok "a failed navigation does not print url credentials or query string (status $STATUS: $ERR)"
+  not_ok "a failed navigation does not print the url query string (status $STATUS: $ERR)"
 fi
 
 # ---- environment problems ---------------------------------------------------
