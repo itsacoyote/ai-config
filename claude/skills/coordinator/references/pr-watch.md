@@ -57,13 +57,14 @@ A PR has news when any of these is true since the baseline:
 
 1. Look up authors only when new ids appear.
 2. Classify them with `gh api repos/{owner}/{repo}/issues/<n>/comments` and `gh api repos/{owner}/{repo}/pulls/<n>/reviews`. An author with `user.type == "Bot"` is a bot.
-3. Add each bot login to `config.json`. A known bot login needs no further lookup.
+3. Match REST rows to the new ids by `node_id`; it equals the `id` from `gh pr view`.
+4. Add each bot login to `config.json` with any trailing `[bot]` removed, which is the form `gh pr view` shows. A known bot login needs no further lookup.
 
 ## Read commands
 
 | Need | Command |
 |---|---|
-| PR state | `gh pr view <n> --json state,isDraft,baseRefName,headRefOid,reviewDecision,reviews,comments,files,mergedAt,author` |
+| PR state | `gh pr view <n> --json state,isDraft,baseRefName,headRefOid,reviewDecision,reviews,comments,files,mergedAt,closedAt,author` |
 | CI | `gh pr checks <n>`. Read the output, not the exit code: non-zero means pending or failing |
 | Signatures | `gh api repos/{owner}/{repo}/pulls/<n>/commits`, then `commit.verification.verified` on each commit |
 
@@ -74,19 +75,20 @@ GitHub is authoritative for pushed commits. Use the PR's real base for stacked P
 Each entry: `{key, headRefOid, sent_at, status}`.
 
 - `key` is the triggering review id or comment id, one of `decision:<value>`, `merged`, `closed`, or `unblocks:<target>` for each action taken from an `unblocks` entry (`<target>` is the branch told to rebase, or the ticket handed to the developer).
-- `status` is `sent, not confirmed`, `held`, or `refused`.
+- `status` is `sent, not confirmed`, `held`, `refused`, `not sent: session closed`, or `given to developer`.
 
 Rules:
 
-1. Before any send, skip it when `notes_sent` already has that key for that PR.
-2. Write the entry right after each send, before the board write.
+1. Before any send, skip it when `notes_sent` already has that key with the same `headRefOid` for that PR.
+2. One note per PR per turn covers all its new events; write one entry per event key, right after the send and before the board write.
 3. That mid-turn write changes only `notes_sent`. It keeps the previous seen ids and `state`. If the turn crashes before the board write, the next run replays the event to the board and does not send the note again.
 
 ## unblocks
 
 Free text naming what can start and which session must rebase (example in the schema above).
 
-- Keep the rule text. Never overwrite it.
+- Fill it when a prompt says "Wait for" a PR: append the waiting ticket and branch to that PR's entry. If that PR is not watched yet, add it and say so in the reply.
+- Append; never overwrite.
 - Record what was acted on as a `notes_sent` entry.
 - What a merge with an `unblocks` entry must produce is in `SKILL.md` (Main loop).
 

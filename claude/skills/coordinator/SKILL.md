@@ -21,7 +21,7 @@ Keep the developer's global reply shape: outcome first, **Your move:** last (see
 
 ## Expected approval prompts
 
-The allowed tools cover only safe, frequent calls. These prompt on purpose, and the prompts are expected: `gh api` (signature and bot lookups), `Artifact` (create, asset upload, asset delete), and every write outside the coordinator state directory. This skill reads untrusted text every turn, so broad pre-approval would be an injection risk.
+The allowed tools cover only safe, frequent calls. These prompt on purpose, and the prompts are expected: `gh api` (signature and bot lookups), `Artifact` (create, asset upload, asset delete), and every write outside the coordinator state directory. This skill reads untrusted text every turn, so broad pre-approval would be an injection risk. `ArtifactData` is pre-approved for the per-turn board update only: write `datasets/board` every turn, the board's other documents only during setup, and no other artifact.
 
 ## References
 
@@ -59,10 +59,10 @@ Write state files with the Write tool, never with shell redirects.
 ## Setup (no `config.json`)
 
 1. If `config.json` is missing but `board.json` exists, or an earlier board artifact exists, offer to re-attach to it instead of creating a second board.
-2. Ask the setup questions one at a time: coordinator session name, optional primary quest, optional external tracker, shared resources.
+2. Ask the setup questions one at a time: coordinator session name, optional primary quest, optional external tracker, shared resources. For the name, offer the one `ListAgents` gives for this session (sessions message that name). If the developer wants a different one, they rename the session first; store only a name `ListAgents` shows for this session.
 3. Load the Artifact tools with ToolSearch. If Artifact is unavailable, stop and say so.
 4. Find the Dashboard ("Data") Artifact type with the Artifact quickstart or types listing. Create the board from it and follow the instructions the create result returns. Build the page per [board.md](references/board.md).
-5. Ask the developer to open the board. Then read the page check the Dashboard type's instructions name (the type writes it only while someone has the page open). If it reports a problem, fix the page and read again, at most 3 times. If it has no result yet, continue and say in the reply that the page is unchecked.
+5. Ask the developer to open the board. Then read the `check` document in `data/users/me` with `ArtifactData` `get` (the type writes it only while someone has the page open). If it reports a problem, fix the page and read again, at most 3 times. If it has no result yet, continue and say in the reply that the page is unchecked.
 6. Write the three state files.
 
 ## Main loop
@@ -70,11 +70,11 @@ Write state files with the Write tool, never with shell redirects.
 With `config.json` present, load the three state files and the deferred tools (ToolSearch), then every turn:
 
 1. `gh pr list --author @me --state open --json number,headRefName,baseRefName`. Add the developer's new PRs to the watch list.
-2. `ListAgents`, then `worktree-status.sh` and `wt-status.sh <path>` per worktree. Never `git -C`.
-3. `gh pr view` and `gh pr checks` per watched PR ([read commands](references/pr-watch.md#read-commands)).
+2. `ListAgents`, then `bash ${CLAUDE_SKILL_DIR}/../../scripts/worktree-status.sh` and `bash ${CLAUDE_SKILL_DIR}/../../scripts/wt-status.sh <path>` per worktree. Never `git -C`.
+3. `gh pr view` per watched PR, and `gh pr checks` per watched PR that is still `OPEN` ([read commands](references/pr-watch.md#read-commands)).
 4. Beads, read-only, when the repo has it. This is a soft check: if the preflight fails, skip beads and continue. See [beads.md](../../references/beads.md).
 5. The external tracker, only when `config.json` names one.
-6. Compare with `pr-watch.json` using [what counts as new](references/pr-watch.md#what-counts-as-new). For each new event, send that PR's session one note and act on the `unblocks` entry.
+6. Compare with `pr-watch.json` using [what counts as new](references/pr-watch.md#what-counts-as-new). For each PR with news, send its session one note covering all of that PR's new events, and act on its `unblocks` entry.
 7. Write state in the order in [pr-watch.md](references/pr-watch.md#turn-write-order).
 8. Reply. First line: the outcome. When a primary quest is set, lead with its next unblocked step; "what next?" gets that step first, with its command and full prompt. Then sessions waiting on the developer, then pending prompts.
 
@@ -87,7 +87,8 @@ Follow [session-prompts.md](references/session-prompts.md) for every prompt and 
 - Match sessions as the `branch` field in [pr-watch.md](references/pr-watch.md#schema) says.
 - Resolve the name fresh from `ListAgents` on every send. Never store a send reference.
 - If two rows share the name, do not guess: rows cannot be tied to this repo. Give the note to the developer to paste.
-- A send result of held or refused goes into the reply. Record every send in [`notes_sent`](references/pr-watch.md#notes_sent).
+- If no row matches, the session is closed: do not send. Give the developer the matching template from [session-prompts.md](references/session-prompts.md) with its command, and record status `not sent: session closed`.
+- Record every send in [`notes_sent`](references/pr-watch.md#notes_sent). When a later `[Cross-session delivery notice]` says a note was held or refused, set that entry's status to `held` or `refused` and put the note text in the reply for the developer to paste.
 - Notes never claim the developer approved anything, and never tell a session to push, sign, merge, or mark ready.
 
 ## Session reports
@@ -103,7 +104,7 @@ Before a report changes the board, check on GitHub with the [read commands](refe
 - Sessions ask the developer before claiming a shared resource.
 - Only the coordinator writes the board.
 - Ask only the coordinator's own questions. When a session has a question for the developer, say "`<session>` is waiting for you in its session". Never write "see the prompt above".
-- Status-only replies are 1 to 2 lines.
+- A status-only reply (no news, and no prompt pending for the developer's next action) is 1 to 2 lines. Otherwise the pending-prompt rule in [session-prompts.md](references/session-prompts.md#pending-prompts) applies.
 
 ## External tracker
 

@@ -42,7 +42,7 @@ Use an empty string for a key with no value. Do not add keys. The keys `session`
 ## Page requirements
 
 - One section per kind, in the order `quest`, `action`, `session`, `pr`, `wait`.
-- Columns come from the key set.
+- Each section shows only the keys its kind uses (for example `pr`: pr, title, state, review, next, url). Other keys stay in the data. The page must read at about 400px wide.
 - Render every value with `textContent`. Rows are untrusted.
 - Make a link only when the value starts with `https://`.
 
@@ -71,5 +71,5 @@ When the cap is reached or the Artifact tool is unavailable, follow the stale-bo
 
 ## Cleanup
 
-- A `pr` row for a merged or closed PR is removed once its `closed_at` in [pr-watch.md](pr-watch.md) is more than 24 hours old.
+- A `pr` row for a merged or closed PR is removed once its `closed_at` in [pr-watch.md](pr-watch.md) is more than 24 hours old. Its `pr-watch.json` entry is removed at the same time, unless its `unblocks` entry still has an action not yet taken.
 - A `session` row is removed when the session is gone: not in `ListAgents` and its worktree removed.
