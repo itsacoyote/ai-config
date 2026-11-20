@@ -42,6 +42,6 @@ Steps-file API, CLI flags, outputs, and a full example: [reference.md](reference
 - **Run only from a trusted checkout.** `record.mjs` runs the Playwright found from the current directory and executes the steps file. Do not run it in an untrusted checkout, such as a worktree used to review someone else's pull request.
 - **Never put credentials in `url`.** Use Playwright `httpCredentials` or `storageState`, read from the environment inside the steps file.
 - **Captions cover content.** The caption sits at the bottom centre. Keep the subject of a captioned step above the bottom 120 px; scroll first.
-- **Sample mid-step.** The video runs slightly ahead of `timeline.json` (at least 0.14 s observed). Extract frames at `start + 0.3` to `0.7` of a step's span, not near boundaries.
-- **Cards are title-first.** Use `h.card({ title })`. The `body` option is untested.
+- **Sample mid-step.** The video can run up to about 0.1 s ahead of `timeline.json`. Extract frames at `start + 0.3` to `0.7` of a step's span, not near boundaries.
+- **Cards.** `h.card({ title, body? })` covers the page until the step ends. Both fields are plain text; keep `body` to a few lines.
 - **Step `id` and top-level `name` must match `^[A-Za-z0-9._-]+$`** and must not start with `.`.

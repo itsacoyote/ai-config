@@ -66,7 +66,7 @@ Per step: the caption is shown, `act` runs, the overlay and caption are re-appli
 | `h.type(locator, text)` | Scroll into view, then type with a 60 ms delay per key. Does not click first. |
 | `h.scroll(pixels)` | Mouse-wheel scroll in 50 px steps, then a 150 ms settle. Negative scrolls up. |
 | `h.highlight(locator, ms = 1200)` | Draw a ring around the element for `ms`, then remove it. |
-| `h.card({ title, body })` | Full-screen title card. `title` is a required non-empty string. Stays until the end of the current step, then is cleared automatically. Use title only; `body` is untested. |
+| `h.card({ title, body? })` | Full-screen title card. `title` is a required non-empty string; `body` is optional text under it, kept to a few lines. Stays until the end of the current step, then is cleared automatically. |
 
 Helpers throw on a missing or hidden element. The pointer, ring, caption and card live in a closed shadow root, so Playwright locators never match their text.
 
@@ -80,7 +80,7 @@ Written to the output directory:
 |------|------|---------|
 | `<name>.mp4` | success | H.264, yuv420p, 30 fps, no audio, `+faststart`. |
 | `timeline.json` | success | Step offsets, below. |
-| `<name>.webm` | failure only | Raw recording, path printed as `webm kept: <path>`. |
+| `<random id>.webm` | failure only | Raw recording; its path is printed as `webm kept: <path>`. |
 | `failure-<id>.png` | a step failed | Screenshot at the failure. |
 
 Failed runs leave the `.webm` and PNG behind; both can show logged-in content. Delete them.
@@ -94,7 +94,7 @@ Failed runs leave the `.webm` and PNG behind; both can show logged-in content. D
 }
 ```
 
-`start` and `end` are seconds from the start of the video. `caption` is present only when the step has one. The video runs slightly ahead of these numbers (at least 0.14 s observed), so sample frames at `start + 0.3` to `0.7` of `end - start`.
+`start` and `end` are seconds from the start of the video. `caption` is present only when the step has one. The video can run up to about 0.1 s ahead of these numbers, so sample frames at `start + 0.3` to `0.7` of `end - start`.
 
 The encode appends cloned final frames and cuts at the measured run length, because Playwright can drop a static tail from the webm.
 
