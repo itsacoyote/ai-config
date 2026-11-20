@@ -15,7 +15,7 @@ sh scripts/preflight.sh
 | `--out <dir>` | Output directory. Default: a new `browser-video-*` directory under the OS temp dir. |
 | `--check` | Verify Playwright resolves from the current directory and Chromium launches. Used by `preflight.sh`. |
 
-`--out` is refused if it is a symlink, not a directory, or not owned by the current user. A missing directory is created with mode `0700`.
+`--out` is refused if it is a symlink, not a directory, not owned by the current user, or writable by group or others. A missing directory is created with mode `0700`.
 
 Run from the project that has Playwright: it is resolved from the current directory (`playwright`, `@playwright/test`, then `playwright-core`), not from the skill directory.
 
@@ -40,7 +40,7 @@ An ES module (`.mjs`) with a default export, or named exports, of one object:
 | Field | Required | Rule |
 |-------|----------|------|
 | `name` | yes | Matches `^[A-Za-z0-9._-]+$`, no leading `.`. Output file is `<name>.mp4`. |
-| `url` | yes | Absolute `http:`, `https:` or `file:` URL, opened first. No credentials in it. |
+| `url` | yes | Absolute `http:`, `https:` or `file:` URL, opened first. A username or password in it is rejected (exit `2`). |
 | `viewport` | no | `{ width, height }`, both positive even integers. Default `1440x900`. Also the video size. |
 | `steps` | yes | Non-empty array. |
 
@@ -101,10 +101,10 @@ The encode appends cloned final frames and cuts at the measured run length, beca
 ## Extract a frame
 
 ```bash
-ffmpeg -nostdin -hide_banner -loglevel error -y -ss <seconds> -i <file>.mp4 -frames:v 1 <out>.png
+sh ${CLAUDE_SKILL_DIR}/scripts/frame.sh <file>.mp4 <seconds> <out>.png
 ```
 
-Pick `<seconds>` from `timeline.json`, mid-step. Open the PNG to look at it.
+Pick `<seconds>` from `timeline.json`, mid-step. Open the PNG to look at it. `frame.sh` accepts only an existing `.mp4`, a non-negative decimal number of seconds and a `.png` output (exit `2` otherwise), then runs `ffmpeg -nostdin -hide_banner -loglevel error -y -ss <seconds> -i <mp4> -frames:v 1 <png>`. It overwrites the PNG.
 
 ## Example
 
@@ -149,5 +149,5 @@ export default {
 Run it from the project:
 
 ```bash
-node ${CLAUDE_SKILL_DIR}/scripts/record.mjs steps.mjs --out /tmp/profile-video
+node ${CLAUDE_SKILL_DIR}/scripts/record.mjs steps.mjs
 ```
