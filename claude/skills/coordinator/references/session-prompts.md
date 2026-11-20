@@ -100,7 +100,7 @@ Branch <branch>, PR #123 (<open|draft|none>). What remains: <list>.
 
 ```text
 TICKET-1, step <n> of <m> in <quest name>: a fix is needed on PR #123.
-Problem: <checked fact>. Where: <file or area>.
+Problem: <checked fact, or the link to the review comment that raised it>. Where: <file or area>.
 Keep the fix to this problem. Report when it is committed.
 
 <standard closing lines>
