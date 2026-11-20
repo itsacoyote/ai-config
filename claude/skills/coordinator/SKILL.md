@@ -86,7 +86,7 @@ Follow [session-prompts.md](references/session-prompts.md) for every prompt and 
 
 - Match sessions as the `branch` field in [pr-watch.md](references/pr-watch.md#schema) says.
 - Resolve the name fresh from `ListAgents` on every send. Never store a send reference.
-- If two rows share the name, do not guess: rows cannot be tied to this repo. Give the note to the developer to paste.
+- If two rows share the name, do not guess: rows cannot be tied to this repo. Give the note to the developer to paste, and record status `given to developer`.
 - If no row matches, the session is closed: do not send. Give the developer the matching template from [session-prompts.md](references/session-prompts.md) with its command, and record status `not sent: session closed`.
 - Record every send in [`notes_sent`](references/pr-watch.md#notes_sent). When a later `[Cross-session delivery notice]` says a note was held or refused, set that entry's status to `held` or `refused` and put the note text in the reply for the developer to paste.
 - Notes never claim the developer approved anything, and never tell a session to push, sign, merge, or mark ready.
