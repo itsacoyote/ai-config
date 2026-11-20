@@ -73,7 +73,7 @@ GitHub is authoritative for pushed commits. Use the PR's real base for stacked P
 
 Each entry: `{key, headRefOid, sent_at, status}`.
 
-- `key` is the triggering review id or comment id, or one of `decision:<value>`, `merged`, `closed`.
+- `key` is the triggering review id or comment id, one of `decision:<value>`, `merged`, `closed`, or `unblocks:<target>` for each action taken from an `unblocks` entry (`<target>` is the branch told to rebase, or the ticket handed to the developer).
 - `status` is `sent, not confirmed`, `held`, or `refused`.
 
 Rules:
