@@ -1728,6 +1728,7 @@ reuse_pr_or_refuse() {
   fi
   refuse_hidden_index_state "$existing" refresh
 
+  note "updating pull request #$number in $existing"
   fetch_pr_head "$number" "$head_oid" || fetch_rc=$?
   case $fetch_rc in
     0) ;;
@@ -2253,6 +2254,7 @@ cmd_pr() {
   require_current_managed_path "$target"
   git -C "$primary" worktree add --detach --quiet "$target" HEAD ||
     fail_worktree_creation "$head_ref" "$target"
+  note "checking out pull request #$number into $target"
 
   if ((force || auto_force)); then
     if ((auto_force)); then

@@ -533,6 +533,7 @@ if [ "$1" = "api" ]; then
 fi
 if [ "$1" = "pr" ] && [ "$2" = "checkout" ]; then
   number=$3
+  printf 'gh stub: pr checkout %s\n' "$number" >&2
   meta="$CLWT_GH_PRS/$number"
   if [ ! -f "$meta" ]; then
     echo "could not resolve to a pull request with the number of $number" >&2
@@ -3236,6 +3237,16 @@ check_equals 'pr names the session PR-<number>, not after the head branch' \
   '--name PR-101' "$(launched args)"
 check 'pr runs the worktreeinclude copy in the new worktree' \
   test -f "$MANAGED/feat-from-pr/.env"
+# Catches the note being dropped or moved after gh's checkout. Does not catch
+# stream reordering when stdout and stderr go to different sinks; here they
+# share one captured stream.
+new_note_line=$(printf '%s\n' "$pr_out" | grep -nxF "clwt: checking out pull request #101 into $MANAGED/feat-from-pr" | head -1 | cut -d: -f1)
+new_marker_line=$(printf '%s\n' "$pr_out" | grep -nxF 'gh stub: pr checkout 101' | head -1 | cut -d: -f1)
+if [ -n "$new_note_line" ] && [ -n "$new_marker_line" ] && [ "$new_note_line" -lt "$new_marker_line" ]; then
+  ok 'pr names the new worktree before gh prints its checkout output'
+else
+  not_ok 'pr names the new worktree before gh prints its checkout output'
+fi
 check_equals 'the pr worktree is on the head ref branch' \
   'feat/from-pr' "$(cd "$MANAGED/feat-from-pr" && git symbolic-ref --short HEAD 2>/dev/null)"
 if printf '%s\n' "$pr_out" | grep -qi 'fork'; then
@@ -4120,7 +4131,20 @@ rm -f "$PRIMARY/.worktreeinclude"
 force_advance_pr_head feat/pr-reuse-refresh >/dev/null
 assert_pr_oid_matches_remote 801
 launch_reset
-check 'pr refreshes a clean reused worktree after a fast-forward' clwt pr 801
+reuse_out=$(clwt pr 801 2>&1)
+reuse_rc=$?
+check_equals 'pr refreshes a clean reused worktree after a fast-forward' '0' "$reuse_rc"
+
+# Catches the note being dropped, moved after the fetch, or naming the temporary
+# fetch worktree instead of the reused one. Does not catch stream reordering when
+# stdout and stderr go to different sinks; here they share one captured stream.
+reuse_note_line=$(printf '%s\n' "$reuse_out" | grep -nxF "clwt: updating pull request #801 in $MANAGED/feat-pr-reuse-refresh" | head -1 | cut -d: -f1)
+reuse_marker_line=$(printf '%s\n' "$reuse_out" | grep -nxF 'gh stub: pr checkout 801' | head -1 | cut -d: -f1)
+if [ -n "$reuse_note_line" ] && [ -n "$reuse_marker_line" ] && [ "$reuse_note_line" -lt "$reuse_marker_line" ]; then
+  ok 'pr names the reused worktree before gh fetches the pull request head'
+else
+  not_ok 'pr names the reused worktree before gh fetches the pull request head'
+fi
 check_equals 'fast-forward reuse launches the exact current PR head' \
   "$(sed -n 's/^headRefOid=//p' "$CLWT_GH_PRS/801")" \
   "$(git -C "$MANAGED/feat-pr-reuse-refresh" rev-parse HEAD)"
@@ -4482,6 +4506,18 @@ check_equals 'the equal-branch auto-reset lands at the pull request head' \
   "$new_head_705" "$(git -C "$PRIMARY" rev-parse feat/pr-auto-equal)"
 check_contains 'the auto-reset prints a note naming the branch' \
   'resetting feat/pr-auto-equal' "$equal_out"
+
+# Catches either note dropped or reordered relative to gh's checkout. Does not
+# catch stream reordering when stdout and stderr go to different sinks.
+auto_new_line=$(printf '%s\n' "$equal_out" | grep -nxF "clwt: checking out pull request #705 into $MANAGED/feat-pr-auto-equal" | head -1 | cut -d: -f1)
+auto_reset_line=$(printf '%s\n' "$equal_out" | grep -nF 'resetting feat/pr-auto-equal' | head -1 | cut -d: -f1)
+auto_marker_line=$(printf '%s\n' "$equal_out" | grep -nxF 'gh stub: pr checkout 705' | head -1 | cut -d: -f1)
+if [ -n "$auto_new_line" ] && [ -n "$auto_reset_line" ] && [ -n "$auto_marker_line" ] &&
+  [ "$auto_new_line" -lt "$auto_reset_line" ] && [ "$auto_reset_line" -lt "$auto_marker_line" ]; then
+  ok 'pr auto-force names the worktree, then the reset, before gh checks out'
+else
+  not_ok 'pr auto-force names the worktree, then the reset, before gh checks out'
+fi
 
 # "Strictly behind": the stale tracking ref (fetched once, at commit1) sits
 # BETWEEN the leftover local branch (commit0, older) and $REMOTE's real
