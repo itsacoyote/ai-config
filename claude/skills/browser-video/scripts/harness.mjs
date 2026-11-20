@@ -22,7 +22,11 @@ const DEFAULT_HIGHLIGHT_MS = 1200;
 // Runs inside the page, so it must stay self-contained: addInitScript and page.evaluate serialise it.
 export function installOverlay({ start, ringPad }) {
   const key = Symbol.for('browser-video');
-  if (window.top !== window || window[key]) return;
+  if (window.top !== window) return;
+  if (window[key]) {
+    window[key].reattach();
+    return;
+  }
 
   const host = document.createElement('browser-video-overlay');
   host.setAttribute('aria-hidden', 'true');
@@ -119,6 +123,10 @@ export function installOverlay({ start, ringPad }) {
     },
     clearCard() {
       card.style.display = 'none';
+    },
+    // A page can drop the host (document.open(), replacing <html>'s children) while this window object lives on.
+    reattach() {
+      if (!host.isConnected && document.documentElement) document.documentElement.append(host);
     },
   };
   Object.defineProperty(window, key, { value: api });

@@ -66,6 +66,13 @@ export default {
     },
     // Uncaptioned and after the scroll has finished: the same-scroll reference for the caption compares, away from any step edge.
     { id: 'settle', hold: 600, act: () => {} },
+    // The page drops the overlay host (as document.open() does); the end-of-act re-install must attach it again.
+    {
+      id: 'reattach',
+      caption: 'Back',
+      hold: 1200,
+      act: (page) => page.evaluate(() => document.querySelector('browser-video-overlay').remove()),
+    },
     // Last, so its caption is only cleared by the end-of-step clear: no later step resets it.
     { id: 'finish', caption: 'Done', hold: 1200, act: () => {} },
   ],

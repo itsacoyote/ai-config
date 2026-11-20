@@ -268,6 +268,7 @@ frame_at "$OVMP4" "$(time_of "$OV" type 0.5)" "$FR/type.png"
 frame_at "$OVMP4" "$(time_of "$OV" card 0.5)" "$FR/card.png"
 frame_at "$OVMP4" "$(time_of "$OV" card-body 0.5)" "$FR/card-body.png"
 frame_at "$OVMP4" "$(time_of "$OV" save 0.5)" "$FR/save.png"
+frame_at "$OVMP4" "$(time_of "$OV" reattach 0.5)" "$FR/reattached.png"
 # The video leads timeline.json by up to about 0.1 s on Linux, so sample mid-step: a point within 0.1 s of a step edge shows the neighbouring step.
 frame_at "$OVMP4" "$(time_of "$OV" settle 0.5)" "$FR/settled.png"
 frame_at "$OVMP4" "$(time_of "$OV" finish 0.5)" "$FR/finish.png"
@@ -291,6 +292,9 @@ check_diff "control: the last step's caption is drawn during the step" \
   "$FR/settled.png" "$FR/finish.png" "$CAPTION_CROP" gt "$CAPTION_MIN"
 check_diff "caption is cleared at the end of its step" \
   "$FR/settled.png" "$FR/final.png" "$CAPTION_CROP" lt "$SAME_MAX"
+
+check_diff "the overlay is attached again after the page removes its host (the caption is drawn)" \
+  "$FR/settled.png" "$FR/reattached.png" "$CAPTION_CROP" gt "$CAPTION_MIN"
 
 check_diff "control: a region away from caption and pointer is the same in both frames" \
   "$FR/idle-late.png" "$FR/aim.png" "$AWAY_CROP" lt "$SAME_MAX"
