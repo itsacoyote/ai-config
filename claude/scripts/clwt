@@ -1612,6 +1612,7 @@ reuse_pr_or_refuse() {
     die "worktree has uncommitted or untracked work, refusing to refresh: $existing"
   fi
 
+  note "updating pull request #$number in $existing"
   local fetch_rc=0
   fetch_pr_head "$number" "$head_oid" || fetch_rc=$?
   case $fetch_rc in
@@ -2077,6 +2078,7 @@ cmd_pr() {
   # Detached, because `gh pr checkout` is what decides the branch — for a fork it
   # may pick a local name of its own.
   git worktree add --detach --quiet "$target" HEAD
+  note "checking out pull request #$number into $target"
   # Two literal invocations for the same "${rest[@]}"-under-set-u reason as the
   # arg-parsing pre-pass above — `gh pr checkout "$number" "${arr[@]}"` with an
   # empty $arr errors on bash older than 4.4.
