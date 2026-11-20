@@ -6,6 +6,9 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const POINTER_START = { x: 48, y: 48 };
+const RING_PAD_PX = 6;
+// installOverlay runs in the page, so its inputs travel as an argument rather than as module constants.
+const OVERLAY_ARGS = { start: POINTER_START, ringPad: RING_PAD_PX };
 const ACTION_TIMEOUT_MS = 5000;
 const GLIDE_MIN_MS = 250;
 const GLIDE_MAX_MS = 900;
@@ -17,7 +20,7 @@ const SCROLL_SETTLE_MS = 150;
 const DEFAULT_HIGHLIGHT_MS = 1200;
 
 // Runs inside the page, so it must stay self-contained: addInitScript and page.evaluate serialise it.
-export function installOverlay({ start }) {
+export function installOverlay({ start, ringPad }) {
   const key = Symbol.for('browser-video');
   if (window.top !== window || window[key]) return;
 
@@ -98,11 +101,10 @@ export function installOverlay({ start }) {
         ring.style.display = 'none';
         return;
       }
-      const pad = 6;
-      ring.style.left = `${rect.x - pad}px`;
-      ring.style.top = `${rect.y - pad}px`;
-      ring.style.width = `${rect.width + pad * 2}px`;
-      ring.style.height = `${rect.height + pad * 2}px`;
+      ring.style.left = `${rect.x - ringPad}px`;
+      ring.style.top = `${rect.y - ringPad}px`;
+      ring.style.width = `${rect.width + ringPad * 2}px`;
+      ring.style.height = `${rect.height + ringPad * 2}px`;
       ring.style.display = 'block';
     },
     showCard(title, body) {
@@ -131,7 +133,7 @@ export function installOverlay({ start }) {
 }
 
 export function addOverlay(context) {
-  return context.addInitScript(installOverlay, { start: POINTER_START });
+  return context.addInitScript(installOverlay, OVERLAY_ARGS);
 }
 
 // Node owns the pointer position: a new document starts at POINTER_START until ensureOverlay restores it.
@@ -141,7 +143,7 @@ const callOverlay = (page, method, ...args) =>
   page.evaluate(([name, rest]) => window[Symbol.for('browser-video')]?.[name](...rest), [method, args]);
 
 export async function ensureOverlay(page) {
-  await page.evaluate(installOverlay, { start: POINTER_START });
+  await page.evaluate(installOverlay, OVERLAY_ARGS);
   const at = pointerAt.get(page) ?? POINTER_START;
   await callOverlay(page, 'movePointer', at.x, at.y, 0);
 }
