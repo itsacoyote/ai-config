@@ -225,13 +225,14 @@ async function record(stepsFile, outArg) {
     return 1;
   }
 
-  const context = await browser.newContext({ viewport, recordVideo: { dir: outDir, size: viewport } });
+  let context;
   let page;
   let failed = false;
   const timeline = [];
   let webm;
   let totalSeconds = 0;
   try {
+    context = await browser.newContext({ viewport, recordVideo: { dir: outDir, size: viewport } });
     await addOverlay(context);
     page = await context.newPage();
     // Video recording starts when the page is created, so timeline offsets count from here.
@@ -275,7 +276,7 @@ async function record(stepsFile, outArg) {
     report(`error: ${error.message}`);
   } finally {
     // The webm is only complete once the context is closed.
-    await context.close().catch(() => {});
+    await context?.close().catch(() => {});
     if (page) webm = await page.video()?.path().catch(() => undefined);
     await browser.close().catch(() => {});
   }
