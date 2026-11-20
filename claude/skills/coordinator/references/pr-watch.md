@@ -88,7 +88,7 @@ Free text naming what can start and which session must rebase (example in the sc
 
 - Keep the rule text. Never overwrite it.
 - Record what was acted on as a `notes_sent` entry.
-- A merge with an `unblocks` entry produces two outputs: a note to the waiting session, and the `clwt` command plus full prompt for the developer (see [session-prompts.md](session-prompts.md)).
+- What a merge with an `unblocks` entry must produce is in `SKILL.md` (Main loop).
 
 ## Turn write order
 
