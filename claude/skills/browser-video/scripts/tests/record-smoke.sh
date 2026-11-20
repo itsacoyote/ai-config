@@ -306,6 +306,19 @@ else
   not_ok "fails with exit 1 and writes failure-<id>.png when highlight targets a missing element (status $STATUS: $ERR)"
 fi
 
+# ---- screencast frames on a static page ---------------------------------------
+section "static page screencast"
+# Chromium sends a screencast frame only when the page repaints. Measured over 1.5 s on the fixture page:
+# 31 frames with the overlay's repainting pixel, 1 without. The webm starts at its first frame, so a quiet
+# opening step is cut from the video when no frames flow.
+MIN_STATIC_FRAMES=10
+FRAMES="$(cd "$PROJECT" && node "$HERE/screencast-frames.mjs" "$FIX/page.html" 2>/dev/null)"
+if [ -n "$FRAMES" ] && [ "$FRAMES" -ge "$MIN_STATIC_FRAMES" ] 2>/dev/null; then
+  ok "a static page with the overlay keeps emitting screencast frames ($FRAMES)"
+else
+  not_ok "a static page with the overlay keeps emitting screencast frames (got: ${FRAMES:-nothing}, need $MIN_STATIC_FRAMES)"
+fi
+
 # ---- invalid steps files ----------------------------------------------------
 # Run from BARE, where Playwright cannot resolve: exit 2 (not 1) proves the
 # validation ran before any attempt to load Playwright or launch a browser.
