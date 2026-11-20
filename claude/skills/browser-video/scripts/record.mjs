@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { createHelpers } from './harness.mjs';
+import { addOverlay, clearCard, createHelpers, ensureOverlay, setCaption } from './harness.mjs';
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 900 };
 const DEFAULT_HOLD_MS = 1500;
@@ -119,6 +119,9 @@ function validateSteps(def) {
     if (typeof step.act !== 'function') fail(`step "${step.id}": "act" must be a function`);
     if (step.hold !== undefined && !(Number.isFinite(step.hold) && step.hold >= 0)) {
       fail(`step "${step.id}": "hold" must be a finite number >= 0`);
+    }
+    if (step.caption !== undefined && (typeof step.caption !== 'string' || step.caption === '')) {
+      fail(`step "${step.id}": "caption" must be a non-empty string`);
     }
   });
   return { name, url, viewport: { width: viewport.width, height: viewport.height }, steps };
@@ -229,6 +232,7 @@ async function record(stepsFile, outArg) {
   let webm;
   let totalSeconds = 0;
   try {
+    await addOverlay(context);
     page = await context.newPage();
     // Video recording starts when the page is created, so timeline offsets count from here.
     const t0 = performance.now();
@@ -239,9 +243,15 @@ async function record(stepsFile, outArg) {
     for (const step of steps) {
       const startSeconds = elapsedSeconds();
       try {
+        await setCaption(page, step.caption);
         await step.act(page, h);
+        // A navigation in act() replaces the document, so the overlay and caption are re-applied.
+        await ensureOverlay(page);
+        await setCaption(page, step.caption);
         const remainingMs = (step.hold ?? DEFAULT_HOLD_MS) - (elapsedSeconds() - startSeconds) * 1000;
         if (remainingMs > 0) await sleep(remainingMs);
+        await setCaption(page, null);
+        await clearCard(page);
       } catch (error) {
         failed = true;
         report(`error: step "${step.id}" failed: ${error.message}`);

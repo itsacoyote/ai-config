@@ -55,6 +55,48 @@ frame_at() { ffmpeg -nostdin -hide_banner -loglevel error -y -ss "$2" -i "$1" -f
 
 probe() { ffprobe -v error -select_streams v:0 -show_entries "$2" -of default=noprint_wrappers=1:nokey=1 "$1"; }
 
+# Seconds at <fraction> of step <id>'s span in <outdir>/timeline.json.
+time_of() {
+  node -e '
+const { steps } = JSON.parse(require("fs").readFileSync(process.argv[1] + "/timeline.json", "utf8"));
+const s = steps.find((x) => x.id === process.argv[2]);
+process.stdout.write(s ? (s.start + (s.end - s.start) * Number(process.argv[3])).toFixed(3) : "-1");
+' "$1" "$2" "$3"
+}
+
+# Value recorded by the overlay fixture's act functions, or <missing>.
+obs() {
+  node -e '
+let lines = [];
+try { lines = require("fs").readFileSync(process.argv[1], "utf8").trim().split("\n").map((l) => JSON.parse(l)); } catch {}
+const hit = lines.filter((l) => l.key === process.argv[2]).pop();
+process.stdout.write(hit === undefined ? "<missing>" : String(hit.value));
+' "$OBS_FILE" "$1"
+}
+
+# Crops are w:h:x:y. Output is captured before matching so a failed ffmpeg shows up as an empty value.
+luma_stat() { # <png> <crop> <YMIN|YMAX|YAVG>
+  local text
+  text="$(ffmpeg -nostdin -hide_banner -loglevel error -i "$1" -vf "crop=$2,signalstats,metadata=print:file=-" -f null - 2>&1)"
+  printf '%s\n' "$text" | sed -n "s/^lavfi.signalstats.$3=//p" | head -n 1
+}
+luma_range() { # <png> <crop>
+  local lo hi
+  lo="$(luma_stat "$1" "$2" YMIN)"; hi="$(luma_stat "$1" "$2" YMAX)"
+  [ -n "$lo" ] && [ -n "$hi" ] && awk -v lo="$lo" -v hi="$hi" 'BEGIN { print hi - lo }'
+}
+# Mean absolute luma difference of the same crop in two frames: ~0 for identical content.
+diff_avg() { # <png a> <png b> <crop>
+  local text
+  text="$(ffmpeg -nostdin -hide_banner -loglevel error -i "$1" -i "$2" \
+    -filter_complex "[0:v]crop=$3[a];[1:v]crop=$3[b];[a][b]blend=all_mode=difference,signalstats,metadata=print:file=-" \
+    -f null - 2>&1)"
+  printf '%s\n' "$text" | sed -n 's/^lavfi.signalstats.YAVG=//p' | head -n 1
+}
+# An empty number never passes either comparison.
+gt() { [ -n "$1" ] && awk -v a="$1" -v b="$2" 'BEGIN { exit !(a > b) }'; }
+lt() { [ -n "$1" ] && awk -v a="$1" -v b="$2" 'BEGIN { exit !(a < b) }'; }
+
 # ---- happy path -------------------------------------------------------------
 section "fixture flow"
 OUTDIR="$TMP/out/nested"
@@ -139,6 +181,114 @@ else
   not_ok "on a failing step stdout does not end with an .mp4 path and no mp4 is written"
 fi
 
+# ---- overlay: pointer, captions, cards, paced helpers -----------------------
+section "overlay flow"
+OV="$TMP/overlay"
+OBS_FILE="$TMP/obs.jsonl"
+rm -f "$OBS_FILE"
+BV_OBS="$OBS_FILE" run_in "$PROJECT" "$FIX/steps-overlay.mjs" --out "$OV"
+if [ "$STATUS" -eq 0 ]; then ok "overlay fixture run exits 0"; else not_ok "overlay fixture run exits 0 (got $STATUS: $ERR)"; fi
+
+[ "$(obs label)" = "Saved" ] \
+  && ok "click through the overlay changes the page (button label updates)" \
+  || not_ok "click through the overlay changes the page (button label updates) (got: $(obs label))"
+
+[ "$(obs typed)" = "Ada Lovelace" ] \
+  && ok "type enters the full text into the input" \
+  || not_ok "type enters the full text into the input (got: $(obs typed))"
+
+# Playwright text locators must not see the closed shadow root, or a caption that repeats page text breaks strict locators.
+[ "$(obs captionCount)" = "1" ] \
+  && ok "a caption whose text equals the button label does not change what getByText resolves to (count stays 1)" \
+  || not_ok "a caption whose text equals the button label does not change what getByText resolves to (count stays 1) (got: $(obs captionCount))"
+
+[ "$(obs cardTextCount)" = "0" ] \
+  && ok "card text is invisible to page locators" \
+  || not_ok "card text is invisible to page locators (got: $(obs cardTextCount))"
+
+[ "$(obs valueAfterCard)" = "Ada Lovelace" ] \
+  && ok "page state set before a card survives it (input value still present after the card step)" \
+  || not_ok "page state set before a card survives it (input value still present after the card step) (got: $(obs valueAfterCard))"
+
+[ "$(obs scrolled)" = "true" ] \
+  && ok "scroll moves the page" \
+  || not_ok "scroll moves the page (got: $(obs scrolled))"
+
+# Frames. idle and aim show identical page content, so a diff between them can only come from the caption or the pointer.
+OVMP4="$OV/overlay-flow.mp4"
+FR="$TMP/frames"; mkdir -p "$FR"
+frame_at "$OVMP4" "$(time_of "$OV" idle 0.3)" "$FR/idle-early.png"
+frame_at "$OVMP4" "$(time_of "$OV" idle 0.7)" "$FR/idle-late.png"
+frame_at "$OVMP4" "$(time_of "$OV" aim 0.5)" "$FR/aim.png"
+frame_at "$OVMP4" "$(time_of "$OV" type 0.5)" "$FR/type.png"
+frame_at "$OVMP4" "$(time_of "$OV" card 0.5)" "$FR/card.png"
+frame_at "$OVMP4" "$(time_of "$OV" save 0.5)" "$FR/save.png"
+if [ -n "${BROWSER_VIDEO_KEEP_FRAMES:-}" ]; then
+  mkdir -p "$BROWSER_VIDEO_KEEP_FRAMES" && cp "$FR"/*.png "$BROWSER_VIDEO_KEEP_FRAMES"/
+fi
+
+CAPTION_CROP="400:100:520:780"
+# Positive control: two uncaptioned frames of one step. Without it, a noisy encode could make the compare below pass alone.
+D="$(diff_avg "$FR/idle-early.png" "$FR/idle-late.png" "$CAPTION_CROP")"
+lt "$D" 2 && ok "control: caption region of two frames of one uncaptioned step is the same (diff $D)" \
+  || not_ok "control: caption region of two frames of one uncaptioned step is the same (diff $D)"
+
+D="$(diff_avg "$FR/idle-late.png" "$FR/aim.png" "$CAPTION_CROP")"
+gt "$D" 20 && ok "caption-bar region of a captioned step differs from the same region of an uncaptioned step (diff $D)" \
+  || not_ok "caption-bar region of a captioned step differs from the same region of an uncaptioned step (diff $D)"
+
+D="$(diff_avg "$FR/idle-late.png" "$FR/type.png" "$CAPTION_CROP")"
+lt "$D" 2 && ok "an uncaptioned step after a captioned one shows no caption (diff $D)" \
+  || not_ok "an uncaptioned step after a captioned one shows no caption (diff $D)"
+
+# The last step has no successor to reset the caption, so only the end-of-step clear can remove it.
+OVDUR="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OVMP4" 2>&1)"
+frame_at "$OVMP4" "$(awk -v d="$OVDUR" 'BEGIN { printf "%.3f", d - 0.2 }')" "$FR/final.png"
+frame_at "$OVMP4" "$(time_of "$OV" scroll 0.9)" "$FR/scrolled.png"
+frame_at "$OVMP4" "$(time_of "$OV" finish 0.5)" "$FR/finish.png"
+D="$(diff_avg "$FR/scrolled.png" "$FR/finish.png" "$CAPTION_CROP")"
+gt "$D" 20 && ok "control: the last step's caption is drawn during the step (diff $D)" \
+  || not_ok "control: the last step's caption is drawn during the step (diff $D)"
+D="$(diff_avg "$FR/scrolled.png" "$FR/final.png" "$CAPTION_CROP")"
+lt "$D" 2 && ok "caption is cleared at the end of its step (diff $D)" \
+  || not_ok "caption is cleared at the end of its step (diff $D)"
+
+POINTER_CROP="36:40:1016:246"
+D="$(diff_avg "$FR/idle-late.png" "$FR/aim.png" "300:100:500:500")"
+lt "$D" 2 && ok "control: a region away from caption and pointer is the same in both frames (diff $D)" \
+  || not_ok "control: a region away from caption and pointer is the same in both frames (diff $D)"
+
+D="$(diff_avg "$FR/idle-late.png" "$FR/aim.png" "$POINTER_CROP")"
+gt "$D" 8 && ok "region around the pointer target differs from the same region in a frame with the pointer elsewhere (diff $D)" \
+  || not_ok "region around the pointer target differs from the same region in a frame with the pointer elsewhere (diff $D)"
+
+D="$(diff_avg "$FR/idle-late.png" "$FR/card.png" "400:200:520:350")"
+gt "$D" 30 && ok "centre region of the card frame differs from the page frame (diff $D)" \
+  || not_ok "centre region of the card frame differs from the page frame (diff $D)"
+
+TITLE_CROP="400:90:520:405"
+R="$(luma_range "$FR/card.png" "$TITLE_CROP")"
+gt "$R" 100 && ok "card title region is not a single flat colour (text is drawn, range $R)" \
+  || not_ok "card title region is not a single flat colour (text is drawn, range $R)"
+
+H1_CROP="600:100:40:40"
+R="$(luma_range "$FR/idle-late.png" "$H1_CROP")"
+gt "$R" 100 && ok "control: the page heading region has visible text on a page frame (range $R)" \
+  || not_ok "control: the page heading region has visible text on a page frame (range $R)"
+R="$(luma_range "$FR/card.png" "$H1_CROP")"
+lt "$R" 12 && ok "card hides the page for its step (heading region is flat, range $R)" \
+  || not_ok "card hides the page for its step (heading region is flat, range $R)"
+R="$(luma_range "$FR/save.png" "$H1_CROP")"
+gt "$R" 100 && ok "card hides the page for its step only: the next step shows the real page (range $R)" \
+  || not_ok "card hides the page for its step only: the next step shows the real page (range $R)"
+
+run_in "$PROJECT" "$FIX/steps-highlight-missing.mjs" --out "$TMP/hl-failed"
+if [ "$STATUS" -eq 1 ] && [ -s "$TMP/hl-failed/failure-no-highlight-target.png" ]; then
+  ok "fails with exit 1 and writes failure-<id>.png when highlight targets a missing element"
+else
+  not_ok "fails with exit 1 and writes failure-<id>.png when highlight targets a missing element (status $STATUS: $ERR)"
+fi
+
 # ---- invalid steps files ----------------------------------------------------
 # Run from BARE, where Playwright cannot resolve: exit 2 (not 1) proves the
 # validation ran before any attempt to load Playwright or launch a browser.
@@ -155,6 +305,7 @@ expect_usage_error "rejects a relative url" invalid-rel-url.mjs
 expect_usage_error "rejects a name with a path separator" invalid-bad-name.mjs
 expect_usage_error "rejects an odd viewport width" invalid-odd-viewport.mjs
 expect_usage_error "rejects a step id with a path separator" invalid-bad-step-id.mjs
+expect_usage_error "rejects a caption that is not a string" invalid-bad-caption.mjs
 
 # ---- --out and error-output safety -------------------------------------------
 section "out dir and redaction"
