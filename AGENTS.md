@@ -106,6 +106,8 @@ bash claude/scripts/tests/beads-gate-test.sh
 bash claude/scripts/tests/bash-guard-test.sh
 bash claude/scripts/tests/wt-status-test.sh
 bash claude/scripts/tests/statusline-test.sh
+bash claude/skills/browser-video/scripts/tests/preflight-test.sh
+BROWSER_VIDEO_PROJECT=<dir> bash claude/skills/browser-video/scripts/tests/record-smoke.sh   # <dir> has Playwright installed
 ```
 
 Build the world the script needs under `mktemp -d` with a fake `$HOME` — a bare remote,

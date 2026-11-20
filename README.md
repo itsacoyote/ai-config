@@ -95,6 +95,7 @@ Skills marked **`/cmd`** are invoked explicitly by you (`/name`); the rest load 
 | `deprecation-and-migration` | Remove and migrate old systems safely |
 | `ci-cd-and-automation` | Build/deploy pipelines and quality gates |
 | `browser-testing-with-devtools` | Verify UI against a real browser (needs the chrome-devtools MCP) |
+| `browser-video` | Record a scripted browser flow to an MP4 with a visible pointer, captions and title cards (Playwright and ffmpeg) |
 
 ### Technology specialists
 
