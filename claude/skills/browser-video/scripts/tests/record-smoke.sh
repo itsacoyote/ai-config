@@ -74,28 +74,50 @@ process.stdout.write(hit === undefined ? "<missing>" : String(hit.value));
 ' "$OBS_FILE" "$1"
 }
 
-# Crops are w:h:x:y. Output is captured before matching so a failed ffmpeg shows up as an empty value.
-luma_stat() { # <png> <crop> <YMIN|YMAX|YAVG>
-  local text
-  text="$(ffmpeg -nostdin -hide_banner -loglevel error -i "$1" -vf "crop=$2,signalstats,metadata=print:file=-" -f null - 2>&1)"
-  printf '%s\n' "$text" | sed -n "s/^lavfi.signalstats.$3=//p" | head -n 1
-}
-luma_range() { # <png> <crop>
-  local lo hi
-  lo="$(luma_stat "$1" "$2" YMIN)"; hi="$(luma_stat "$1" "$2" YMAX)"
-  [ -n "$lo" ] && [ -n "$hi" ] && awk -v lo="$lo" -v hi="$hi" 'BEGIN { print hi - lo }'
+# Crops are w:h:x:y. stat_of prints "YMIN YMAX YAVG" of the filtered frame, or nothing when ffmpeg failed
+# (output is captured before matching, so an empty value can never satisfy a comparison below).
+stat_of() { # <filtergraph over [0:v] (and [1:v])> <png>...
+  local graph="$1" text input args=()
+  shift
+  for input in "$@"; do args+=(-i "$input"); done
+  text="$(ffmpeg -nostdin -hide_banner -loglevel error "${args[@]}" \
+    -filter_complex "$graph,signalstats,metadata=print:file=-" -f null - 2>&1)"
+  printf '%s\n' "$text" | awk -F= '
+    /^lavfi.signalstats.YMIN=/ { lo = $2 }
+    /^lavfi.signalstats.YMAX=/ { hi = $2 }
+    /^lavfi.signalstats.YAVG=/ { avg = $2 }
+    END { if (lo != "" && hi != "" && avg != "") print lo, hi, avg }'
 }
 # Mean absolute luma difference of the same crop in two frames: ~0 for identical content.
 diff_avg() { # <png a> <png b> <crop>
-  local text
-  text="$(ffmpeg -nostdin -hide_banner -loglevel error -i "$1" -i "$2" \
-    -filter_complex "[0:v]crop=$3[a];[1:v]crop=$3[b];[a][b]blend=all_mode=difference,signalstats,metadata=print:file=-" \
-    -f null - 2>&1)"
-  printf '%s\n' "$text" | sed -n 's/^lavfi.signalstats.YAVG=//p' | head -n 1
+  local s
+  s="$(stat_of "[0:v]crop=$3[a];[1:v]crop=$3[b];[a][b]blend=all_mode=difference" "$1" "$2")"
+  [ -n "$s" ] && printf '%s\n' "$s" | awk '{ print $3 }'
+}
+luma_range() { # <png> <crop>
+  local s
+  s="$(stat_of "[0:v]crop=$2" "$1")"
+  [ -n "$s" ] && printf '%s\n' "$s" | awk '{ print $2 - $1 }'
 }
 # An empty number never passes either comparison.
 gt() { [ -n "$1" ] && awk -v a="$1" -v b="$2" 'BEGIN { exit !(a > b) }'; }
 lt() { [ -n "$1" ] && awk -v a="$1" -v b="$2" 'BEGIN { exit !(a < b) }'; }
+
+check_eq() { # <name> <obs key> <expected>
+  local got
+  got="$(obs "$2")"
+  if [ "$got" = "$3" ]; then ok "$1"; else not_ok "$1 (got: $got)"; fi
+}
+check_diff() { # <name> <png a> <png b> <crop> <lt|gt> <bound>
+  local v
+  v="$(diff_avg "$2" "$3" "$4")"
+  if "$5" "$v" "$6"; then ok "$1 (diff $v)"; else not_ok "$1 (diff $v)"; fi
+}
+check_range() { # <name> <png> <crop> <lt|gt> <bound>
+  local v
+  v="$(luma_range "$2" "$3")"
+  if "$4" "$v" "$5"; then ok "$1 (range $v)"; else not_ok "$1 (range $v)"; fi
+}
 
 # ---- happy path -------------------------------------------------------------
 section "fixture flow"
@@ -189,32 +211,38 @@ rm -f "$OBS_FILE"
 BV_OBS="$OBS_FILE" run_in "$PROJECT" "$FIX/steps-overlay.mjs" --out "$OV"
 if [ "$STATUS" -eq 0 ]; then ok "overlay fixture run exits 0"; else not_ok "overlay fixture run exits 0 (got $STATUS: $ERR)"; fi
 
-[ "$(obs label)" = "Saved" ] \
-  && ok "click through the overlay changes the page (button label updates)" \
-  || not_ok "click through the overlay changes the page (button label updates) (got: $(obs label))"
-
-[ "$(obs typed)" = "Ada Lovelace" ] \
-  && ok "type enters the full text into the input" \
-  || not_ok "type enters the full text into the input (got: $(obs typed))"
-
+check_eq "click through the overlay changes the page (button label updates)" label "Saved"
+check_eq "type enters the full text into the input" typed "Ada Lovelace"
 # Playwright text locators must not see the closed shadow root, or a caption that repeats page text breaks strict locators.
-[ "$(obs captionCount)" = "1" ] \
-  && ok "a caption whose text equals the button label does not change what getByText resolves to (count stays 1)" \
-  || not_ok "a caption whose text equals the button label does not change what getByText resolves to (count stays 1) (got: $(obs captionCount))"
+check_eq "a caption whose text equals the button label does not change what getByText resolves to (count stays 1)" captionCount 1
+check_eq "card text is invisible to page locators" cardTextCount 0
+check_eq "page state set before a card survives it (input value still present after the card step)" valueAfterCard "Ada Lovelace"
+check_eq "scroll moves the page" scrolled true
 
-[ "$(obs cardTextCount)" = "0" ] \
-  && ok "card text is invisible to page locators" \
-  || not_ok "card text is invisible to page locators (got: $(obs cardTextCount))"
+# Thresholds, each set from a measured run with a wide margin. Mean luma difference is 0..255, range is YMAX-YMIN.
+SAME_MAX=2         # identical content measured 0 to 0.4 (static h264 noise), so about 5x margin
+CAPTION_MIN=20     # caption bar over the page measured 33.6 to 60.6, so at least 1.6x margin
+POINTER_MIN=8      # pointer arrow in the small crop measured 29.4, so about 3.7x margin
+CARD_MIN=30        # opaque dark card over a white page measured 168 to 175, so about 5x margin
+TEXT_RANGE_MIN=100 # white text on dark, or black on white, measured 211 to 219, so about 2x margin
+FLAT_RANGE_MAX=12  # a flat card region measured 0, so margin for encode noise
 
-[ "$(obs valueAfterCard)" = "Ada Lovelace" ] \
-  && ok "page state set before a card survives it (input value still present after the card step)" \
-  || not_ok "page state set before a card survives it (input value still present after the card step) (got: $(obs valueAfterCard))"
+# Crops are w:h:x:y in the 1440x900 fixture viewport. Each one depends on a fixture or overlay value:
+#   CAPTION_CROP   caption bar: centred (x 720), 40px above the bottom edge, about 70px tall, over #save (left 600, top 800)
+#   POINTER_CROP   the pointer tip rests on the centre of #inert (page.html: left 900, top 200, 240x100)
+#   AWAY_CROP      blank page between #name (top 400) and #save (top 800), clear of caption and pointer
+#   CARD_CROP      middle of the viewport, where the card centres its title
+#   TITLE_CROP     the one-line title of the title-only card (centred at y 450)
+#   H1_CROP        the page heading, top left; the pointer start (48, 48) sits inside it in page frames
+INERT_CX=$((900 + 240 / 2)); INERT_CY=$((200 + 100 / 2))
+CAPTION_CROP="400:100:520:780"
+POINTER_CROP="36:40:$((INERT_CX - 4)):$((INERT_CY - 4))"
+AWAY_CROP="300:100:500:500"
+CARD_CROP="400:200:520:350"
+TITLE_CROP="400:90:520:405"
+H1_CROP="600:100:40:40"
 
-[ "$(obs scrolled)" = "true" ] \
-  && ok "scroll moves the page" \
-  || not_ok "scroll moves the page (got: $(obs scrolled))"
-
-# Frames. idle and aim show identical page content, so a diff between them can only come from the caption or the pointer.
+# idle and aim show identical page content, so a diff between them can only come from the caption or the pointer.
 OVMP4="$OV/overlay-flow.mp4"
 FR="$TMP/frames"; mkdir -p "$FR"
 frame_at "$OVMP4" "$(time_of "$OV" idle 0.3)" "$FR/idle-early.png"
@@ -223,64 +251,36 @@ frame_at "$OVMP4" "$(time_of "$OV" aim 0.5)" "$FR/aim.png"
 frame_at "$OVMP4" "$(time_of "$OV" type 0.5)" "$FR/type.png"
 frame_at "$OVMP4" "$(time_of "$OV" card 0.5)" "$FR/card.png"
 frame_at "$OVMP4" "$(time_of "$OV" save 0.5)" "$FR/save.png"
-if [ -n "${BROWSER_VIDEO_KEEP_FRAMES:-}" ]; then
-  mkdir -p "$BROWSER_VIDEO_KEEP_FRAMES" && cp "$FR"/*.png "$BROWSER_VIDEO_KEEP_FRAMES"/
-fi
-
-CAPTION_CROP="400:100:520:780"
-# Positive control: two uncaptioned frames of one step. Without it, a noisy encode could make the compare below pass alone.
-D="$(diff_avg "$FR/idle-early.png" "$FR/idle-late.png" "$CAPTION_CROP")"
-lt "$D" 2 && ok "control: caption region of two frames of one uncaptioned step is the same (diff $D)" \
-  || not_ok "control: caption region of two frames of one uncaptioned step is the same (diff $D)"
-
-D="$(diff_avg "$FR/idle-late.png" "$FR/aim.png" "$CAPTION_CROP")"
-gt "$D" 20 && ok "caption-bar region of a captioned step differs from the same region of an uncaptioned step (diff $D)" \
-  || not_ok "caption-bar region of a captioned step differs from the same region of an uncaptioned step (diff $D)"
-
-D="$(diff_avg "$FR/idle-late.png" "$FR/type.png" "$CAPTION_CROP")"
-lt "$D" 2 && ok "an uncaptioned step after a captioned one shows no caption (diff $D)" \
-  || not_ok "an uncaptioned step after a captioned one shows no caption (diff $D)"
-
-# The last step has no successor to reset the caption, so only the end-of-step clear can remove it.
-OVDUR="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$OVMP4" 2>&1)"
-frame_at "$OVMP4" "$(awk -v d="$OVDUR" 'BEGIN { printf "%.3f", d - 0.2 }')" "$FR/final.png"
 frame_at "$OVMP4" "$(time_of "$OV" scroll 0.9)" "$FR/scrolled.png"
 frame_at "$OVMP4" "$(time_of "$OV" finish 0.5)" "$FR/finish.png"
-D="$(diff_avg "$FR/scrolled.png" "$FR/finish.png" "$CAPTION_CROP")"
-gt "$D" 20 && ok "control: the last step's caption is drawn during the step (diff $D)" \
-  || not_ok "control: the last step's caption is drawn during the step (diff $D)"
-D="$(diff_avg "$FR/scrolled.png" "$FR/final.png" "$CAPTION_CROP")"
-lt "$D" 2 && ok "caption is cleared at the end of its step (diff $D)" \
-  || not_ok "caption is cleared at the end of its step (diff $D)"
+# 1.2 of the 1.2 s hold is 0.24 s past the step end, inside the 0.5 s trailing hold.
+frame_at "$OVMP4" "$(time_of "$OV" finish 1.2)" "$FR/final.png"
 
-POINTER_CROP="36:40:1016:246"
-D="$(diff_avg "$FR/idle-late.png" "$FR/aim.png" "300:100:500:500")"
-lt "$D" 2 && ok "control: a region away from caption and pointer is the same in both frames (diff $D)" \
-  || not_ok "control: a region away from caption and pointer is the same in both frames (diff $D)"
+# Positive control: two uncaptioned frames of one step. Without it, a noisy encode could make the compares below pass alone.
+check_diff "control: caption region of two frames of one uncaptioned step is the same" \
+  "$FR/idle-early.png" "$FR/idle-late.png" "$CAPTION_CROP" lt "$SAME_MAX"
+check_diff "caption-bar region of a captioned step differs from the same region of an uncaptioned step" \
+  "$FR/idle-late.png" "$FR/aim.png" "$CAPTION_CROP" gt "$CAPTION_MIN"
+check_diff "an uncaptioned step after a captioned one shows no caption" \
+  "$FR/idle-late.png" "$FR/type.png" "$CAPTION_CROP" lt "$SAME_MAX"
 
-D="$(diff_avg "$FR/idle-late.png" "$FR/aim.png" "$POINTER_CROP")"
-gt "$D" 8 && ok "region around the pointer target differs from the same region in a frame with the pointer elsewhere (diff $D)" \
-  || not_ok "region around the pointer target differs from the same region in a frame with the pointer elsewhere (diff $D)"
+# The last step has no successor to reset the caption, so only the end-of-step clear can remove it.
+check_diff "control: the last step's caption is drawn during the step" \
+  "$FR/scrolled.png" "$FR/finish.png" "$CAPTION_CROP" gt "$CAPTION_MIN"
+check_diff "caption is cleared at the end of its step" \
+  "$FR/scrolled.png" "$FR/final.png" "$CAPTION_CROP" lt "$SAME_MAX"
 
-D="$(diff_avg "$FR/idle-late.png" "$FR/card.png" "400:200:520:350")"
-gt "$D" 30 && ok "centre region of the card frame differs from the page frame (diff $D)" \
-  || not_ok "centre region of the card frame differs from the page frame (diff $D)"
+check_diff "control: a region away from caption and pointer is the same in both frames" \
+  "$FR/idle-late.png" "$FR/aim.png" "$AWAY_CROP" lt "$SAME_MAX"
+check_diff "region around the pointer target differs from the same region in a frame with the pointer elsewhere" \
+  "$FR/idle-late.png" "$FR/aim.png" "$POINTER_CROP" gt "$POINTER_MIN"
+check_diff "centre region of the card frame differs from the page frame" \
+  "$FR/idle-late.png" "$FR/card.png" "$CARD_CROP" gt "$CARD_MIN"
 
-TITLE_CROP="400:90:520:405"
-R="$(luma_range "$FR/card.png" "$TITLE_CROP")"
-gt "$R" 100 && ok "card title region is not a single flat colour (text is drawn, range $R)" \
-  || not_ok "card title region is not a single flat colour (text is drawn, range $R)"
-
-H1_CROP="600:100:40:40"
-R="$(luma_range "$FR/idle-late.png" "$H1_CROP")"
-gt "$R" 100 && ok "control: the page heading region has visible text on a page frame (range $R)" \
-  || not_ok "control: the page heading region has visible text on a page frame (range $R)"
-R="$(luma_range "$FR/card.png" "$H1_CROP")"
-lt "$R" 12 && ok "card hides the page for its step (heading region is flat, range $R)" \
-  || not_ok "card hides the page for its step (heading region is flat, range $R)"
-R="$(luma_range "$FR/save.png" "$H1_CROP")"
-gt "$R" 100 && ok "card hides the page for its step only: the next step shows the real page (range $R)" \
-  || not_ok "card hides the page for its step only: the next step shows the real page (range $R)"
+check_range "card title region is not a single flat colour (text is drawn)" "$FR/card.png" "$TITLE_CROP" gt "$TEXT_RANGE_MIN"
+check_range "control: the page heading region has visible text on a page frame" "$FR/idle-late.png" "$H1_CROP" gt "$TEXT_RANGE_MIN"
+check_range "card hides the page for its step (heading region is flat)" "$FR/card.png" "$H1_CROP" lt "$FLAT_RANGE_MAX"
+check_range "card hides the page for its step only: the next step shows the real page" "$FR/save.png" "$H1_CROP" gt "$TEXT_RANGE_MIN"
 
 run_in "$PROJECT" "$FIX/steps-highlight-missing.mjs" --out "$TMP/hl-failed"
 if [ "$STATUS" -eq 1 ] && [ -s "$TMP/hl-failed/failure-no-highlight-target.png" ]; then
