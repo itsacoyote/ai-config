@@ -28,9 +28,7 @@ check_equals() {
   if [ "$2" = "$3" ]; then ok "$1"; else not_ok "$1 (expected '$2', got '$3')"; fi
 }
 
-# check_contains <label> <needle> <captured-text>. Matching runs against text the caller
-# already captured, never through a pipeline: under pipefail `cmd | grep -q` can report
-# failure on a match (SIGPIPE) and an assertion inside a pipeline updates discarded counters.
+# check_contains <label> <needle> <captured-text> — never pipes the command into grep (SIGPIPE under pipefail).
 check_contains() {
   if printf '%s\n' "$3" | grep -qF -- "$2"; then ok "$1"; else not_ok "$1 (missing '$2' in: $3)"; fi
 }
@@ -122,7 +120,7 @@ reset_fixture() {
   : >"$LOG"
 }
 
-# run_pf <bindir> [args…] — sets OUT (stdout+stderr) and RC. env -i keeps the caller's
+# run_pf <bindir> [args…] — sets OUT (stdout+stderr), RC and CALLS (the stub call log). env -i keeps the caller's
 # PATH and variables out of what the script can see.
 run_pf() {
   local bin=$1
@@ -132,11 +130,10 @@ run_pf() {
     FAKE_ENCODERS="$FAKE_ENCODERS" BROWSER_VIDEO_OS_RELEASE="$OS_RELEASE" \
     "$SH_BIN" "$PF" "$@" 2>&1)
   RC=$?
+  CALLS=$(cat "$LOG")
 }
 
 ALL="node ffmpeg ffprobe uname"
-CALLS=''
-refresh_calls() { CALLS=$(cat "$LOG"); }
 
 # ---------------------------------------------------------------- tests
 
@@ -147,7 +144,6 @@ section 'baseline'
 # otherwise pass every failure assertion below.
 reset_fixture
 run_pf "$(make_bin $ALL)"
-refresh_calls
 check_equals 'passes when every dependency is present (positive control): exit 0' 0 "$RC"
 check_not_contains 'positive control prints no missing item' 'missing:' "$OUT"
 # Would fail to catch: a libx264 check that never asks ffmpeg anything.
@@ -158,15 +154,12 @@ check_contains 'positive control ran the check next to preflight.sh' "${PF%/*}/r
 
 section 'ffmpeg'
 
-for pair in 'macOS:Darwin:brew install ffmpeg:' \
-            'debian:Linux:sudo apt install ffmpeg:debian'; do
-  label=${pair%%:*}; rest=${pair#*:}
-  uname_out=${rest%%:*}; rest=${rest#*:}
-  fix=${rest%:*}; distro=${rest##*:}
+check_ffmpeg_cases() { # check_ffmpeg_cases <label> <uname> <fix> <os-release file>
+  local label=$1 uname_out=$2 fix=$3 release=$4
 
   reset_fixture
   FAKE_UNAME=$uname_out
-  [ "$distro" = debian ] && OS_RELEASE=$DEBIAN_RELEASE
+  OS_RELEASE=$release
   run_pf "$(make_bin node ffprobe uname)"
   check_equals "$label: missing ffmpeg exits 1" 1 "$RC"
   check_contains "$label: missing ffmpeg fails with $fix" "$fix" "$OUT"
@@ -176,7 +169,7 @@ for pair in 'macOS:Darwin:brew install ffmpeg:' \
 
   reset_fixture
   FAKE_UNAME=$uname_out
-  [ "$distro" = debian ] && OS_RELEASE=$DEBIAN_RELEASE
+  OS_RELEASE=$release
   run_pf "$(make_bin node ffmpeg uname)"
   check_equals "$label: missing ffprobe exits 1" 1 "$RC"
   check_contains "$label: missing ffprobe fails with $fix" "$fix" "$OUT"
@@ -186,13 +179,16 @@ for pair in 'macOS:Darwin:brew install ffmpeg:' \
 
   reset_fixture
   FAKE_UNAME=$uname_out
+  OS_RELEASE=$release
   FAKE_ENCODERS=$X265_LINE
-  [ "$distro" = debian ] && OS_RELEASE=$DEBIAN_RELEASE
   run_pf "$(make_bin $ALL)"
   check_equals "$label: ffmpeg without libx264 exits 1" 1 "$RC"
   check_contains "$label: ffmpeg without libx264 fails with $fix" "$fix" "$OUT"
   check_contains "$label: ffmpeg without libx264 names libx264" 'missing: libx264' "$OUT"
-done
+}
+
+check_ffmpeg_cases macOS Darwin 'brew install ffmpeg' "$MISSING_RELEASE"
+check_ffmpeg_cases debian Linux 'sudo apt install ffmpeg' "$DEBIAN_RELEASE"
 
 reset_fixture
 FAKE_UNAME=Linux
@@ -279,7 +275,6 @@ reset_fixture
 FAKE_NODE_VERSION=v16.20.2
 FAKE_CHECK_EXIT=3
 run_pf "$(make_bin $ALL)"
-refresh_calls
 check_equals 'node older than 18 exits 1' 1 "$RC"
 check_contains 'node older than 18 says to install Node 18 or later' 'Node 18 or later' "$OUT"
 check_contains 'node older than 18 reports the found version' '16.20.2' "$OUT"
@@ -292,7 +287,7 @@ reset_fixture
 run_pf "$(make_bin ffmpeg ffprobe uname)"
 check_equals 'missing node exits 1' 1 "$RC"
 check_contains 'missing node says to install Node 18 or later' 'Node 18 or later' "$OUT"
-# Would fail to catch: a missing node reported as an old one (found unknown) because the presence check was dropped.
+# Would fail to catch: a dropped presence check reporting missing node as "found unknown".
 check_not_contains 'missing node is not reported as an old version' 'found' "$OUT"
 check_contains 'missing node says the playwright check was skipped' 'skipped' "$OUT"
 check_not_contains 'missing node prints no playwright fix' 'npm install playwright' "$OUT"
@@ -312,11 +307,10 @@ check_equals 'node 9 is rejected (numeric, not lexical, comparison)' 1 "$RC"
 reset_fixture
 FAKE_NODE_VERSION=garbage
 run_pf "$(make_bin $ALL)"
-# Would fail to catch: a non-numeric version crashing the comparison and passing.
 check_equals 'unparseable node version is treated as too old' 1 "$RC"
 check_contains 'unparseable node version still says to install Node 18 or later' 'Node 18 or later' "$OUT"
-# Would fail to catch: dropping the numeric guard, which still fails but leaks the shell's
-# own "integer expression expected" / "Illegal number" error into the report.
+# Would fail to catch: dropping the numeric guard, which still exits 1 but leaks the
+# shell's "integer expression expected" / "Illegal number" error into the report.
 check_not_contains 'unparseable node version prints no shell test error (bash)' 'expected' "$OUT"
 check_not_contains 'unparseable node version prints no shell test error (dash)' 'llegal' "$OUT"
 
@@ -347,7 +341,6 @@ section 'usage'
 
 reset_fixture
 run_pf "$(make_bin $ALL)" -h
-refresh_calls
 check_equals '-h exits 0' 0 "$RC"
 check_contains '-h prints the usage header' 'Usage:' "$OUT"
 check_contains '-h documents the exit codes' 'Exit:' "$OUT"
@@ -357,7 +350,6 @@ check_not_contains '-h prints only the header' 'set -u' "$OUT"
 
 reset_fixture
 run_pf "$(make_bin $ALL)" --bogus
-refresh_calls
 check_equals 'an unknown flag exits 2' 2 "$RC"
 check_contains 'an unknown flag is named on stderr as an error' 'error: unknown argument: --bogus' "$OUT"
 check_equals 'an unknown flag runs no checks' '' "$CALLS"

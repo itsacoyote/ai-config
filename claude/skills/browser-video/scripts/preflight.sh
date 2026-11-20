@@ -2,7 +2,7 @@
 # preflight.sh — check everything a browser-video recording needs, before recording.
 #
 # Reports every missing item (not just the first) with the exact fix command for
-# this OS. This is the only place install commands are written.
+# this OS.
 #
 # Checks: node 18 or later, ffmpeg, ffprobe, the libx264 encoder, then
 #   node record.mjs --check for Playwright (resolved from the current directory)
@@ -11,8 +11,6 @@
 # Usage:
 #   sh preflight.sh        run all checks
 #   sh preflight.sh -h     print this help
-#
-# Environment: BROWSER_VIDEO_OS_RELEASE overrides /etc/os-release (used by tests).
 #
 # Exit: 0 ok; 1 a dependency is missing; 2 usage error.
 
@@ -43,7 +41,7 @@ esac
 
 missing=0
 
-report() { # report <what is missing> <fix command or advice>
+report() {
   printf 'missing: %s\n  fix: %s\n' "$1" "$2"
   missing=$((missing + 1))
 }
@@ -73,8 +71,7 @@ fi
 
 if command -v ffmpeg >/dev/null 2>&1; then
   encoders=$(ffmpeg -hide_banner -encoders 2>&1)
-  # Anchored to the encoder-name column: the libx264rgb line's description also
-  # starts with "libx264 ", so a plain substring match would accept that encoder.
+  # Anchored to the name column: libx264rgb's description also starts with "libx264 ".
   case "$encoders" in
     *' V'?????' libx264 '*) ;;
     *) report libx264 "$(ffmpeg_fix)" ;;
@@ -86,18 +83,17 @@ fi
 command -v ffprobe >/dev/null 2>&1 || report ffprobe "$(ffmpeg_fix)"
 
 if [ "$node_ok" = 1 ]; then
-  # Branches on the exit code only; --check's stdout is for humans running it directly.
   node "$SCRIPT_DIR/record.mjs" --check >/dev/null 2>&1
   rc=$?
   case "$rc" in
     0) ;;
     3) report playwright 'npm install playwright   (run in the project)' ;;
     4)
-      if [ "$os" = macos ]; then
-        report chromium 'npx playwright install chromium'
-      else
-        report chromium 'npx playwright install --with-deps chromium'
-        [ "$os" = debian ] || echo '  note: Playwright officially supports Debian and Ubuntu only; other distributions may need extra system libraries.'
+      fix='npx playwright install --with-deps chromium'
+      [ "$os" = macos ] && fix='npx playwright install chromium'
+      report chromium "$fix"
+      if [ "$os" = linux ]; then
+        echo '  note: Playwright officially supports Debian and Ubuntu only; other distributions may need extra system libraries.'
       fi
       ;;
     *)
