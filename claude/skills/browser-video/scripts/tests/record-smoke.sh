@@ -106,6 +106,7 @@ else
   not_ok "timeline offsets are monotonic and the last end is no later than the video duration ($TL)"
 fi
 
+# Pins the exact frame command that the skill docs tell users to run.
 if frame_at "$MP4" 0.5 "$TMP/frame.png" && [ -s "$TMP/frame.png" ]; then
   ok "a frame can be extracted from the mp4"
 else
@@ -153,6 +154,34 @@ expect_usage_error "rejects a negative hold" invalid-neg-hold.mjs
 expect_usage_error "rejects a relative url" invalid-rel-url.mjs
 expect_usage_error "rejects a name with a path separator" invalid-bad-name.mjs
 expect_usage_error "rejects an odd viewport width" invalid-odd-viewport.mjs
+expect_usage_error "rejects a step id with a path separator" invalid-bad-step-id.mjs
+
+# ---- --out and error-output safety -------------------------------------------
+section "out dir and redaction"
+mkdir -p "$TMP/real-out"
+ln -s "$TMP/real-out" "$TMP/link-out"
+run_in "$PROJECT" "$FIX/steps.mjs" --out "$TMP/link-out"
+if [ "$STATUS" -eq 2 ] && [ -z "$(ls "$TMP/real-out")" ]; then
+  ok "refuses an --out path that is a symlink (exit 2)"
+else
+  not_ok "refuses an --out path that is a symlink (exit 2, got $STATUS: $ERR)"
+fi
+
+run_in "$PROJECT" "$FIX/steps.mjs" --out "$TMP/new-out"
+MODE="$(node -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8))' "$TMP/new-out")"
+if [ "$STATUS" -eq 0 ] && [ "$MODE" = "700" ]; then
+  ok "creates a new --out directory with mode 700"
+else
+  not_ok "creates a new --out directory with mode 700 (status $STATUS, mode $MODE)"
+fi
+
+run_in "$PROJECT" "$FIX/steps-nav-fail.mjs" --out "$TMP/nav-out"
+# Exit 1 plus a non-empty error is the positive control: the run really failed in navigation.
+if [ "$STATUS" -eq 1 ] && [ -n "$ERR" ] && ! printf '%s\n%s' "$OUT" "$ERR" | grep -qE 'secret|token=abc'; then
+  ok "a failed navigation does not print url credentials or query string"
+else
+  not_ok "a failed navigation does not print url credentials or query string (status $STATUS: $ERR)"
+fi
 
 # ---- environment problems ---------------------------------------------------
 section "missing playwright / chromium"

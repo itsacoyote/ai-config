@@ -12,7 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -23,6 +23,10 @@ const DEFAULT_VIEWPORT = { width: 1440, height: 900 };
 const DEFAULT_HOLD_MS = 1500;
 const TRAILING_HOLD_MS = 500;
 const STDERR_TAIL_CHARS = 2000;
+const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
+
+// Linux containers and CI commonly lack the user namespaces Chromium's sandbox needs.
+const LAUNCH_OPTIONS = { headless: true, chromiumSandbox: process.platform !== 'linux' };
 
 class UsageError extends Error {}
 
@@ -70,13 +74,17 @@ async function check() {
     return 3;
   }
   try {
-    const browser = await chromium.launch({ headless: true, timeout: 15000 });
+    const browser = await chromium.launch({ ...LAUNCH_OPTIONS, timeout: 15000 });
     await browser.close();
   } catch {
     console.log('missing: chromium');
     return 4;
   }
   return 0;
+}
+
+function isSafeName(value) {
+  return typeof value === 'string' && SAFE_NAME.test(value) && !value.startsWith('.');
 }
 
 function isPositiveEven(n) {
@@ -90,7 +98,7 @@ function validateSteps(def) {
   if (!def || typeof def !== 'object') fail('the module must export an object (default export or named exports)');
   const { name, url, viewport = DEFAULT_VIEWPORT, steps } = def;
 
-  if (typeof name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(name) || name.startsWith('.')) {
+  if (!isSafeName(name)) {
     fail('"name" must match [A-Za-z0-9._-]+ and not start with "."');
   }
   let parsed;
@@ -107,7 +115,7 @@ function validateSteps(def) {
   }
   if (!Array.isArray(steps) || steps.length === 0) fail('"steps" must be a non-empty array');
   steps.forEach((step, i) => {
-    if (!step || typeof step.id !== 'string' || step.id === '') fail(`step ${i}: "id" must be a non-empty string`);
+    if (!step || !isSafeName(step.id)) fail(`step ${i}: "id" must match [A-Za-z0-9._-]+ and not start with "."`);
     if (typeof step.act !== 'function') fail(`step "${step.id}": "act" must be a function`);
     if (step.hold !== undefined && !(Number.isFinite(step.hold) && step.hold >= 0)) {
       fail(`step "${step.id}": "hold" must be a finite number >= 0`);
@@ -128,9 +136,7 @@ async function loadSteps(stepsFile) {
   return validateSteps(mod.default ?? mod);
 }
 
-// Playwright writes frames only when the page repaints, so a static tail can be missing
-// from the webm (seen on Linux). Cloning the last frame and cutting at the wall-clock
-// duration keeps the video as long as the recorded session.
+// Playwright drops a static tail from the webm (seen on Linux); clone the last frame and cut at wall-clock duration.
 function encode(webm, mp4, seconds) {
   const ffmpegArgs = [
     '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
@@ -155,27 +161,64 @@ function encode(webm, mp4, seconds) {
   });
 }
 
-function fileSafe(text) {
-  return text.replace(/[^A-Za-z0-9._-]/g, '_');
+// Recordings can show logged-in pages, so refuse an out dir another user or a symlink could redirect.
+function prepareOutDir(outArg) {
+  if (!outArg) return mkdtempSync(join(tmpdir(), 'browser-video-'));
+  const dir = resolve(outArg);
+  let stat;
+  try {
+    stat = lstatSync(dir);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (!stat) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    return dir;
+  }
+  if (stat.isSymbolicLink()) throw new UsageError(`--out must not be a symlink: ${dir}`);
+  if (!stat.isDirectory()) throw new UsageError(`--out is not a directory: ${dir}`);
+  if (stat.uid !== process.getuid()) throw new UsageError(`--out is not owned by the current user: ${dir}`);
+  return dir;
+}
+
+// ffmpeg and writeFileSync both follow a symlink at the target path, so unlink one first.
+function clearSymlink(path) {
+  try {
+    if (lstatSync(path).isSymbolicLink()) rmSync(path);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+// Navigation errors echo the url, which may carry credentials or tokens.
+function makeRedactor(url) {
+  const safe = new URL(url);
+  safe.username = '';
+  safe.password = '';
+  safe.search = '';
+  safe.hash = '';
+  const href = new URL(url).href;
+  return (text) => text.split(url).join(safe.href).split(href).join(safe.href);
 }
 
 async function record(stepsFile, outArg) {
   const { name, url, viewport, steps } = await loadSteps(stepsFile);
 
+  const outDir = prepareOutDir(outArg);
+  const redact = makeRedactor(url);
+  const report = (message) => console.error(redact(message));
+
   const chromium = await loadChromium();
   if (!chromium) {
-    console.error('error: Playwright is not resolvable from the current directory; run preflight.sh');
+    report('error: Playwright is not resolvable from the current directory; run preflight.sh');
     return 1;
   }
 
-  const outDir = outArg ? resolve(outArg) : mkdtempSync(join(tmpdir(), 'browser-video-'));
-  mkdirSync(outDir, { recursive: true });
-
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch(LAUNCH_OPTIONS);
   } catch (error) {
-    console.error(`error: Chromium failed to launch; run preflight.sh\n${error.message}`);
+    report(`error: Chromium failed to launch; run preflight.sh\n${error.message}`);
     return 1;
   }
 
@@ -189,37 +232,37 @@ async function record(stepsFile, outArg) {
     page = await context.newPage();
     // Video recording starts when the page is created, so timeline offsets count from here.
     const t0 = performance.now();
-    const elapsed = () => (performance.now() - t0) / 1000;
+    const elapsedSeconds = () => (performance.now() - t0) / 1000;
     const h = createHelpers(page);
 
     await page.goto(url);
     for (const step of steps) {
-      const start = elapsed();
+      const startSeconds = elapsedSeconds();
       try {
         await step.act(page, h);
-        const remaining = (step.hold ?? DEFAULT_HOLD_MS) - (elapsed() - start) * 1000;
-        if (remaining > 0) await sleep(remaining);
+        const remainingMs = (step.hold ?? DEFAULT_HOLD_MS) - (elapsedSeconds() - startSeconds) * 1000;
+        if (remainingMs > 0) await sleep(remainingMs);
       } catch (error) {
         failed = true;
-        console.error(`error: step "${step.id}" failed: ${error.message}`);
-        const shot = join(outDir, `failure-${fileSafe(step.id)}.png`);
+        report(`error: step "${step.id}" failed: ${error.message}`);
+        const shot = join(outDir, `failure-${step.id}.png`);
         try {
           await page.screenshot({ path: shot });
-          console.error(`screenshot: ${shot}`);
+          report(`screenshot: ${shot}`);
         } catch (shotError) {
-          console.error(`error: could not take failure screenshot: ${shotError.message}`);
+          report(`error: could not take failure screenshot: ${shotError.message}`);
         }
         break;
       }
-      const entry = { id: step.id, start, end: elapsed() };
+      const entry = { id: step.id, start: startSeconds, end: elapsedSeconds() };
       if (step.caption) entry.caption = step.caption;
       timeline.push(entry);
     }
     if (!failed) await sleep(TRAILING_HOLD_MS);
-    totalSeconds = elapsed();
+    totalSeconds = elapsedSeconds();
   } catch (error) {
     failed = true;
-    console.error(`error: ${error.message}`);
+    report(`error: ${error.message}`);
   } finally {
     // The webm is only complete once the context is closed.
     await context.close().catch(() => {});
@@ -233,15 +276,18 @@ async function record(stepsFile, outArg) {
   }
 
   const mp4 = join(outDir, `${name}.mp4`);
+  const timelinePath = join(outDir, 'timeline.json');
+  clearSymlink(mp4);
+  clearSymlink(timelinePath);
   try {
     await encode(webm, mp4, totalSeconds);
   } catch (error) {
-    console.error(`error: encode failed: ${error.message}`);
+    report(`error: encode failed: ${error.message}`);
     console.error(`webm kept: ${webm}`);
     return 1;
   }
   rmSync(webm, { force: true });
-  writeFileSync(join(outDir, 'timeline.json'), `${JSON.stringify({ steps: timeline }, null, 2)}\n`);
+  writeFileSync(timelinePath, `${JSON.stringify({ steps: timeline }, null, 2)}\n`);
   console.log(mp4);
   return 0;
 }
@@ -251,13 +297,8 @@ async function main() {
     const args = parseArgs(process.argv.slice(2));
     process.exitCode = args.check ? await check() : await record(args.stepsFile, args.out);
   } catch (error) {
-    if (error instanceof UsageError) {
-      console.error(`error: ${error.message}`);
-      process.exitCode = 2;
-    } else {
-      console.error(`error: ${error.message}`);
-      process.exitCode = 1;
-    }
+    console.error(`error: ${error.message}`);
+    process.exitCode = error instanceof UsageError ? 2 : 1;
   }
 }
 
