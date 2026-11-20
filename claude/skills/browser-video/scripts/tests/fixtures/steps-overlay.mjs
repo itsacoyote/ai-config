@@ -59,6 +59,8 @@ export default {
         seen('scrolled', await page.evaluate(() => window.scrollY > 0));
       },
     },
+    // Uncaptioned and after the scroll has finished: the same-scroll reference for the caption compares, away from any step edge.
+    { id: 'settle', hold: 600, act: () => {} },
     // Last, so its caption is only cleared by the end-of-step clear: no later step resets it.
     { id: 'finish', caption: 'Done', hold: 1200, act: () => {} },
   ],

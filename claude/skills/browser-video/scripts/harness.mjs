@@ -54,6 +54,8 @@ export function installOverlay({ start, ringPad }) {
                box-sizing: border-box; max-width: min(960px, 80vw); padding: 16px 28px; overflow: hidden;
                border-radius: 12px; background: rgba(17, 20, 26, 0.9); color: #fff; text-align: center;
                font: 600 28px/1.35 system-ui, sans-serif; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .tick { position: fixed; right: 0; top: 0; width: 1px; height: 1px; animation: tick 100ms steps(1) infinite; }
+    @keyframes tick { 0% { background: rgba(0, 0, 0, 0.01); } 50% { background: transparent; } }
   `);
   root.adoptedStyleSheets = [sheet];
 
@@ -82,7 +84,9 @@ export function installOverlay({ start, ringPad }) {
   card.append(cardTitle, cardBody);
   // Caption last so it stays readable over a card.
   const caption = make('caption');
-  root.append(ring, pointer, card, caption);
+  // Chromium emits no screencast frame for a static page, and the webm starts at its first frame: a quiet opening
+  // step is cut from the video and every later offset leads timeline.json. A repainting pixel keeps frames flowing.
+  root.append(ring, pointer, card, caption, make('tick'));
 
   const placePointer = (x, y, ms) => {
     pointer.style.transition = ms > 0 ? `transform ${ms}ms cubic-bezier(0.4, 0, 0.2, 1)` : 'none';

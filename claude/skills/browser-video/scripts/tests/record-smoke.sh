@@ -7,6 +7,18 @@
 #
 # Usage:  BROWSER_VIDEO_PROJECT=<dir> bash claude/skills/browser-video/scripts/tests/record-smoke.sh
 # Exits non-zero on any failure. No CI, no runner — run it by hand.
+#
+# Linux (Playwright image; its tag must match the Playwright version installed below), from the repo root:
+#   docker run --rm -it --ipc=host -v "$PWD":/repo:ro mcr.microsoft.com/playwright:v1.65.1-noble bash
+# then inside the container (the image has no ffmpeg; node_modules stays container-local):
+#   mkdir /scratch && cd /scratch && npm init -y && npm i playwright@1.65.1
+#   apt-get update && apt-get install -y ffmpeg
+#   sh /repo/claude/skills/browser-video/scripts/preflight.sh
+#   bash /repo/claude/skills/browser-video/scripts/tests/preflight-test.sh
+#   BROWSER_VIDEO_PROJECT=/scratch bash /repo/claude/skills/browser-video/scripts/tests/record-smoke.sh
+# Missing Chromium system libraries (preflight reports --with-deps, --check exits 4) reproduce in a plain
+#   docker run --rm -it -v "$PWD":/repo:ro node:22-bookworm-slim bash
+# after npm i playwright and npx playwright install chromium (no --with-deps).
 
 set -u
 exec </dev/null
@@ -251,7 +263,8 @@ frame_at "$OVMP4" "$(time_of "$OV" aim 0.5)" "$FR/aim.png"
 frame_at "$OVMP4" "$(time_of "$OV" type 0.5)" "$FR/type.png"
 frame_at "$OVMP4" "$(time_of "$OV" card 0.5)" "$FR/card.png"
 frame_at "$OVMP4" "$(time_of "$OV" save 0.5)" "$FR/save.png"
-frame_at "$OVMP4" "$(time_of "$OV" scroll 0.9)" "$FR/scrolled.png"
+# The video leads timeline.json by up to about 0.1 s on Linux, so sample mid-step: a point within 0.1 s of a step edge shows the neighbouring step.
+frame_at "$OVMP4" "$(time_of "$OV" settle 0.5)" "$FR/settled.png"
 frame_at "$OVMP4" "$(time_of "$OV" finish 0.5)" "$FR/finish.png"
 # 1.2 of the 1.2 s hold is 0.24 s past the step end, inside the 0.5 s trailing hold.
 frame_at "$OVMP4" "$(time_of "$OV" finish 1.2)" "$FR/final.png"
@@ -259,6 +272,10 @@ frame_at "$OVMP4" "$(time_of "$OV" finish 1.2)" "$FR/final.png"
 # Positive control: two uncaptioned frames of one step. Without it, a noisy encode could make the compares below pass alone.
 check_diff "control: caption region of two frames of one uncaptioned step is the same" \
   "$FR/idle-early.png" "$FR/idle-late.png" "$CAPTION_CROP" lt "$SAME_MAX"
+# Without the overlay's repainting pixel, Chromium sent no frames for the static opening step on Linux (about 1 run in 3),
+# the video started late, and the card showed 1.8 s before its timeline offset. A quarter second early is clear of the 0.1 s normal lead.
+frame_at "$OVMP4" "$(time_of "$OV" card -0.15)" "$FR/pre-card.png"
+check_range "the page, not the card, is shown just before the card step (video offsets match timeline.json)" "$FR/pre-card.png" "$H1_CROP" gt "$TEXT_RANGE_MIN"
 check_diff "caption-bar region of a captioned step differs from the same region of an uncaptioned step" \
   "$FR/idle-late.png" "$FR/aim.png" "$CAPTION_CROP" gt "$CAPTION_MIN"
 check_diff "an uncaptioned step after a captioned one shows no caption" \
@@ -266,9 +283,9 @@ check_diff "an uncaptioned step after a captioned one shows no caption" \
 
 # The last step has no successor to reset the caption, so only the end-of-step clear can remove it.
 check_diff "control: the last step's caption is drawn during the step" \
-  "$FR/scrolled.png" "$FR/finish.png" "$CAPTION_CROP" gt "$CAPTION_MIN"
+  "$FR/settled.png" "$FR/finish.png" "$CAPTION_CROP" gt "$CAPTION_MIN"
 check_diff "caption is cleared at the end of its step" \
-  "$FR/scrolled.png" "$FR/final.png" "$CAPTION_CROP" lt "$SAME_MAX"
+  "$FR/settled.png" "$FR/final.png" "$CAPTION_CROP" lt "$SAME_MAX"
 
 check_diff "control: a region away from caption and pointer is the same in both frames" \
   "$FR/idle-late.png" "$FR/aim.png" "$AWAY_CROP" lt "$SAME_MAX"
