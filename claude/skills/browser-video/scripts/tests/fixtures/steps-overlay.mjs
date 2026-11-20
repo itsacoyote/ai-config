@@ -42,6 +42,11 @@ export default {
       },
     },
     {
+      id: 'card-body',
+      hold: 1800,
+      act: (page, h) => h.card({ title: 'Chapter three', body: 'Details follow here' }),
+    },
+    {
       id: 'save',
       caption: 'Save changes',
       hold: 1200,

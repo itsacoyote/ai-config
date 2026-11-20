@@ -245,6 +245,8 @@ FLAT_RANGE_MAX=12  # a flat card region measured 0, so margin for encode noise
 #   AWAY_CROP      blank page between #name (top 400) and #save (top 800), clear of caption and pointer
 #   CARD_CROP      middle of the viewport, where the card centres its title
 #   TITLE_CROP     the one-line title of the title-only card (centred at y 450)
+#   BODY_CROP      the one-line body of the title-and-body card: title (83 px) + gap (32) + body (48) centred at y 450 puts the body at y 483-531
+#   BELOW_BODY_CROP blank card area under the body
 #   H1_CROP        the page heading, top left; the pointer start (48, 48) sits inside it in page frames
 INERT_CX=$((900 + 240 / 2)); INERT_CY=$((200 + 100 / 2))
 CAPTION_CROP="400:100:520:780"
@@ -253,6 +255,8 @@ AWAY_CROP="300:100:500:500"
 CARD_CROP="400:200:520:350"
 TITLE_CROP="400:90:520:405"
 H1_CROP="600:100:40:40"
+BODY_CROP="400:40:520:490"
+BELOW_BODY_CROP="400:40:520:600"
 
 # idle and aim show identical page content, so a diff between them can only come from the caption or the pointer.
 OVMP4="$OV/overlay-flow.mp4"
@@ -262,6 +266,7 @@ frame_at "$OVMP4" "$(time_of "$OV" idle 0.7)" "$FR/idle-late.png"
 frame_at "$OVMP4" "$(time_of "$OV" aim 0.5)" "$FR/aim.png"
 frame_at "$OVMP4" "$(time_of "$OV" type 0.5)" "$FR/type.png"
 frame_at "$OVMP4" "$(time_of "$OV" card 0.5)" "$FR/card.png"
+frame_at "$OVMP4" "$(time_of "$OV" card-body 0.5)" "$FR/card-body.png"
 frame_at "$OVMP4" "$(time_of "$OV" save 0.5)" "$FR/save.png"
 # The video leads timeline.json by up to about 0.1 s on Linux, so sample mid-step: a point within 0.1 s of a step edge shows the neighbouring step.
 frame_at "$OVMP4" "$(time_of "$OV" settle 0.5)" "$FR/settled.png"
@@ -295,6 +300,8 @@ check_diff "centre region of the card frame differs from the page frame" \
   "$FR/idle-late.png" "$FR/card.png" "$CARD_CROP" gt "$CARD_MIN"
 
 check_range "card title region is not a single flat colour (text is drawn)" "$FR/card.png" "$TITLE_CROP" gt "$TEXT_RANGE_MIN"
+check_range "card body text is drawn (body region is not flat)" "$FR/card-body.png" "$BODY_CROP" gt "$TEXT_RANGE_MIN"
+check_range "control: the card region under the body is flat" "$FR/card-body.png" "$BELOW_BODY_CROP" lt "$FLAT_RANGE_MAX"
 check_range "control: the page heading region has visible text on a page frame" "$FR/idle-late.png" "$H1_CROP" gt "$TEXT_RANGE_MIN"
 check_range "card hides the page for its step (heading region is flat)" "$FR/card.png" "$H1_CROP" lt "$FLAT_RANGE_MAX"
 check_range "card hides the page for its step only: the next step shows the real page" "$FR/save.png" "$H1_CROP" gt "$TEXT_RANGE_MIN"
