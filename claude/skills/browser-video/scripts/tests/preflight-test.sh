@@ -56,7 +56,7 @@ UBUNTU_LIKE_RELEASE="$TMP/os-release-ubuntu-like"
 FEDORA_RELEASE="$TMP/os-release-fedora"
 MISSING_RELEASE="$TMP/os-release-absent"
 printf 'ID=debian\n' >"$DEBIAN_RELEASE"
-printf 'ID=pop\nID_LIKE="ubuntu debian"\n' >"$UBUNTU_LIKE_RELEASE"
+printf 'ID=pop\nID_LIKE=ubuntu\n' >"$UBUNTU_LIKE_RELEASE"
 printf 'ID=fedora\nID_LIKE="rhel"\n' >"$FEDORA_RELEASE"
 
 X264_LINE=' V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)'
@@ -206,7 +206,7 @@ reset_fixture
 FAKE_UNAME=Linux
 OS_RELEASE=$UBUNTU_LIKE_RELEASE
 run_pf "$(make_bin node ffprobe uname)"
-# Would fail to catch: debian detection that only reads ID and ignores ID_LIKE.
+# Would fail to catch: debian detection that only reads ID, or one that drops the ubuntu arm. The fixture has no "debian" word, so only that arm can match.
 check_contains 'linux with ID_LIKE containing ubuntu is treated as debian' 'sudo apt install ffmpeg' "$OUT"
 
 reset_fixture
