@@ -29,9 +29,21 @@ export default {
       hold: 2200,
       act: async (page, h) => {
         await h.highlight(page.locator('#name'), 500);
+        // pressSequentially fires one input event per character; fill fires one for the whole text.
+        await page.evaluate(() => {
+          window.bvInputs = 0;
+          document.querySelector('#name').addEventListener('input', () => window.bvInputs++);
+        });
         await h.type(page.locator('#name'), 'Ada Lovelace');
         seen('typed', await page.locator('#name').inputValue());
+        seen('inputEvents', await page.evaluate(() => window.bvInputs));
       },
+    },
+    // A long highlight on its own, so a frame can sample the ring and a later frame the ring-free page.
+    {
+      id: 'ring',
+      hold: 2400,
+      act: (page, h) => h.highlight(page.locator('#name'), 1200),
     },
     {
       id: 'card',
@@ -60,10 +72,17 @@ export default {
       id: 'scroll',
       hold: 800,
       act: async (page, h) => {
+        await page.evaluate(() => {
+          window.bvWheels = 0;
+          window.addEventListener('wheel', () => window.bvWheels++, { passive: true });
+        });
         await h.scroll(700);
+        seen('wheelEvents', await page.evaluate(() => window.bvWheels));
         seen('scrolled', await page.evaluate(() => window.scrollY > 0));
       },
     },
+    // No hold: the span measures the default.
+    { id: 'default-hold', act: () => {} },
     // Uncaptioned and after the scroll has finished: the same-scroll reference for the caption compares, away from any step edge.
     { id: 'settle', hold: 600, act: () => {} },
     // The page drops the overlay host (as document.open() does); the end-of-act re-install must attach it again.
