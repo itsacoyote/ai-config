@@ -1,0 +1,98 @@
+import { appendFileSync } from 'node:fs';
+import base from './steps.mjs';
+
+const seen = (key, value) => {
+  if (process.env.BV_OBS) appendFileSync(process.env.BV_OBS, `${JSON.stringify({ key, value })}\n`);
+};
+
+// "idle" and "aim" show the same page, so a frame compare between them isolates the caption and the pointer.
+export default {
+  ...base,
+  name: 'overlay-flow',
+  steps: [
+    {
+      id: 'idle',
+      hold: 1800,
+      act: (page, h) => h.expectVisible(page.locator('#title')),
+    },
+    {
+      id: 'aim',
+      caption: 'Save changes',
+      hold: 2400,
+      act: async (page, h) => {
+        await h.click(page.locator('#inert'));
+        seen('captionCount', await page.getByText('Save changes').count());
+      },
+    },
+    {
+      id: 'type',
+      hold: 2200,
+      act: async (page, h) => {
+        await h.highlight(page.locator('#name'), 500);
+        // pressSequentially fires one input event per character; fill fires one for the whole text.
+        await page.evaluate(() => {
+          window.bvInputs = 0;
+          document.querySelector('#name').addEventListener('input', () => window.bvInputs++);
+        });
+        await h.type(page.locator('#name'), 'Ada Lovelace');
+        seen('typed', await page.locator('#name').inputValue());
+        seen('inputEvents', await page.evaluate(() => window.bvInputs));
+      },
+    },
+    // A long highlight on its own, so a frame can sample the ring and a later frame the ring-free page.
+    {
+      id: 'ring',
+      hold: 2400,
+      act: (page, h) => h.highlight(page.locator('#name'), 1200),
+    },
+    {
+      id: 'card',
+      hold: 1800,
+      act: async (page, h) => {
+        await h.card({ title: 'Chapter two' });
+        seen('cardTextCount', await page.getByText('Chapter two').count());
+      },
+    },
+    {
+      id: 'card-body',
+      hold: 1800,
+      act: (page, h) => h.card({ title: 'Chapter three', body: 'Details follow here' }),
+    },
+    {
+      id: 'save',
+      caption: 'Save changes',
+      hold: 1200,
+      act: async (page, h) => {
+        seen('valueAfterCard', await page.locator('#name').inputValue());
+        await h.click(page.locator('#save'));
+        seen('label', await page.locator('#save').textContent());
+      },
+    },
+    {
+      id: 'scroll',
+      hold: 800,
+      act: async (page, h) => {
+        await page.evaluate(() => {
+          window.bvWheels = 0;
+          window.addEventListener('wheel', () => window.bvWheels++, { passive: true });
+        });
+        await h.scroll(700);
+        seen('wheelEvents', await page.evaluate(() => window.bvWheels));
+        seen('scrolled', await page.evaluate(() => window.scrollY > 0));
+      },
+    },
+    // No hold: the span measures the default.
+    { id: 'default-hold', act: () => {} },
+    // Uncaptioned and after the scroll has finished: the same-scroll reference for the caption compares, away from any step edge.
+    { id: 'settle', hold: 600, act: () => {} },
+    // The page drops the overlay host (as document.open() does); the end-of-act re-install must attach it again.
+    {
+      id: 'reattach',
+      caption: 'Back',
+      hold: 1200,
+      act: (page) => page.evaluate(() => document.querySelector('browser-video-overlay').remove()),
+    },
+    // Last, so its caption is only cleared by the end-of-step clear: no later step resets it.
+    { id: 'finish', caption: 'Done', hold: 1200, act: () => {} },
+  ],
+};

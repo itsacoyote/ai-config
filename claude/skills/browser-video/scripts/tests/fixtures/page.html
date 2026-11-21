@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Fixture page</title>
+<style>
+body{font:32px sans-serif;margin:40px;background:#fff}
+button{font-size:28px;padding:12px 24px}
+#inert{position:absolute;left:900px;top:200px;box-sizing:border-box;width:240px;height:100px;border:3px dashed #888;padding:8px}
+#name{position:absolute;left:40px;top:400px;width:360px;font-size:28px}
+#save{position:absolute;left:600px;top:800px}
+#spacer{height:2400px;margin-top:700px;background:linear-gradient(#fff,#cde)}
+</style>
+</head>
+<body>
+<h1 id="title">Fixture page</h1>
+<button id="go" type="button" onclick="document.getElementById('result').hidden=false">Go</button>
+<p id="result" hidden>Done</p>
+<div id="inert">Target</div>
+<input id="name" aria-label="Name">
+<button id="save" type="button" onclick="this.textContent='Saved'">Save changes</button>
+<div id="spacer"></div>
+<p id="bottom">Bottom</p>
+</body>
+</html>
