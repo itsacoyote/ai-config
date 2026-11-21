@@ -104,7 +104,7 @@ The encode appends cloned final frames and cuts at the measured run length, beca
 sh ${CLAUDE_SKILL_DIR}/scripts/frame.sh <file>.mp4 <seconds> <out>.png
 ```
 
-Pick `<seconds>` from `timeline.json`, mid-step. Open the PNG to look at it. `frame.sh` accepts only an existing `.mp4`, a non-negative decimal number of seconds and a `.png` output (exit `2` otherwise), then runs `ffmpeg -nostdin -hide_banner -loglevel error -y -ss <seconds> -i <mp4> -frames:v 1 <png>`. It overwrites the PNG.
+Pick `<seconds>` from `timeline.json`, mid-step. Open the PNG to look at it. `frame.sh` accepts only an existing `.mp4`, a non-negative decimal number of seconds and a `.png` output that is not a symlink (exit `2` otherwise), then runs `ffmpeg -nostdin -hide_banner -loglevel error -y -ss <seconds> -f mp4 -i <mp4> -frames:v 1 <png>`. It overwrites the PNG, and exits `1` when ffmpeg fails or `<seconds>` is past the end of the video.
 
 ## Example
 

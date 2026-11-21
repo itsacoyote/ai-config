@@ -3,7 +3,7 @@
 #
 # Arguments are validated so the skill can pre-approve this script instead of ffmpeg:
 # the input must be an existing .mp4 file, seconds a non-negative decimal number,
-# and the output path must end in .png. The output file is overwritten.
+# and the output path must end in .png and not be a symlink. The output file is overwritten.
 #
 # Usage:
 #   sh frame.sh <file>.mp4 <seconds> <out>.png
@@ -32,11 +32,14 @@ case "$seconds" in
   ''|*[!0-9.]*|.*|*.|*.*.*) usage_error "seconds must be a non-negative decimal number: $seconds" ;;
 esac
 case "$output" in *.png) ;; *) usage_error "output must end in .png: $output" ;; esac
+[ ! -L "$output" ] || usage_error "output must not be a symlink: $output"
 
 # A leading ./ keeps a path that starts with "-" from being read as an ffmpeg option.
 case "$input" in /*) ;; *) input=./$input ;; esac
 case "$output" in /*) ;; *) output=./$output ;; esac
 
 command -v ffmpeg >/dev/null 2>&1 || { echo "error: ffmpeg not found; run preflight.sh" >&2; exit 1; }
-ffmpeg -nostdin -hide_banner -loglevel error -y -ss "$seconds" -i "$input" -frames:v 1 "$output" || exit 1
+# ffmpeg exits 0 and writes nothing for a time past the end, so a stale PNG must not pass the check below.
+rm -f "$output"
+ffmpeg -nostdin -hide_banner -loglevel error -y -ss "$seconds" -f mp4 -i "$input" -frames:v 1 "$output" || exit 1
 [ -s "$output" ] || { echo "error: no frame at $seconds s (past the end of the video?)" >&2; exit 1; }
