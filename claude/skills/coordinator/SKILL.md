@@ -3,7 +3,7 @@ name: coordinator
 description: Use when you run several parallel worktree sessions in one repo and want one session to coordinate them, or when you resume that coordinator session after /clear or a restart.
 disable-model-invocation: true
 argument-hint: "[optional: what you want, e.g. \"what next?\" or a session report]"
-allowed-tools: Read ToolSearch ListAgents SendMessage ArtifactData Write(~/.claude/projects/*/coordinator/**) Edit(~/.claude/projects/*/coordinator/**) Bash(gh pr view *) Bash(gh pr list *) Bash(gh pr checks *) Bash(gh pr diff *) Bash(bash ${CLAUDE_SKILL_DIR}/../../scripts/worktree-status.sh*) Bash(bash ${CLAUDE_SKILL_DIR}/../../scripts/wt-status.sh *) Bash(git worktree list*) Bash(git rev-parse *) Bash(bd show *) Bash(bd list *) Bash(bd ready*) Bash(clwt list*) Bash(sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh*)
+allowed-tools: Read ToolSearch ListAgents SendMessage ArtifactData Write(~/.claude/projects/*/coordinator/**) Edit(~/.claude/projects/*/coordinator/**) Bash(gh pr view *) Bash(gh pr list *) Bash(gh pr checks *) Bash(gh pr diff *) Bash(bash ${CLAUDE_SKILL_DIR}/../../scripts/worktree-status.sh*) Bash(bash ${CLAUDE_SKILL_DIR}/../../scripts/wt-status.sh *) Bash(git worktree list*) Bash(git rev-parse *) Bash(date -u *) Bash(bd show *) Bash(bd list *) Bash(bd ready*) Bash(clwt list*) Bash(sh ${CLAUDE_SKILL_DIR}/../../references/beads-preflight.sh*)
 ---
 
 # Coordinator
@@ -39,7 +39,7 @@ State is keyed off the primary checkout, not the session's working directory.
 2. Take its parent directory. Replace every `/` and `.` in that path with `-`. The result is the slug.
 3. State directory: `~/.claude/projects/<slug>/coordinator/`. It holds `config.json`, `board.json`, `pr-watch.json`. Keep no copies in the scratchpad.
 
-Write state files with the Write tool, never with shell redirects.
+Write state files with the Write tool, never with shell redirects. Take every timestamp from `date -u +%Y-%m-%dT%H:%M:%SZ`; never estimate one.
 
 `config.json` keys:
 
@@ -70,7 +70,7 @@ Write state files with the Write tool, never with shell redirects.
 With `config.json` present, load the three state files and the deferred tools (ToolSearch), then every turn:
 
 1. `gh pr list --author @me --state open --json number,headRefName,baseRefName`. Add the developer's new PRs to the watch list.
-2. `ListAgents`, then `bash ${CLAUDE_SKILL_DIR}/../../scripts/worktree-status.sh` and `bash ${CLAUDE_SKILL_DIR}/../../scripts/wt-status.sh <path>` per worktree. Never `git -C`.
+2. `ListAgents`, then `bash ${CLAUDE_SKILL_DIR}/../../scripts/worktree-status.sh` and `bash ${CLAUDE_SKILL_DIR}/../../scripts/wt-status.sh <path>` per worktree, written exactly like this (an absolute path does not match the pre-approval and prompts every turn). Never `git -C`.
 3. `gh pr view` per watched PR, and `gh pr checks` per watched PR that is still `OPEN` ([read commands](references/pr-watch.md#read-commands)).
 4. Beads, read-only, when the repo has it. This is a soft check: if the preflight fails, skip beads and continue. See [beads.md](../../references/beads.md).
 5. The external tracker, only when `config.json` names one.
