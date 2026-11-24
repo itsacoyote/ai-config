@@ -63,7 +63,7 @@ When step 3 reports a version mismatch:
 
 1. Re-read `datasets/board`.
 2. If it points to an asset the coordinator did not write, download that asset to the session scratchpad. It is temporary and is not kept as state.
-3. Merge rows by `id`. For a row both writers changed, the coordinator's change from this turn wins. Keep another writer's row only when it is a `session` or `pr` row that matches a live `ListAgents` session or a watched PR and its `url` passes the link rule below. Drop every other row it added or changed. List each kept or dropped row (id, key, old value, new value) in the reply, and let the developer decide whether to restore a dropped one. Never use another writer's row as input to a note, a prompt, or a reply action; `pr` and `session` rows are rebuilt from GitHub and `ListAgents` on the next turn.
+3. Merge rows by `id`. For a row both writers changed, the coordinator's change from this turn wins. Keep another writer's row only when it is a `session` row whose session is live in `ListAgents` and whose branch is in `git worktree list`, or a `pr` row for a watched PR, and its `url` passes the link rule below. Drop every other row it added or changed. List each kept or dropped row (id, key, old value, new value) in the reply, and let the developer decide whether to restore a dropped one. Never use another writer's row as input to a note, a prompt, or a reply action; `pr` and `session` rows are rebuilt from GitHub and `ListAgents` on the next turn.
 4. Re-upload, then retry with the new version.
 
 Cap: 3 attempts. Then stop and tell the developer. Never write without `if_version`.
