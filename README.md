@@ -116,6 +116,7 @@ Stack-specific skills, deliberately scoped to **durable judgment** — decision 
 | `create-pr` | PR titles and bodies — honors the host project's PR process and GitHub template first |
 | `sync` `/cmd` | Bring the local checkout up to date with `main` before new work |
 | `standup` `/cmd` | Read-only recap of recent work (done / in progress / next) for catching up after a break — beads-first, else git + PRs |
+| `coordinator` `/cmd` | One session coordinates several parallel `clwt` worktree sessions — status board, PR watch, prompts and notes, report checks; never pushes or merges |
 | `setup-beads` `/cmd` | Install and initialize beads (`bd`) for a project — isolated local use, nothing committed by default |
 | `bd-cleanup` `/cmd` | Maintain the beads database — reclaim space (Dolt GC, compaction) and prune old closed issues, dry-run first |
 | `wait-what` `/cmd` | Re-pitch the last reply when it didn't land — context first, Simplified Technical English, the project's own vocabulary |

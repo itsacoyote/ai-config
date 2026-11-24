@@ -2,7 +2,8 @@
 
 Single source of truth for how the workflow skills (`define`, `research`,
 `planning-and-task-breakdown`, `plan-review`, `incremental-implementation`, `efficiency-review`,
-`senior-review`, `security-scan`, `design-review`, `qa-review`, `validate`, `document`, `standup`)
+`senior-review`, `security-scan`, `design-review`, `qa-review`, `validate`, `document`, `standup`,
+`coordinator`)
 use **beads** as the project's task tracker and system of record. Beads is a **hard requirement**
 for the workflow — skills point here instead of restating the model, and when the beads model
 changes, this file is the only edit.
@@ -195,11 +196,16 @@ Hard-won details when an agent (not a human) runs `bd`:
   close out the epic when the PR is ready.
 - **Standup** → read-only: `bd ready` for what's next, plus closed/in-progress issues
   for what's done and in flight. Never mutates.
+- **Coordinator** → read-only, soft check (skips beads when absent): `bd ready`, `bd show`,
+  and `bd list` to relate sessions to tasks. Never mutates, and never stops the run when
+  the preflight fails.
 
 ## Guardrails
 
 - **Never run `bd` until the preflight passes.** Run the detection snippet first. If
   beads is not set up, redirect the user to the `setup-beads` skill — do not proceed.
+  Exception: `coordinator` treats the preflight as a soft check. It skips beads when the
+  preflight fails and continues without it.
 - **Never auto-close or auto-transition** issues the user owns without surfacing it.
 - **Don't invent issue IDs.** Read them back from `bd` output (e.g. capture the ID
   printed by `bd create`).
