@@ -837,6 +837,7 @@ if [ "$1" = pr ] && [ "$2" = list ]; then
 fi
 if [ "$1" = pr ] && [ "$2" = checkout ]; then
   number=$3
+  printf 'gh stub: pr checkout %s\n' "$number" >&2
   meta="$meta_root/$number"
   if [ ! -f "$meta" ]; then
     printf 'could not resolve pull request %s\n' "$number" >&2
@@ -2636,6 +2637,16 @@ check_equals 'the PR worktree is on the expected head branch' \
 check_equals 'the PR worktree matches the advertised head object' \
   "$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/101")" \
   "$(git -C "$MANAGED/feat-from-pr" rev-parse HEAD 2>/dev/null)"
+# Catches the note being dropped or moved after gh's checkout. Does not catch
+# stream reordering when stdout and stderr go to different sinks; here they
+# share one captured stream.
+new_note_line=$(printf '%s\n' "$pr_out" | grep -nxF "pwt: checking out pull request #101 into $MANAGED/feat-from-pr" | head -1 | cut -d: -f1)
+new_marker_line=$(printf '%s\n' "$pr_out" | grep -nxF 'gh stub: pr checkout 101' | head -1 | cut -d: -f1)
+if [ -n "$new_note_line" ] && [ -n "$new_marker_line" ] && [ "$new_note_line" -lt "$new_marker_line" ]; then
+  ok 'pr names the new worktree before gh prints its checkout output'
+else
+  not_ok 'pr names the new worktree before gh prints its checkout output'
+fi
 check_not_contains 'a same-repository pull request prints no fork warning' \
   'comes from a fork' "$pr_out"
 check_equals 'fresh PR checkout invokes gh checkout exactly once' \
@@ -3290,6 +3301,18 @@ check_equals 'the equal-tip auto-reset lands at the PR head' \
 check_contains 'auto-reset reports the branch it safely resets' \
   'resetting feat/pr-auto-equal' "$equal_out"
 
+# Catches either note dropped or reordered relative to gh's checkout. Does not
+# catch stream reordering when stdout and stderr go to different sinks.
+auto_new_line=$(printf '%s\n' "$equal_out" | grep -nxF "pwt: checking out pull request #203 into $MANAGED/feat-pr-auto-equal" | head -1 | cut -d: -f1)
+auto_reset_line=$(printf '%s\n' "$equal_out" | grep -nF 'resetting feat/pr-auto-equal' | head -1 | cut -d: -f1)
+auto_marker_line=$(printf '%s\n' "$equal_out" | grep -nxF 'gh stub: pr checkout 203' | head -1 | cut -d: -f1)
+if [ -n "$auto_new_line" ] && [ -n "$auto_reset_line" ] && [ -n "$auto_marker_line" ] &&
+  [ "$auto_new_line" -lt "$auto_reset_line" ] && [ "$auto_reset_line" -lt "$auto_marker_line" ]; then
+  ok 'pr auto-force names the worktree, then the reset, before gh checks out'
+else
+  not_ok 'pr auto-force names the worktree, then the reset, before gh checks out'
+fi
+
 # Strictly behind the stale tracking ref, then rewritten away from both.
 pr_meta 204 feat/pr-auto-behind false
 old_204=$(cached_object feat/pr-auto-behind)
@@ -3467,7 +3490,20 @@ rm -f "$PRIMARY/.worktreeinclude"
 force_advance_pr_head feat/pr-reuse-refresh >/dev/null
 assert_pr_oid_matches_remote 301
 launch_reset
-check 'pr refreshes a clean reused worktree after a fast-forward' pwt pr 301
+reuse_out=$(pwt pr 301 2>&1)
+reuse_rc=$?
+check_equals 'pr refreshes a clean reused worktree after a fast-forward' '0' "$reuse_rc"
+
+# Catches the note being dropped, moved after the fetch, or naming the temporary
+# fetch worktree instead of the reused one. Does not catch stream reordering when
+# stdout and stderr go to different sinks; here they share one captured stream.
+reuse_note_line=$(printf '%s\n' "$reuse_out" | grep -nxF "pwt: updating pull request #301 in $MANAGED/feat-pr-reuse-refresh" | head -1 | cut -d: -f1)
+reuse_marker_line=$(printf '%s\n' "$reuse_out" | grep -nxF 'gh stub: pr checkout 301' | head -1 | cut -d: -f1)
+if [ -n "$reuse_note_line" ] && [ -n "$reuse_marker_line" ] && [ "$reuse_note_line" -lt "$reuse_marker_line" ]; then
+  ok 'pr names the reused worktree before gh fetches the pull request head'
+else
+  not_ok 'pr names the reused worktree before gh fetches the pull request head'
+fi
 check_equals 'fast-forward reuse launches the exact current PR head' \
   "$(sed -n 's/^headRefOid=//p' "$PWT_GH_PRS/301")" \
   "$(git -C "$MANAGED/feat-pr-reuse-refresh" rev-parse HEAD)"
