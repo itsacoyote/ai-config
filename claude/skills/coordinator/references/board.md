@@ -57,9 +57,29 @@ The page is a compact status list, not a report.
 2. Sections, in this order: *Quest* (only when a quest is set), *Needs you* (`action` rows), *Work*, *Waiting* (`wait` rows).
 3. *Work* has one row per piece of work: a `session` row and the `pr` row with the same `branch` render as one row. A `pr` row with no session, or a session with no PR, gets its own row.
 4. Hide a section that has no rows. Only *Needs you* shows an empty line: "Nothing needs you".
-5. Each row is at most two lines in a divided list, not a card. Line 1: state pill, title, `#<pr>` link. Line 2: `next`, muted, only when set. Other keys stay in the data, not on the page.
-6. Branch names in monospace, cut off with an ellipsis, full name in the `title` attribute.
-7. Use the Dashboard type's own tokens. No custom colors, fonts, or sizes. The page must read at about 400px wide.
+5. Width: one centered column, `max-width: 44rem`, so lines stay readable on a full screen. It still reads at about 400px wide.
+6. Each section is a panel: `--color-panel` background, 1px `--color-border-line` border, `--cds-radius`, `--cds-pad-lg` padding, and `--cds-gap-lg` between panels. Its heading shows the row count ("Needs you · 2"). Rows inside a panel are separated by a 1px `--color-border-line` divider, not drawn as cards.
+7. Each row is at most two lines. Line 1: state pill, title, `#<pr>` link. Line 2: `next`, in `--color-fg-muted`, only when set. Both lines use `--cds-font-size-body`; only the pill uses `caption`. Other keys stay in the data, not on the page.
+8. Branch names in monospace, cut off with an ellipsis, full name in the `title` attribute.
+9. Colors come only from the type's tokens (`--color-*`), never from hex values in the page, so the look below reaches every part.
+
+## Look
+
+At setup, write this document as `dash/look` together with the page. It is a dusk palette: muted violet-slate panels and soft text, every text color at least 5.5:1 against its background.
+
+```json
+{
+  "system": { "name": "Dusk" },
+  "light": { "ground": "#eeebf3", "card": "#faf8fc", "text": "#29253a", "muted": "#5d5670", "border": "#d9d4e3",
+    "good": "#2c6a43", "warning": "#7a5000", "bad": "#9a3232",
+    "charts": ["#6b5b95", "#8a7fb0", "#b08a5a", "#5f8a74", "#a0607a", "#5a7a9a", "#8d8698", "#c0a070"] },
+  "dark": { "ground": "#1e1b27", "card": "#282435", "text": "#ece6f3", "muted": "#b7afc6", "border": "#3d3850",
+    "good": "#93cfa6", "warning": "#e8bb6c", "bad": "#f0a0a0",
+    "charts": ["#a898d8", "#c4b8e8", "#d8b088", "#8fc4a8", "#d898b0", "#90b0d0", "#b0a8c0", "#e0c898"] }
+}
+```
+
+If `dash/look` already exists, read it first: replacing it also clears the developer's own style tweaks, so ask before replacing a look that has any.
 
 ## Page safety
 
